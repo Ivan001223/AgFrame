@@ -2,8 +2,6 @@
 
 一个用于快速搭建 Agent/RAG 后端的 Python 脚手架：FastAPI + LangServe + LangGraph，并内置 RAG、聊天记忆与用户画像等可复用组件。
 
-> 说明：本仓库默认忽略 `docs/` 与 `tests/` 目录（不会提交到 GitHub）。
-
 ## 功能概览
 - 对话编排：基于 LangGraph 的工作流（路由/检索/提示词组装/生成）
 - 服务化 API：FastAPI + LangServe（默认暴露 `/chat`）

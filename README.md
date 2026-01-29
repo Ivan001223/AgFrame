@@ -83,8 +83,3 @@ curl -X POST "http://localhost:8000/history/u1/save" \
 - Swagger：启动后访问 `http://localhost:8000/docs`
 - CORS：默认全放开（见 [server.py](file:///Users/ivan/Documents/Code/Agent_infra/server.py)）
 - 本地调试 LangGraph：可直接运行示例脚本（`app/examples/`）
-
-## 常见问题
-- 远端已存在提交导致 push 被拒绝：先 `git pull --rebase` 再 push
-- 不想提交本地配置：`config.json` 已被 `.gitignore` 忽略；敏感信息建议只用环境变量
-- 不想提交运行数据：向量库/上传文件默认落在 `data/` 下，建议保持忽略

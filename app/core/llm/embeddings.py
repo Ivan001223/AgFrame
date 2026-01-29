@@ -1,0 +1,206 @@
+import torch
+from typing import List, Optional
+from langchain_core.embeddings import Embeddings
+
+from app.core.config.config_manager import config_manager
+from app.core.llm.component_loader import (
+    load_sentence_transformers_embedder,
+    load_transformers_model,
+    load_transformers_tokenizer,
+    resolve_pretrained_source_for_spec,
+    try_load_transformers_processor,
+)
+from app.core.llm.model_manager import (
+    build_model_spec,
+    get_best_device,
+)
+
+class ModelEmbeddings(Embeddings):
+    def __init__(
+        self,
+        *,
+        config: Optional[dict] = None,
+        model_name: Optional[str] = None,
+    ):
+        cfg = config or config_manager.get_config()
+        emb_cfg = cfg.get("embeddings") or {}
+        configured_model = emb_cfg.get("model_name") or (cfg.get("local_models") or {}).get("embedding_model")
+        pooling = emb_cfg.get("pooling") or "auto"
+        normalize = emb_cfg.get("normalize")
+        max_length = emb_cfg.get("max_length")
+        backend = emb_cfg.get("backend") or "transformers"
+        batch_size = emb_cfg.get("batch_size")
+        query_prefix = emb_cfg.get("query_prefix")
+        doc_prefix = emb_cfg.get("doc_prefix")
+        device = emb_cfg.get("device") or "auto"
+        self._spec = build_model_spec(
+            config=cfg,
+            component_key="embeddings",
+            env_var=emb_cfg.get("env_var") or "MODEL_PATH_EMBEDDING",
+            config_path=("embeddings", "model_name"),
+            explicit=model_name or configured_model,
+            default=configured_model or "Qwen/Qwen3-VL-Embedding-2B",
+        )
+        self.model_name = self._spec.model_ref
+        if not self.model_name:
+            raise ValueError("embeddings.model_name 未配置，且未传入 model_name")
+
+        self._backend = str(backend)
+        self._batch_size = 32 if batch_size is None else int(batch_size)
+        self._query_prefix = "" if query_prefix is None else str(query_prefix)
+        self._doc_prefix = "" if doc_prefix is None else str(doc_prefix)
+        self._pooling = str(pooling)
+        self._normalize = True if normalize is None else bool(normalize)
+        self._max_length = 512 if max_length is None else int(max_length)
+
+        self._model = None
+        self._processor = None
+        self._tokenizer = None
+        self._st_model = None
+        self._loaded_source = None
+        self._device = get_best_device() if str(device).lower() in {"auto", ""} else str(device)
+
+    def _load_model(self):
+        if self._backend == "sentence_transformers":
+            if self._st_model is not None:
+                return
+            self._loaded_source = resolve_pretrained_source_for_spec(self._spec)
+            print(f"正在加载向量模型：{self.model_name}（设备：{self._device}，后端：sentence_transformers）...")
+            try:
+                self._st_model = load_sentence_transformers_embedder(
+                    self._loaded_source, device=self._device, max_length=self._max_length
+                )
+                print("向量模型加载完成。")
+            except Exception as e:
+                print(f"加载向量模型失败：{e}")
+                raise e
+            return
+
+        if self._model is None:
+            self._loaded_source = resolve_pretrained_source_for_spec(self._spec)
+            print(f"正在加载向量模型：{self.model_name}（设备：{self._device}）...")
+            try:
+                self._model = load_transformers_model(
+                    self._loaded_source,
+                    trust_remote_code=self._spec.trust_remote_code,
+                    device=self._device,
+                )
+                self._processor = try_load_transformers_processor(
+                    self._loaded_source, trust_remote_code=self._spec.trust_remote_code
+                )
+                if self._processor is None:
+                    self._tokenizer = load_transformers_tokenizer(
+                        self._loaded_source, trust_remote_code=self._spec.trust_remote_code
+                    )
+                print("向量模型加载完成。")
+            except Exception as e:
+                print(f"加载向量模型失败：{e}")
+                raise e
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        self._load_model()
+        if not texts:
+            return []
+        prefixed = [self._doc_prefix + t for t in texts]
+        if self._backend == "sentence_transformers":
+            embeddings = self._st_model.encode(
+                prefixed,
+                batch_size=self._batch_size,
+                normalize_embeddings=self._normalize,
+                convert_to_tensor=True,
+                show_progress_bar=False,
+            )
+            return embeddings.detach().cpu().tolist()
+        return self._embed_batch(prefixed)
+
+    def embed_query(self, text: str) -> List[float]:
+        self._load_model()
+        prefixed = self._query_prefix + text
+        if self._backend == "sentence_transformers":
+            embedding = self._st_model.encode(
+                [prefixed],
+                batch_size=1,
+                normalize_embeddings=self._normalize,
+                convert_to_tensor=True,
+                show_progress_bar=False,
+            )[0]
+            return embedding.detach().cpu().tolist()
+        return self._embed_batch([prefixed])[0]
+
+    def _embed_batch(self, texts: List[str]) -> List[List[float]]:
+        try:
+            pooling = self._pooling
+            if pooling == "auto":
+                pooling = "mean"
+
+            results: List[List[float]] = []
+            for start in range(0, len(texts), self._batch_size):
+                batch = texts[start : start + self._batch_size]
+                if self._processor is not None:
+                    inputs = self._processor(
+                        text=batch,
+                        return_tensors="pt",
+                        padding=True,
+                        truncation=True,
+                        max_length=self._max_length,
+                    )
+                else:
+                    inputs = self._tokenizer(
+                        batch,
+                        return_tensors="pt",
+                        padding=True,
+                        truncation=True,
+                        max_length=self._max_length,
+                    )
+                inputs = {k: v.to(self._device) for k, v in inputs.items()}
+
+                with torch.inference_mode():
+                    if self._device == "cuda":
+                        with torch.autocast(device_type="cuda", dtype=torch.float16):
+                            outputs = self._model(**inputs)
+                    else:
+                        outputs = self._model(**inputs)
+
+                    if hasattr(outputs, "text_embeds"):
+                        embedding_batch = outputs.text_embeds
+                    elif hasattr(outputs, "pooler_output") and outputs.pooler_output is not None:
+                        embedding_batch = outputs.pooler_output
+                    elif hasattr(outputs, "last_hidden_state"):
+                        token_embeddings = outputs.last_hidden_state
+                        attention_mask = inputs.get("attention_mask")
+                        if pooling == "last_token":
+                            if attention_mask is not None:
+                                last_indices = attention_mask.sum(dim=1) - 1
+                                batch_idx = torch.arange(token_embeddings.size(0), device=token_embeddings.device)
+                                embedding_batch = token_embeddings[batch_idx, last_indices, :]
+                            else:
+                                embedding_batch = token_embeddings[:, -1, :]
+                        elif pooling == "cls":
+                            embedding_batch = token_embeddings[:, 0, :]
+                        elif pooling == "mean":
+                            if attention_mask is None:
+                                embedding_batch = token_embeddings.mean(dim=1)
+                            else:
+                                mask = attention_mask.unsqueeze(-1).type_as(token_embeddings)
+                                summed = (token_embeddings * mask).sum(dim=1)
+                                denom = mask.sum(dim=1).clamp(min=1e-9)
+                                embedding_batch = summed / denom
+                        else:
+                            raise ValueError(f"不支持的 embeddings.pooling: {pooling}")
+                    else:
+                        raise ValueError("模型输出不包含 text_embeds/pooler_output/last_hidden_state，无法生成 embedding")
+
+                    embedding_batch = embedding_batch.float()
+                    if self._normalize:
+                        embedding_batch = torch.nn.functional.normalize(embedding_batch, p=2, dim=1)
+                    results.extend(embedding_batch.detach().cpu().tolist())
+
+            return results
+        except Exception as e:
+            preview = texts[0][:20] if texts else ""
+            print(f"向量化文本“{preview}...”时出错：{e}")
+            raise e
+
+
+HFEmbeddings = ModelEmbeddings
+Qwen3VLEmbeddings = ModelEmbeddings

@@ -18,6 +18,7 @@ from app.core.database.history_manager import history_manager
 from app.core.database.schema import ensure_schema_if_possible
 from app.core.database.stores import MySQLConversationStore
 from app.core.services.memory_update_service import memory_update_service
+from app.core.services.profile_engine import UserProfileEngine
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

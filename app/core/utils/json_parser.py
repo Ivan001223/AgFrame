@@ -4,7 +4,22 @@ from typing import Any, Dict, Union, List
 
 def parse_json_from_llm(content: str) -> Union[Dict[str, Any], List[Any]]:
     """
-    从 LLM 输出中解析 JSON，并处理常见问题（如 Markdown 代码块、<think> 标签与轻微格式错误）。
+    从 LLM 输出中健壮地解析 JSON。
+    
+    能够处理：
+    1. Markdown 代码块 (```json ... ```)
+    2. <think> 标签（推理过程）
+    3. 文本混杂
+    4. 常见的格式错误（如反斜杠转义）
+    
+    Args:
+        content: LLM 返回的原始字符串
+        
+    Returns:
+        Union[Dict, List]: 解析后的 JSON 对象或列表
+        
+    Raises:
+        ValueError: 如果无法解析出有效的 JSON
     """
     # 1. 移除 <think> 标签（如存在）
     content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)

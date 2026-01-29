@@ -8,16 +8,22 @@ from app.core.database.conversation_utils import derive_session_title, should_bu
 HISTORY_FILE = os.path.join("data", "chat_history.json")
 
 class HistoryManager:
+    """
+    基于 JSON 文件的本地对话历史管理器。
+    用于在没有数据库环境时的降级存储方案。
+    """
     def __init__(self):
         self._ensure_data_dir()
         
     def _ensure_data_dir(self):
+        """确保数据目录和历史文件存在"""
         os.makedirs("data", exist_ok=True)
         if not os.path.exists(HISTORY_FILE):
             with open(HISTORY_FILE, "w", encoding="utf-8") as f:
                 json.dump({}, f)
 
     def _load_data(self) -> Dict[str, Any]:
+        """加载 JSON 数据"""
         try:
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
@@ -25,6 +31,7 @@ class HistoryManager:
             return {}
 
     def _save_data(self, data: Dict[str, Any]):
+        """保存 JSON 数据"""
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -77,6 +84,7 @@ class HistoryManager:
         return data[user_id][session_id]
 
     def delete_session(self, user_id: str, session_id: str):
+        """删除会话"""
         data = self._load_data()
         if user_id in data and session_id in data[user_id]:
             del data[user_id][session_id]

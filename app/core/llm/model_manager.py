@@ -10,6 +10,7 @@ from transformers import AutoModel, AutoProcessor
 from app.core.llm.model_importer import resolve_pretrained_source
 
 def get_best_device() -> str:
+    """获取当前环境可用的最佳计算设备 (cuda > mps > cpu)"""
     if torch.cuda.is_available():
         return "cuda"
     if torch.backends.mps.is_available():
@@ -18,10 +19,12 @@ def get_best_device() -> str:
 
 
 def torch_dtype_for_device(device: str) -> torch.dtype:
+    """根据设备类型选择合适的 torch 数据类型"""
     return torch.float32 if device == "cpu" else torch.float16
 
 
 def get_config_value(config: dict, path: Tuple[str, ...]) -> Any:
+    """从嵌套字典中获取配置值"""
     cur: Any = config
     for key in path:
         if not isinstance(cur, dict) or key not in cur:
@@ -38,6 +41,10 @@ def resolve_model_ref(
     explicit: Optional[str],
     default: str,
 ) -> str:
+    """
+    解析模型引用路径或 ID。
+    优先级：环境变量 > 配置文件 > 显式参数 > 默认值
+    """
     env_path = os.getenv(env_var)
     if env_path and os.path.exists(env_path):
         return env_path
@@ -53,6 +60,10 @@ def resolve_model_ref(
 
 
 def resolve_provider(config: dict, component_key: str) -> str:
+    """
+    解析模型提供方 (provider)。
+    优先级：组件配置 > 全局 model_manager 配置 > 默认 'hf'
+    """
     component = config.get(component_key) or {}
     provider = component.get("provider")
     if provider:
@@ -63,6 +74,7 @@ def resolve_provider(config: dict, component_key: str) -> str:
 
 
 def resolve_modelscope_cache_dir(config: dict, component_key: str) -> Optional[str]:
+    """解析 ModelScope 缓存目录配置"""
     component = config.get(component_key) or {}
     if component.get("cache_dir"):
         return str(component.get("cache_dir"))
@@ -74,6 +86,7 @@ def resolve_modelscope_cache_dir(config: dict, component_key: str) -> Optional[s
 
 @dataclass(frozen=True)
 class ModelSpec:
+    """模型规格描述符，包含加载所需的所有元数据"""
     provider: str
     model_ref: str
     revision: Optional[str] = None
@@ -91,6 +104,10 @@ def build_model_spec(
     explicit: Optional[str],
     default: str,
 ) -> ModelSpec:
+    """
+    构建统一的模型规格对象 (ModelSpec)。
+    整合配置、环境变量和默认值。
+    """
     provider = resolve_provider(config, component_key)
     component = config.get(component_key) or {}
     manager = config.get("model_manager") or {}
@@ -129,6 +146,10 @@ def load_model_and_processor(
     processor_cls: Type[Any] = AutoProcessor,
     require_processor: bool = True,
 ) -> tuple[Any, Any | None]:
+    """
+    通用模型加载函数。
+    加载模型和处理器（Processor），并移动到指定设备。
+    """
     imported = resolve_pretrained_source(
         provider=spec.provider,
         model_ref=spec.model_ref,

@@ -16,6 +16,11 @@ from app.core.llm.model_manager import (
 )
 
 class ModelEmbeddings(Embeddings):
+    """
+    基于本地模型的 Embeddings 实现。
+    支持 Transformers 和 SentenceTransformers 两种后端。
+    负责将文本转换为向量表示。
+    """
     def __init__(
         self,
         *,
@@ -61,6 +66,7 @@ class ModelEmbeddings(Embeddings):
         self._device = get_best_device() if str(device).lower() in {"auto", ""} else str(device)
 
     def _load_model(self):
+        """懒加载模型：仅在首次使用时加载"""
         if self._backend == "sentence_transformers":
             if self._st_model is not None:
                 return
@@ -98,6 +104,10 @@ class ModelEmbeddings(Embeddings):
                 raise e
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        """
+        批量计算文档列表的 embeddings。
+        会自动添加 doc_prefix。
+        """
         self._load_model()
         if not texts:
             return []
@@ -114,6 +124,10 @@ class ModelEmbeddings(Embeddings):
         return self._embed_batch(prefixed)
 
     def embed_query(self, text: str) -> List[float]:
+        """
+        计算单个查询的 embedding。
+        会自动添加 query_prefix。
+        """
         self._load_model()
         prefixed = self._query_prefix + text
         if self._backend == "sentence_transformers":
@@ -128,6 +142,10 @@ class ModelEmbeddings(Embeddings):
         return self._embed_batch([prefixed])[0]
 
     def _embed_batch(self, texts: List[str]) -> List[List[float]]:
+        """
+        使用 Transformers 后端进行批量向量化。
+        支持自定义 pooling 策略 (cls, mean, last_token)。
+        """
         try:
             pooling = self._pooling
             if pooling == "auto":

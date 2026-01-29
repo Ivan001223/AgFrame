@@ -8,12 +8,22 @@ from app.core.workflow.json_router import run_json_router
 
 
 class MemoryRouteDecision(BaseModel):
-    needs_docs: bool = Field(description="Whether to retrieve from knowledge base documents")
-    needs_history: bool = Field(description="Whether to retrieve from conversation memory (summaries)")
-    reasoning: str = Field(description="Short reasoning")
+    """内存检索路由决策模型"""
+    needs_docs: bool = Field(description="是否需要检索知识库文档")
+    needs_history: bool = Field(description="是否需要检索历史对话记忆（摘要）")
+    reasoning: str = Field(description="简短的决策理由")
 
 
 def route_memory(state: Dict[str, Any]) -> MemoryRouteDecision:
+    """
+    内存路由函数：判断用户请求是否需要检索文档或历史记忆。
+    
+    Args:
+        state: 包含对话消息的状态字典
+        
+    Returns:
+        MemoryRouteDecision: 包含检索需求的决策对象
+    """
     messages = state.get("messages", [])
     if not messages:
         return MemoryRouteDecision(needs_docs=False, needs_history=False, reasoning="No messages")

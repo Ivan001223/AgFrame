@@ -15,6 +15,11 @@ from app.core.llm.model_manager import (
 )
 
 class ModelReranker:
+    """
+    基于本地模型的重排器 (Reranker) 实现。
+    用于对初步召回的文档进行二次精排。
+    支持 Transformers (CrossEncoder/SequenceClassification) 和 SentenceTransformers 后端。
+    """
     def __init__(
         self,
         *,
@@ -59,6 +64,7 @@ class ModelReranker:
         self._device = get_best_device() if str(device).lower() in {"auto", ""} else str(device)
 
     def _load_model(self):
+        """懒加载模型：仅在首次使用时加载"""
         if self._disabled:
             return
         if self._backend == "sentence_transformers":
@@ -100,7 +106,14 @@ class ModelReranker:
     def rerank(self, query: str, documents: List[str], top_k: int = 3) -> List[Tuple[str, float, int]]:
         """
         基于查询对候选文档列表进行重排。
-        返回按分数排序的 (doc_content, score, original_index) 列表。
+        
+        Args:
+            query: 查询字符串
+            documents: 候选文档列表
+            top_k: 返回前 K 个结果
+            
+        Returns:
+            List[Tuple[str, float, int]]: 按分数降序排列的结果列表，每项为 (doc_content, score, original_index)
         """
         if not documents:
             return []
@@ -127,6 +140,7 @@ class ModelReranker:
                 return [(doc, 0.0, i) for i, doc in enumerate(documents)][:top_k]
 
         try:
+            # 优先尝试 compute_score 接口
             if hasattr(self._model, "compute_score"):
                 all_scores: List[float] = []
                 for start in range(0, len(docs), self._batch_size):
@@ -140,6 +154,7 @@ class ModelReranker:
                 scores.sort(key=lambda x: x[1], reverse=True)
                 return scores[:top_k]
 
+            # 其次尝试 predict 接口
             if hasattr(self._model, "predict"):
                 all_scores: List[float] = []
                 for start in range(0, len(docs), self._batch_size):
@@ -155,6 +170,7 @@ class ModelReranker:
             if self._tokenizer is None or not hasattr(self._model, "__call__"):
                 return [(doc, 0.0, i) for i, doc in enumerate(documents)][:top_k]
 
+            # 默认使用 Transformers 序列分类逻辑
             all_scores = self._score_pairs_transformers(q, docs)
             scores = [(documents[i], float(all_scores[i]), i) for i in range(len(documents))]
             scores.sort(key=lambda x: x[1], reverse=True)
@@ -164,6 +180,7 @@ class ModelReranker:
             return [(doc, 0.0, i) for i, doc in enumerate(documents)][:top_k]
 
     def _score_pairs_transformers(self, query: str, docs: List[str]) -> List[float]:
+        """使用 Transformers 模型对文本对打分（支持滑动窗口）"""
         if self._window_size is not None and self._window_size > 0:
             stride = self._stride or self._window_size
             return [self._score_single_with_windows(query, d, stride=stride) for d in docs]
@@ -171,6 +188,7 @@ class ModelReranker:
         return self._score_pairs_transformers_no_window(query, docs)
 
     def _score_pairs_transformers_no_window(self, query: str, docs: List[str]) -> List[float]:
+        """批量计算文本对分数（无滑动窗口）"""
         scores: List[float] = []
         for start in range(0, len(docs), self._batch_size):
             q_batch = [query] * len(docs[start : start + self._batch_size])
@@ -203,6 +221,7 @@ class ModelReranker:
         return [float(s) for s in scores]
 
     def _score_single_with_windows(self, query: str, doc: str, *, stride: int) -> float:
+        """对长文档使用滑动窗口计算最高分"""
         tokens = self._tokenizer(doc, add_special_tokens=False, return_tensors=None)
         input_ids = tokens.get("input_ids") if isinstance(tokens, dict) else None
         if not input_ids:

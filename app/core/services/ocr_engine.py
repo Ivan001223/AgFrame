@@ -7,7 +7,14 @@ from app.core.llm.llm_factory import get_local_qwen_provider
 from langchain_core.messages import HumanMessage
 
 class QwenVLOCR:
+    """
+    基于 Qwen-VL (Vision Language) 模型的 OCR 引擎。
+    支持 PDF 和常见图片格式的文字提取。
+    """
     def _pdf_to_temp_images(self, file_path: str) -> List[str]:
+        """
+        将 PDF 转换为临时图片文件列表。
+        """
         images = convert_from_path(file_path)
         temp_paths: List[str] = []
         for img in images:
@@ -17,6 +24,7 @@ class QwenVLOCR:
         return temp_paths
 
     def _cleanup_files(self, paths: List[str]):
+        """清理临时文件"""
         for p in paths:
             if os.path.exists(p):
                 try:
@@ -27,6 +35,12 @@ class QwenVLOCR:
     def process_file(self, file_path: str) -> str:
         """
         处理 PDF 或图片文件，并返回提取出的文本。
+        
+        Args:
+            file_path: 文件路径
+            
+        Returns:
+            str: 提取出的文本内容
         """
         ext = os.path.splitext(file_path)[1].lower()
         
@@ -59,6 +73,7 @@ class QwenVLOCR:
                 abs_path = os.path.abspath(img_path).replace("\\", "/")
                 image_url = f"file://{abs_path}" 
 
+                # 构造包含图片的多模态消息
                 message = HumanMessage(
                     content=[
                         {"type": "image_url", "image_url": {"url": image_url}},

@@ -121,58 +121,64 @@ class RAGEngine:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"未找到文件: {file_path}")
 
-        # 1. 加载文档
         try:
-            docs = self.load_documents(file_path)
-        except Exception as e:
-            print(f"加载文件 {file_path} 错误: {e}")
-            return False
+            # 1. 加载文档
+            try:
+                docs = self.load_documents(file_path)
+            except Exception as e:
+                print(f"加载文件 {file_path} 错误: {e}")
+                return False
+                
+            if not docs:
+                return False
+
+            use_parent_retrieval = ensure_schema_if_possible()
+            splits: List[Document] = []
+            if use_parent_retrieval:
+                try:
+                    doc_store = MySQLDocStore()
+                    checksum = sha256_file(file_path)
+                    doc_id = doc_store.upsert_document(source_path=file_path, checksum=checksum)
+
+                    parent_chunks: List[Dict[str, Any]] = []
+                    for d in docs:
+                        # 父文档切分：较大粒度，保留更多上下文
+                        parent_parts = split_text_by_chars(d.page_content, chunk_size=6000, overlap=400)
+                        for p in parent_parts:
+                            parent_chunks.append({"content": p, "page_num": d.metadata.get("page")})
+
+                    parent_ids = doc_store.insert_parent_chunks(doc_id, parent_chunks)
+                    for parent_id, parent in zip(parent_ids, parent_chunks):
+                        # 子文档切分：较小粒度，用于精确向量检索
+                        child_parts = split_text_by_chars(parent["content"], chunk_size=1400, overlap=120)
+                        for idx, cp in enumerate(child_parts):
+                            splits.append(
+                                Document(
+                                    page_content=cp,
+                                    metadata={
+                                        "type": "doc_fragment",
+                                        "doc_id": doc_id,
+                                        "parent_chunk_id": parent_id,
+                                        "child_index": idx,
+                                        "source": file_path,
+                                    },
+                                )
+                            )
+                except Exception as e:
+                    print(f"数据库操作失败，降级到纯向量模式: {e}")
+                    use_parent_retrieval = False
             
-        if not docs:
-            return False
+            # 如果数据库不可用或操作失败，降级处理
+            if not use_parent_retrieval:
+                print("未检测到可用数据库或数据库操作失败，将使用纯向量存储模式（无 Parent Retrieval）...")
+                print("正在使用语义切分（Semantic Chunking）...")
+                text_splitter = SemanticChunker(
+                    self.embeddings,
+                    breakpoint_threshold_type="percentile",
+                )
+                splits = text_splitter.split_documents(docs)
 
-        use_parent_retrieval = ensure_schema_if_possible()
-        splits: List[Document] = []
-        if use_parent_retrieval:
-            doc_store = MySQLDocStore()
-            checksum = sha256_file(file_path)
-            doc_id = doc_store.upsert_document(source_path=file_path, checksum=checksum)
-
-            parent_chunks: List[Dict[str, Any]] = []
-            for d in docs:
-                # 父文档切分：较大粒度，保留更多上下文
-                parent_parts = split_text_by_chars(d.page_content, chunk_size=6000, overlap=400)
-                for p in parent_parts:
-                    parent_chunks.append({"content": p, "page_num": d.metadata.get("page")})
-
-            parent_ids = doc_store.insert_parent_chunks(doc_id, parent_chunks)
-            for parent_id, parent in zip(parent_ids, parent_chunks):
-                # 子文档切分：较小粒度，用于精确向量检索
-                child_parts = split_text_by_chars(parent["content"], chunk_size=1400, overlap=120)
-                for idx, cp in enumerate(child_parts):
-                    splits.append(
-                        Document(
-                            page_content=cp,
-                            metadata={
-                                "type": "doc_fragment",
-                                "doc_id": doc_id,
-                                "parent_chunk_id": parent_id,
-                                "child_index": idx,
-                                "source": file_path,
-                            },
-                        )
-                    )
-        else:
-            print("未检测到可用数据库，将使用纯向量存储模式（无 Parent Retrieval）...")
-            print("正在使用语义切分（Semantic Chunking）...")
-            text_splitter = SemanticChunker(
-                self.embeddings,
-                breakpoint_threshold_type="percentile",
-            )
-            splits = text_splitter.split_documents(docs)
-
-        # 3. 添加到向量库
-        try:
+            # 3. 添加到向量库
             if self._vectorstore is None:
                 self._vectorstore = FAISS.from_documents(splits, self.embeddings)
             else:
@@ -229,11 +235,18 @@ class RAGEngine:
             # 3. 还原父文档上下文
             parent_scores: Dict[int, float] = {}
             parent_order: List[int] = []
+            fallback_docs: List[Document] = []
+
             for _, score, idx in reranked_results:
                 doc = candidates[idx]
                 parent_id = doc.metadata.get("parent_chunk_id")
+                
+                # 如果没有 parent_chunk_id，说明是 fallback 模式添加的，直接返回原切片
                 if parent_id is None:
+                    doc.metadata["rerank_score"] = score
+                    fallback_docs.append(doc)
                     continue
+
                 parent_id_int = int(parent_id)
                 if parent_id_int not in parent_scores:
                     parent_scores[parent_id_int] = float(score)
@@ -241,25 +254,36 @@ class RAGEngine:
                 else:
                     parent_scores[parent_id_int] = max(parent_scores[parent_id_int], float(score))
 
-            parent_order = parent_order[:k]
-            doc_store = MySQLDocStore()
-            parents = doc_store.fetch_parent_chunks(parent_order)
-            out: List[Document] = []
-            for p in parents:
-                parent_id = int(p["parent_chunk_id"])
-                out.append(
-                    Document(
-                        page_content=p["content"],
-                        metadata={
-                            "type": "doc_parent",
-                            "doc_id": int(p["doc_id"]),
-                            "parent_chunk_id": parent_id,
-                            "page_num": p.get("page_num"),
-                            "rerank_score": parent_scores.get(parent_id),
-                        },
-                    )
-                )
-            return out
+            out: List[Document] = list(fallback_docs)
+            
+            if parent_order:
+                parent_order = parent_order[:k]
+                doc_store = MySQLDocStore()
+                try:
+                    parents = doc_store.fetch_parent_chunks(parent_order)
+                    for p in parents:
+                        parent_id = int(p["parent_chunk_id"])
+                        out.append(
+                            Document(
+                                page_content=p["content"],
+                                metadata={
+                                    "type": "doc_parent",
+                                    "doc_id": int(p["doc_id"]),
+                                    "parent_chunk_id": parent_id,
+                                    "page_num": p.get("page_num"),
+                                    "rerank_score": parent_scores.get(parent_id),
+                                },
+                            )
+                        )
+                except Exception as e:
+                    print(f"获取父文档失败，降级返回原切片: {e}")
+                    # 如果获取父文档失败，尝试找回对应的原切片（这里简化处理，只返回 fallback_docs）
+                    # 更好的做法可能是缓存 candidates 中的 doc
+                    pass
+            
+            # 按分数重新排序混合结果
+            out.sort(key=lambda x: x.metadata.get("rerank_score", 0), reverse=True)
+            return out[:k]
         except Exception as e:
             print(f"检索上下文错误: {e}")
             return []

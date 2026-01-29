@@ -1,0 +1,62 @@
+{
+  "llm": {
+    "api_key": "sk-xxxxxxxxxxx",
+    "base_url": "https://api.openai.com/v1",
+    "model": "gpt-4o"
+  },
+  "model_manager": {
+    "provider": "modelscope",
+    "cache_dir": "",
+    "revision": "",
+    "trust_remote_code": true,
+    "modelscope_fallback_to_hf": true
+  },
+  "local_models": {
+    "ocr_model": "",
+    "embedding_model": "",
+    "rerank_model": ""
+  },
+  "embeddings": {
+    "provider": "modelscope",
+    "backend": "sentence_transformers",
+    "model_name": "",
+    "env_var": "MODEL_PATH_EMBEDDING",
+    "device": "auto",
+    "batch_size": 32,
+    "max_length": 512,
+    "pooling": "mean",
+    "normalize": true,
+    "query_prefix": "",
+    "doc_prefix": ""
+  },
+  "reranker": {
+    "provider": "modelscope",
+    "backend": "sentence_transformers",
+    "model_name": "",
+    "env_var": "MODEL_PATH_RERANKER",
+    "device": "auto",
+    "batch_size": 16,
+    "max_length": 512,
+    "query_prefix": "",
+    "doc_prefix": "",
+    "window_size": null,
+    "stride": null,
+    "transformers_model_type": "auto"
+  },
+  "search": {
+    "provider": "duckduckgo",
+    "tavily_api_key": ""
+  },
+  "database": {
+    "type": "mysql",
+    "host": "localhost",
+    "port": 3306,
+    "user": "root",
+    "password": "password",
+    "db_name": "agent_app"
+  },
+  "general": {
+    "app_name": "My Agent App"
+  }
+}
+

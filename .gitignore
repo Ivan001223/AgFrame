@@ -9,6 +9,7 @@ __pycache__/
 .env
 .env.*
 *.env
+config.json
 *.pem
 *.key
 *.p12

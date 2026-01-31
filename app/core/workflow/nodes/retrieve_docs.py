@@ -6,6 +6,7 @@ from langchain_core.messages import BaseMessage
 import anyio
 import time
 
+from app.core.config.config_manager import config_manager
 from app.core.services.rag_engine import get_rag_engine
 from app.core.workflow.registry import register_node
 from app.core.workflow.state import AgentState
@@ -25,21 +26,33 @@ def _get_last_user_query(messages: List[BaseMessage]) -> str:
     last = messages[-1]
     return str(getattr(last, "content", "") or "")
 
+def _get_candidate_k() -> int:
+    cfg = config_manager.get_config() or {}
+    rag_cfg = (cfg.get("rag") or {}).get("retrieval") or {}
+    val = rag_cfg.get("candidate_k")
+    if val is None:
+        return 20
+    try:
+        return max(1, int(val))
+    except Exception:
+        return 20
+
 
 @register_node("retrieve_docs")
 async def retrieve_docs_node(state: AgentState) -> Dict[str, Any]:
     t0 = time.perf_counter()
     messages = list(state.get("messages") or [])
     query = _get_last_user_query(messages)
+    fetch_k = _get_candidate_k()
     docs = await anyio.to_thread.run_sync(
-        lambda: get_rag_engine().retrieve_context(query, k=3, fetch_k=20)
+        lambda: get_rag_engine().retrieve_candidates(query, fetch_k=fetch_k)
     )
     ctx = dict(state.get("context") or {})
-    ctx["retrieved_docs"] = docs
+    ctx["retrieved_docs_candidates"] = docs
     trace_id = (state.get("trace") or {}).get("trace_id") or ctx.get("trace_id")
     user_id = state.get("user_id") or ctx.get("user_id") or "-"
     session_id = ctx.get("session_id") or "-"
     bind_logger(_log, trace_id=str(trace_id or "-"), user_id=str(user_id), session_id=str(session_id), node="retrieve_docs").info(
-        "retrieved docs=%d cost_ms=%d", len(docs), int((time.perf_counter() - t0) * 1000)
+        "retrieved doc_candidates=%d cost_ms=%d", len(docs), int((time.perf_counter() - t0) * 1000)
     )
-    return {"retrieved_docs": docs, "context": ctx}
+    return {"retrieved_docs_candidates": docs, "context": ctx}

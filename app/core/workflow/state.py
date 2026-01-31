@@ -42,8 +42,10 @@ class AgentState(TypedDict, total=False):
     
     route: RouteDecision
     retrieved_docs: List[Document]
+    retrieved_docs_candidates: List[Document]
     retrieved_memories: List[Document]
     citations: List[Citation]
     errors: List[str]
+    retrieval_debug: Dict[str, Any]
     trace: Dict[str, Any]
 

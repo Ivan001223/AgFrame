@@ -155,6 +155,17 @@ class HybridRetrieverService:
                 d.metadata = meta
             return dense_docs[:candidate_k]
 
+        if hasattr(self._vectorstore, "sparse_search"):
+            sparse_docs = list(self._vectorstore.sparse_search(query, k=sparse_k))[:sparse_k]
+            return _rrf_fuse(
+                [
+                    ("sparse", sparse_docs, float(w_sparse)),
+                    ("dense", dense_docs, float(w_dense)),
+                ],
+                rrf_k=rrf_k,
+                top_n=candidate_k,
+            )
+
         has_bm25 = self._ensure_bm25()
         if not has_bm25:
             for i, d in enumerate(dense_docs, start=1):

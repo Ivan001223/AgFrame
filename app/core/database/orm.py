@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import os
 from typing import Iterator, Optional
 
 from sqlalchemy import create_engine
@@ -21,17 +22,28 @@ def get_engine() -> Engine:
         return _engine
 
     db_config = config_manager.get_config().get("database", {})
-    host = db_config.get("host", "localhost")
-    port = int(db_config.get("port", 3306))
-    user = db_config.get("user", "root")
-    password = db_config.get("password", "password")
-    db_name = db_config.get("db_name", "agent_app")
+    explicit_url = str(db_config.get("url") or os.getenv("DATABASE_URL") or "").strip()
+    if explicit_url:
+        url = explicit_url
+    else:
+        db_type = str(db_config.get("type") or "postgres").lower()
+        host = db_config.get("host", "localhost")
+        port = int(db_config.get("port", 5432 if db_type in {"postgres", "postgresql"} else 3306))
+        user = db_config.get("user", "postgres" if db_type in {"postgres", "postgresql"} else "root")
+        password = db_config.get("password", "password")
+        db_name = db_config.get("db_name", "agent_app")
 
-    url = f"mysql+mysqlconnector://{user}:{password}@{host}:{port}/{db_name}"
+        if db_type in {"postgres", "postgresql"}:
+            url = f"postgresql+psycopg://{user}:{password}@{host}:{port}/{db_name}"
+        elif db_type in {"mysql"}:
+            url = f"mysql+mysqlconnector://{user}:{password}@{host}:{port}/{db_name}"
+        else:
+            raise ValueError(f"不支持的 database.type: {db_type}")
+
     _engine = create_engine(
         url,
-        pool_pre_ping=True,  # 自动检测并回收失效连接
-        pool_recycle=3600,   # 连接最大生命周期
+        pool_pre_ping=True,
+        pool_recycle=3600,
         future=True,
     )
     return _engine

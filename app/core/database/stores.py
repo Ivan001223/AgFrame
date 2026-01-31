@@ -3,9 +3,10 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import delete, select, update, func
+from sqlalchemy import bindparam, delete, select, update, func
+from pgvector.sqlalchemy import Vector
 
-from app.core.database.models import ChatHistory, ChatSession, DocContent, Document, UserProfile
+from app.core.database.models import ChatHistory, ChatSession, DocContent, DocEmbedding, Document, UserProfile
 from app.core.database.orm import get_session
 from app.core.database.conversation_utils import derive_session_title, should_bump_updated_at
 
@@ -300,3 +301,55 @@ class MySQLDocStore:
                     }
                 )
             return out
+
+
+class PgDocEmbeddingStore:
+    def delete_by_doc_id(self, doc_id: int) -> int:
+        with get_session() as session:
+            res = session.execute(delete(DocEmbedding).where(DocEmbedding.doc_id == int(doc_id)))
+            return int(res.rowcount or 0)
+
+    def add_embeddings(self, rows: List[Dict[str, Any]]) -> int:
+        if not rows:
+            return 0
+        now = int(time.time())
+        to_add: List[DocEmbedding] = []
+        for r in rows:
+            to_add.append(
+                DocEmbedding(
+                    doc_id=r.get("doc_id"),
+                    parent_chunk_id=r.get("parent_chunk_id"),
+                    child_index=r.get("child_index"),
+                    source_path=r.get("source_path"),
+                    content=str(r.get("content") or ""),
+                    embedding=list(r.get("embedding") or []),
+                    metadata_json=r.get("metadata_json"),
+                    created_at=int(r.get("created_at") or now),
+                )
+            )
+        with get_session() as session:
+            session.add_all(to_add)
+        return len(to_add)
+
+    def dense_search(self, query_vec: List[float], *, k: int) -> List[DocEmbedding]:
+        if not query_vec or k <= 0:
+            return []
+        q = bindparam("query_vec", value=list(query_vec), type_=Vector)
+        stmt = select(DocEmbedding).order_by(DocEmbedding.embedding.op("<=>")(q)).limit(int(k))
+        with get_session() as session:
+            return list(session.execute(stmt).scalars().all())
+
+    def sparse_search(self, query: str, *, k: int) -> List[DocEmbedding]:
+        q = str(query or "").strip()
+        if not q or k <= 0:
+            return []
+        tsq = func.plainto_tsquery("simple", bindparam("q", value=q))
+        tsv = func.to_tsvector("simple", DocEmbedding.content)
+        stmt = (
+            select(DocEmbedding)
+            .where(tsv.op("@@")(tsq))
+            .order_by(func.ts_rank_cd(tsv, tsq).desc())
+            .limit(int(k))
+        )
+        with get_session() as session:
+            return list(session.execute(stmt).scalars().all())

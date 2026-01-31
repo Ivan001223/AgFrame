@@ -50,4 +50,6 @@ tiktoken
 streamlit
 mysql-connector-python
 SQLAlchemy>=2.0.0
+psycopg[binary]
+pgvector
 pytest

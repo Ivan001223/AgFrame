@@ -79,10 +79,11 @@ class ConfigManager:
                 "tavily_api_key": os.getenv("TAVILY_API_KEY", ""),
             },
             "database": {
-                "type": "mysql",
+                "type": os.getenv("DB_TYPE", "postgres"),
+                "url": os.getenv("DATABASE_URL", ""),
                 "host": os.getenv("DB_HOST", "localhost"),
-                "port": int(os.getenv("DB_PORT", 3306)),
-                "user": os.getenv("DB_USER", "root"),
+                "port": int(os.getenv("DB_PORT", 5432)),
+                "user": os.getenv("DB_USER", "postgres"),
                 "password": os.getenv("DB_PASSWORD", "password"),
                 "db_name": os.getenv("DB_NAME", "agent_app")
             },

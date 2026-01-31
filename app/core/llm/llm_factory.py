@@ -40,7 +40,7 @@ def get_llm(temperature: float = 0, streaming: bool = True, json_mode: bool = Fa
         return get_local_qwen_provider()
 
     model_kwargs = {}
-    if json_mode:
+    if json_mode and bool(llm_config.get("json_mode_response_format", True)):
         model_kwargs["response_format"] = {"type": "json_object"}
 
     return ChatOpenAI(

@@ -87,6 +87,20 @@ class ConfigManager:
             "general": {
                 "app_name": os.getenv("APP_NAME", "My Agent App")
             },
+            "rag": {
+                "retrieval": {
+                    "mode": os.getenv("RAG_RETRIEVAL_MODE", "hybrid"),
+                    "dense_k": int(os.getenv("RAG_DENSE_K", "20")),
+                    "sparse_k": int(os.getenv("RAG_SPARSE_K", "20")),
+                    "candidate_k": int(os.getenv("RAG_CANDIDATE_K", "20")),
+                    "final_k": int(os.getenv("RAG_FINAL_K", "3")),
+                    "rrf_k": int(os.getenv("RAG_RRF_K", "60")),
+                    "weights": [
+                        float(os.getenv("RAG_WEIGHT_SPARSE", "0.5")),
+                        float(os.getenv("RAG_WEIGHT_DENSE", "0.5")),
+                    ],
+                }
+            },
             "prompt": {
                 "budget": {
                     "max_recent_history_lines": int(os.getenv("PROMPT_MAX_RECENT_HISTORY_LINES", "10")),
@@ -98,7 +112,7 @@ class ConfigManager:
                 }
             },
             "nodes": {
-                "enabled": ["router", "retrieve_docs", "retrieve_memories", "assemble", "generate"]
+                "enabled": ["router", "retrieve_docs", "rerank_docs", "retrieve_memories", "assemble", "generate"]
             },
             "feature_flags": {
                 "enable_docs_rag": os.getenv("ENABLE_DOCS_RAG", "true").lower() == "true",

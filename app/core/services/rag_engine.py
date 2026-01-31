@@ -18,6 +18,7 @@ from app.core.services.ocr_engine import ocr_engine
 from app.core.database.schema import ensure_schema_if_possible
 from app.core.database.stores import MySQLDocStore
 from app.core.config.config_manager import config_manager
+from app.core.services.hybrid_retriever_service import HybridRetrieverService, HybridRetrievalConfig
 from app.core.utils.faiss_store import load_faiss, save_faiss
 from app.core.utils.files import sha256_file
 from app.core.utils.text_split import split_text_by_chars
@@ -42,6 +43,7 @@ class RAGEngine:
         
         # 初始化向量库（FAISS）
         self._vectorstore = None
+        self._hybrid_retriever: Optional[HybridRetrieverService] = None
         if os.path.exists(self.persist_directory) and os.path.exists(
             os.path.join(self.persist_directory, "index.faiss")
         ):
@@ -54,9 +56,12 @@ class RAGEngine:
             )
             if self._vectorstore is None:
                 print("加载 FAISS 索引失败")
+            else:
+                self._hybrid_retriever = HybridRetrieverService(vectorstore=self._vectorstore)
         else:
             print("未找到已有的 FAISS 索引，将在首次添加文档时初始化新索引。")
             self._vectorstore = None
+            self._hybrid_retriever = None
 
     def load_documents(self, file_path: str) -> List[Document]:
         """
@@ -185,6 +190,7 @@ class RAGEngine:
             # 3. 添加到向量库
             if self._vectorstore is None:
                 self._vectorstore = FAISS.from_documents(splits, self.embeddings)
+                self._hybrid_retriever = HybridRetrieverService(vectorstore=self._vectorstore)
             else:
                 self._vectorstore.add_documents(documents=splits)
 
@@ -195,6 +201,114 @@ class RAGEngine:
         except Exception as e:
             print(f"添加到向量存储失败：{e}")
             return False
+
+    def _get_hybrid_config(self) -> HybridRetrievalConfig:
+        cfg = config_manager.get_config() or {}
+        rag_cfg = (cfg.get("rag") or {}).get("retrieval") or {}
+        mode = str(rag_cfg.get("mode") or "hybrid")
+        dense_k = int(rag_cfg.get("dense_k") or 20)
+        sparse_k = int(rag_cfg.get("sparse_k") or 20)
+        candidate_k = int(rag_cfg.get("candidate_k") or 20)
+        rrf_k = int(rag_cfg.get("rrf_k") or 60)
+        weights = rag_cfg.get("weights") or [0.5, 0.5]
+        try:
+            w_sparse = float(weights[0])
+            w_dense = float(weights[1])
+        except Exception:
+            w_sparse, w_dense = 0.5, 0.5
+        return HybridRetrievalConfig(
+            mode=mode,
+            dense_k=dense_k,
+            sparse_k=sparse_k,
+            candidate_k=candidate_k,
+            rrf_k=rrf_k,
+            weights=(w_sparse, w_dense),
+        )
+
+    def retrieve_candidates(self, query: str, *, fetch_k: int = 20) -> List[Document]:
+        if self._vectorstore is None:
+            return []
+        cfg = self._get_hybrid_config()
+        cfg = HybridRetrievalConfig(
+            mode=cfg.mode,
+            dense_k=cfg.dense_k,
+            sparse_k=cfg.sparse_k,
+            candidate_k=int(fetch_k),
+            rrf_k=cfg.rrf_k,
+            weights=cfg.weights,
+        )
+        if self._hybrid_retriever is None:
+            self._hybrid_retriever = HybridRetrieverService(vectorstore=self._vectorstore)
+        return self._hybrid_retriever.retrieve_candidates(query, config=cfg)
+
+    def rerank_candidates(self, query: str, candidates: List[Document], *, k: int) -> List[Document]:
+        if not candidates or k <= 0:
+            return []
+        candidate_texts = [doc.page_content for doc in candidates]
+        reranked_results = self.reranker.rerank(query, candidate_texts, top_k=k)
+        out: List[Document] = []
+        for _, score, idx in reranked_results:
+            doc = candidates[idx]
+            meta = dict(getattr(doc, "metadata", {}) or {})
+            meta["rerank_score"] = score
+            doc.metadata = meta
+            out.append(doc)
+        return out
+
+    def restore_parents(self, docs: List[Document], *, k: int) -> List[Document]:
+        if not docs:
+            return []
+        use_parent_retrieval = ensure_schema_if_possible()
+        if not use_parent_retrieval:
+            return docs[:k]
+
+        parent_scores: Dict[int, float] = {}
+        parent_order: List[int] = []
+        fallback_docs: List[Document] = []
+
+        for doc in docs:
+            meta = dict(getattr(doc, "metadata", {}) or {})
+            score = float(meta.get("rerank_score") or 0.0)
+            parent_id = meta.get("parent_chunk_id")
+            if parent_id is None:
+                fallback_docs.append(doc)
+                continue
+            try:
+                parent_id_int = int(parent_id)
+            except Exception:
+                fallback_docs.append(doc)
+                continue
+            if parent_id_int not in parent_scores:
+                parent_scores[parent_id_int] = score
+                parent_order.append(parent_id_int)
+            else:
+                parent_scores[parent_id_int] = max(parent_scores[parent_id_int], score)
+
+        out: List[Document] = list(fallback_docs)
+        if parent_order:
+            parent_order = parent_order[:k]
+            doc_store = MySQLDocStore()
+            try:
+                parents = doc_store.fetch_parent_chunks(parent_order)
+                for p in parents:
+                    parent_id = int(p["parent_chunk_id"])
+                    out.append(
+                        Document(
+                            page_content=p["content"],
+                            metadata={
+                                "type": "doc_parent",
+                                "doc_id": int(p["doc_id"]),
+                                "parent_chunk_id": parent_id,
+                                "page_num": p.get("page_num"),
+                                "rerank_score": parent_scores.get(parent_id),
+                            },
+                        )
+                    )
+            except Exception as e:
+                print(f"获取父文档失败，降级返回原切片: {e}")
+
+        out.sort(key=lambda x: x.metadata.get("rerank_score", 0), reverse=True)
+        return out[:k]
 
     def retrieve_context(self, query: str, k: int = 3, fetch_k: int = 20) -> List[Document]:
         """
@@ -214,80 +328,12 @@ class RAGEngine:
             List[Document]: 检索到的相关文档列表
         """
         try:
-            if self._vectorstore is None:
-                return []
-                
-            use_parent_retrieval = ensure_schema_if_possible()
-
-            candidates = self._vectorstore.similarity_search(query, k=fetch_k)
+            candidates = self.retrieve_candidates(query, fetch_k=fetch_k)
             if not candidates:
                 return []
-                
-            # 2. 重排
             print(f"正在对 {len(candidates)} 条候选文档进行重排...")
-            candidate_texts = [doc.page_content for doc in candidates]
-            reranked_results = self.reranker.rerank(query, candidate_texts, top_k=k)
-            
-            if not use_parent_retrieval:
-                final_docs: List[Document] = []
-                for _, score, idx in reranked_results:
-                    doc = candidates[idx]
-                    doc.metadata["rerank_score"] = score
-                    final_docs.append(doc)
-                return final_docs
-
-            # 3. 还原父文档上下文
-            parent_scores: Dict[int, float] = {}
-            parent_order: List[int] = []
-            fallback_docs: List[Document] = []
-
-            for _, score, idx in reranked_results:
-                doc = candidates[idx]
-                parent_id = doc.metadata.get("parent_chunk_id")
-                
-                # 如果没有 parent_chunk_id，说明是 fallback 模式添加的，直接返回原切片
-                if parent_id is None:
-                    doc.metadata["rerank_score"] = score
-                    fallback_docs.append(doc)
-                    continue
-
-                parent_id_int = int(parent_id)
-                if parent_id_int not in parent_scores:
-                    parent_scores[parent_id_int] = float(score)
-                    parent_order.append(parent_id_int)
-                else:
-                    parent_scores[parent_id_int] = max(parent_scores[parent_id_int], float(score))
-
-            out: List[Document] = list(fallback_docs)
-            
-            if parent_order:
-                parent_order = parent_order[:k]
-                doc_store = MySQLDocStore()
-                try:
-                    parents = doc_store.fetch_parent_chunks(parent_order)
-                    for p in parents:
-                        parent_id = int(p["parent_chunk_id"])
-                        out.append(
-                            Document(
-                                page_content=p["content"],
-                                metadata={
-                                    "type": "doc_parent",
-                                    "doc_id": int(p["doc_id"]),
-                                    "parent_chunk_id": parent_id,
-                                    "page_num": p.get("page_num"),
-                                    "rerank_score": parent_scores.get(parent_id),
-                                },
-                            )
-                        )
-                except Exception as e:
-                    print(f"获取父文档失败，降级返回原切片: {e}")
-                    # 如果获取父文档失败，尝试找回对应的原切片（这里简化处理，只返回 fallback_docs）
-                    # 更好的做法可能是缓存 candidates 中的 doc
-                    pass
-            
-            # 按分数重新排序混合结果
-            out.sort(key=lambda x: x.metadata.get("rerank_score", 0), reverse=True)
-            return out[:k]
+            reranked = self.rerank_candidates(query, candidates, k=k)
+            return self.restore_parents(reranked, k=k)
         except Exception as e:
             print(f"检索上下文错误: {e}")
             return []

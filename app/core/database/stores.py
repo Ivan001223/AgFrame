@@ -11,6 +11,8 @@ from app.core.database.conversation_utils import derive_session_title, should_bu
 
 
 class MySQLConversationStore:
+    """MySQL 对话存储实现"""
+    
     def save_session(
         self,
         user_id: str,
@@ -18,6 +20,7 @@ class MySQLConversationStore:
         messages: List[Dict[str, Any]],
         title: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """保存或更新会话及消息记录"""
         now = int(time.time())
         title = derive_session_title(messages, title)
 
@@ -35,6 +38,7 @@ class MySQLConversationStore:
                         .where(ChatHistory.session_id == session_id, ChatHistory.user_id == user_id)
                     ).scalar_one()
                 )
+            # 只有当有新消息时才更新 updated_at
             bump_updated_at = (not existing) or should_bump_updated_at(range(old_len), messages)
 
             if existing:
@@ -54,6 +58,7 @@ class MySQLConversationStore:
                     )
                 )
 
+            # 全量替换消息策略（简单但可能低效，生产环境可优化为增量更新）
             session.execute(
                 delete(ChatHistory).where(ChatHistory.session_id == session_id, ChatHistory.user_id == user_id)
             )
@@ -86,12 +91,14 @@ class MySQLConversationStore:
         }
 
     def list_sessions(self, user_id: str) -> List[Dict[str, Any]]:
+        """列出用户的所有会话，按更新时间倒序"""
         with get_session() as session:
             sessions = session.execute(
                 select(ChatSession).where(ChatSession.user_id == user_id).order_by(ChatSession.updated_at.desc())
             ).scalars().all()
             out: List[Dict[str, Any]] = []
             for s in sessions:
+                # 获取会话的所有消息
                 msgs = session.execute(
                     select(ChatHistory)
                     .where(ChatHistory.user_id == user_id, ChatHistory.session_id == s.session_id)
@@ -117,6 +124,7 @@ class MySQLConversationStore:
             return out
 
     def delete_session(self, user_id: str, session_id: str) -> bool:
+        """删除指定会话"""
         with get_session() as session:
             session.execute(
                 delete(ChatSession).where(ChatSession.user_id == user_id, ChatSession.session_id == session_id)
@@ -126,6 +134,7 @@ class MySQLConversationStore:
     def get_recent_messages(
         self, user_id: str, session_id: str, limit_messages: int
     ) -> List[Dict[str, Any]]:
+        """获取指定会话的最近 N 条消息"""
         if limit_messages <= 0:
             return []
         with get_session() as session:
@@ -142,6 +151,7 @@ class MySQLConversationStore:
             ]
 
     def get_session_meta(self, user_id: str, session_id: str) -> Optional[Dict[str, Any]]:
+        """获取会话元数据（不含消息内容）"""
         with get_session() as session:
             s = session.execute(
                 select(ChatSession).where(ChatSession.user_id == user_id, ChatSession.session_id == session_id)
@@ -164,6 +174,7 @@ class MySQLConversationStore:
         last_summarized_msg_id: Optional[int] = None,
         last_profiled_msg_id: Optional[int] = None,
     ) -> None:
+        """更新会话的处理进度标记"""
         values: Dict[str, Any] = {}
         if last_summarized_msg_id is not None:
             values["last_summarized_msg_id"] = int(last_summarized_msg_id)
@@ -181,6 +192,7 @@ class MySQLConversationStore:
     def get_messages_after(
         self, user_id: str, session_id: str, after_msg_id: int, limit_messages: int
     ) -> List[Dict[str, Any]]:
+        """获取指定 msg_id 之后的消息（用于增量处理）"""
         if limit_messages <= 0:
             return []
         with get_session() as session:
@@ -207,7 +219,10 @@ class MySQLConversationStore:
 
 
 class MySQLProfileStore:
+    """MySQL 用户画像存储实现"""
+    
     def get_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """获取用户画像"""
         with get_session() as session:
             row = session.get(UserProfile, user_id)
             if not row:
@@ -215,6 +230,7 @@ class MySQLProfileStore:
             return {"profile": row.profile_json, "version": int(row.version), "updated_at": int(row.updated_at)}
 
     def upsert_profile(self, user_id: str, profile: Dict[str, Any], version: int) -> None:
+        """更新或插入用户画像"""
         now = int(time.time())
         with get_session() as session:
             row = session.get(UserProfile, user_id)
@@ -227,9 +243,12 @@ class MySQLProfileStore:
 
 
 class MySQLDocStore:
+    """MySQL 文档存储实现 (Parent Retrieval)"""
+    
     def upsert_document(
         self, source_path: str, created_at: Optional[int] = None, user_id: Optional[str] = None, checksum: Optional[str] = None
     ) -> int:
+        """记录上传的文档元数据"""
         created_at_val = int(created_at or time.time())
         with get_session() as session:
             existing = session.execute(select(Document).where(Document.source_path == source_path)).scalar_one_or_none()
@@ -244,6 +263,7 @@ class MySQLDocStore:
             return int(doc.doc_id)
 
     def insert_parent_chunks(self, doc_id: int, chunks: List[Dict[str, Any]]) -> List[int]:
+        """插入父文档切片"""
         if not chunks:
             return []
         now = int(time.time())
@@ -258,6 +278,7 @@ class MySQLDocStore:
             return [int(r.parent_chunk_id) for r in rows]
 
     def fetch_parent_chunks(self, parent_chunk_ids: List[int]) -> List[Dict[str, Any]]:
+        """根据 ID 列表批量获取父文档切片"""
         if not parent_chunk_ids:
             return []
         with get_session() as session:

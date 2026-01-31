@@ -10,7 +10,7 @@ class ConfigManager:
     支持从 config.json 文件加载，并回退到默认值和环境变量。
     """
     _instance = None
-    CONFIG_FILE = "config.json"
+    CONFIG_FILE = os.path.join("configs", "config.json")
 
     def __new__(cls):
         if cls._instance is None:
@@ -134,10 +134,10 @@ class ConfigManager:
         }
 
     def _load_from_file(self) -> Optional[Dict[str, Any]]:
-        """从 config.json 文件加载配置"""
+        """从 configs/config.json 文件加载配置"""
         if os.path.exists(self.CONFIG_FILE):
             try:
-                with open(self.CONFIG_FILE, 'r', encoding='utf-8') as f:
+                with open(self.CONFIG_FILE, "r", encoding="utf-8") as f:
                     return json.load(f)
             except Exception as e:
                 print(f"加载配置文件失败：{e}")

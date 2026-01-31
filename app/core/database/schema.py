@@ -10,6 +10,9 @@ from app.core.database.orm import get_engine
 def ensure_schema() -> None:
     """初始化数据库表结构 (create_all)"""
     engine = get_engine()
+    with engine.connect() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        conn.commit()
     Base.metadata.create_all(bind=engine)
 
 
@@ -54,5 +57,8 @@ def ensure_schema_if_possible() -> bool:
     # 这里我们假设只要 is_database_ready() 返回 True，且我们至少调过一次 ensure_schema，就不必每次都调
     # 但为了简单起见，且 create_all 本身会检查表是否存在，开销尚可接受。
     # 也可以优化为只在 _db_ready_cache 从 False 变 True 时调用一次。
-    ensure_schema()
-    return True
+    try:
+        ensure_schema()
+        return True
+    except Exception:
+        return False

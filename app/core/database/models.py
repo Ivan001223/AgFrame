@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import BigInteger, ForeignKey, Index, Integer, JSON, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from pgvector.sqlalchemy import Vector
 
 
 class Base(DeclarativeBase):
@@ -113,4 +114,22 @@ class DocContent(Base):
     document: Mapped["Document"] = relationship(back_populates="parents")
 
     __table_args__ = (Index("idx_doc_content_doc", "doc_id"),)
+
+
+class DocEmbedding(Base):
+    __tablename__ = "doc_embedding"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    doc_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    parent_chunk_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    child_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(Vector, nullable=False)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    __table_args__ = (
+        Index("idx_doc_embedding_doc", "doc_id"),
+    )
 

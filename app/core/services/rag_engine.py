@@ -1,6 +1,4 @@
 import os
-import shutil
-
 from typing import List, Dict, Any, Optional
 from langchain_community.document_loaders import (
     TextLoader, 
@@ -8,7 +6,6 @@ from langchain_community.document_loaders import (
     UnstructuredExcelLoader
 )
 from langchain_experimental.text_splitter import SemanticChunker
-from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 
 # 自定义本地模型
@@ -16,14 +13,14 @@ from app.core.llm.embeddings import ModelEmbeddings
 from app.core.llm.reranker import ModelReranker
 from app.core.services.ocr_engine import ocr_engine
 from app.core.database.schema import ensure_schema_if_possible
-from app.core.database.stores import MySQLDocStore
+from app.core.database.orm import get_session
+from app.core.database.models import DocContent, DocEmbedding, Document as DocumentRow
+from app.core.database.stores import MySQLDocStore, PgDocEmbeddingStore
 from app.core.config.config_manager import config_manager
 from app.core.services.hybrid_retriever_service import HybridRetrieverService, HybridRetrievalConfig
-from app.core.utils.faiss_store import load_faiss, save_faiss
+from app.core.services.pgvector_vectorstore import PgVectorVectorStore
 from app.core.utils.files import sha256_file
 from app.core.utils.text_split import split_text_by_chars
-
-DOC_VECTOR_STORE_PATH = os.path.join("data", "vector_store_docs_child")
 
 class RAGEngine:
     """
@@ -31,9 +28,7 @@ class RAGEngine:
     负责管理文档的摄取、切片、向量化存储以及检索增强。
     支持多种文件格式，并集成了 OCR 能力。
     """
-    def __init__(self, persist_directory: str = DOC_VECTOR_STORE_PATH):
-        self.persist_directory = persist_directory
-        
+    def __init__(self):
         # 初始化 Embeddings（本地模型）
         print("正在初始化 RAG 引擎（本地向量模型）...")
         self.embeddings = ModelEmbeddings()
@@ -41,27 +36,11 @@ class RAGEngine:
         # 初始化重排器（Reranker）
         self.reranker = ModelReranker()
         
-        # 初始化向量库（FAISS）
         self._vectorstore = None
         self._hybrid_retriever: Optional[HybridRetrieverService] = None
-        if os.path.exists(self.persist_directory) and os.path.exists(
-            os.path.join(self.persist_directory, "index.faiss")
-        ):
-            print(f"正在从 {self.persist_directory} 加载 FAISS 索引")
-            flags = (config_manager.get_config() or {}).get("feature_flags", {}) or {}
-            self._vectorstore = load_faiss(
-                self.persist_directory,
-                self.embeddings,
-                allow_dangerous_deserialization=bool(flags.get("allow_dangerous_deserialization", False)),
-            )
-            if self._vectorstore is None:
-                print("加载 FAISS 索引失败")
-            else:
-                self._hybrid_retriever = HybridRetrieverService(vectorstore=self._vectorstore)
-        else:
-            print("未找到已有的 FAISS 索引，将在首次添加文档时初始化新索引。")
-            self._vectorstore = None
-            self._hybrid_retriever = None
+        if ensure_schema_if_possible():
+            self._vectorstore = PgVectorVectorStore(embeddings=self.embeddings)
+            self._hybrid_retriever = HybridRetrieverService(vectorstore=self._vectorstore)
 
     def load_documents(self, file_path: str) -> List[Document]:
         """
@@ -102,13 +81,6 @@ class RAGEngine:
 
         return docs
 
-    def _persist_vectorstore(self) -> bool:
-        """持久化保存 FAISS 索引到磁盘"""
-        ok = save_faiss(self.persist_directory, self._vectorstore)
-        if not ok:
-            print("保存向量存储失败")
-        return ok
-
     def add_knowledge_base(self, file_path: str):
         """
         将文件摄取到知识库中。
@@ -143,59 +115,59 @@ class RAGEngine:
 
             use_parent_retrieval = ensure_schema_if_possible()
             splits: List[Document] = []
-            if use_parent_retrieval:
-                try:
-                    doc_store = MySQLDocStore()
-                    checksum = sha256_file(file_path)
-                    doc_id = doc_store.upsert_document(source_path=file_path, checksum=checksum)
-
-                    parent_chunks: List[Dict[str, Any]] = []
-                    for d in docs:
-                        # 父文档切分：较大粒度，保留更多上下文
-                        parent_parts = split_text_by_chars(d.page_content, chunk_size=6000, overlap=400)
-                        for p in parent_parts:
-                            parent_chunks.append({"content": p, "page_num": d.metadata.get("page")})
-
-                    parent_ids = doc_store.insert_parent_chunks(doc_id, parent_chunks)
-                    for parent_id, parent in zip(parent_ids, parent_chunks):
-                        # 子文档切分：较小粒度，用于精确向量检索
-                        child_parts = split_text_by_chars(parent["content"], chunk_size=1400, overlap=120)
-                        for idx, cp in enumerate(child_parts):
-                            splits.append(
-                                Document(
-                                    page_content=cp,
-                                    metadata={
-                                        "type": "doc_fragment",
-                                        "doc_id": doc_id,
-                                        "parent_chunk_id": parent_id,
-                                        "child_index": idx,
-                                        "source": file_path,
-                                    },
-                                )
-                            )
-                except Exception as e:
-                    print(f"数据库操作失败，降级到纯向量模式: {e}")
-                    use_parent_retrieval = False
-            
-            # 如果数据库不可用或操作失败，降级处理
             if not use_parent_retrieval:
-                print("未检测到可用数据库或数据库操作失败，将使用纯向量存储模式（无 Parent Retrieval）...")
-                print("正在使用语义切分（Semantic Chunking）...")
-                text_splitter = SemanticChunker(
-                    self.embeddings,
-                    breakpoint_threshold_type="percentile",
-                )
-                splits = text_splitter.split_documents(docs)
-
-            # 3. 添加到向量库
-            if self._vectorstore is None:
-                self._vectorstore = FAISS.from_documents(splits, self.embeddings)
-                self._hybrid_retriever = HybridRetrieverService(vectorstore=self._vectorstore)
-            else:
-                self._vectorstore.add_documents(documents=splits)
-
-            if not self._persist_vectorstore():
+                print("未检测到可用数据库，无法写入 pgvector")
                 return False
+
+            doc_store = MySQLDocStore()
+            checksum = sha256_file(file_path)
+            doc_id = doc_store.upsert_document(source_path=file_path, checksum=checksum)
+
+            parent_chunks: List[Dict[str, Any]] = []
+            for d in docs:
+                parent_parts = split_text_by_chars(d.page_content, chunk_size=6000, overlap=400)
+                for p in parent_parts:
+                    parent_chunks.append({"content": p, "page_num": d.metadata.get("page")})
+
+            parent_ids = doc_store.insert_parent_chunks(doc_id, parent_chunks)
+            for parent_id, parent in zip(parent_ids, parent_chunks):
+                child_parts = split_text_by_chars(parent["content"], chunk_size=1400, overlap=120)
+                for idx, cp in enumerate(child_parts):
+                    splits.append(
+                        Document(
+                            page_content=cp,
+                            metadata={
+                                "type": "doc_fragment",
+                                "doc_id": doc_id,
+                                "parent_chunk_id": parent_id,
+                                "child_index": idx,
+                                "source": file_path,
+                            },
+                        )
+                    )
+
+            PgDocEmbeddingStore().delete_by_doc_id(doc_id)
+            vectors = self.embeddings.embed_documents([d.page_content for d in splits])
+            rows: List[Dict[str, Any]] = []
+            for d, v in zip(splits, vectors):
+                meta = dict(getattr(d, "metadata", {}) or {})
+                rows.append(
+                    {
+                        "doc_id": meta.get("doc_id"),
+                        "parent_chunk_id": meta.get("parent_chunk_id"),
+                        "child_index": meta.get("child_index"),
+                        "source_path": meta.get("source"),
+                        "content": d.page_content,
+                        "embedding": v,
+                        "metadata_json": meta,
+                    }
+                )
+            PgDocEmbeddingStore().add_embeddings(rows)
+
+            if self._vectorstore is None:
+                self._vectorstore = PgVectorVectorStore(embeddings=self.embeddings)
+                self._hybrid_retriever = HybridRetrieverService(vectorstore=self._vectorstore)
+
             print(f"成功添加了来自 {file_path} 的 {len(splits)} 个块")
             return True
         except Exception as e:
@@ -344,10 +316,15 @@ class RAGEngine:
         删除磁盘上的 FAISS 索引文件并重置内存中的实例。
         """
         try:
-            if os.path.exists(self.persist_directory):
-                shutil.rmtree(self.persist_directory)
-            self._vectorstore = None
-            print("向量库已清空。")
+            if not ensure_schema_if_possible():
+                self._vectorstore = None
+                return
+            with get_session() as session:
+                session.execute(DocEmbedding.__table__.delete())
+                session.execute(DocContent.__table__.delete())
+                session.execute(DocumentRow.__table__.delete())
+            self._vectorstore = PgVectorVectorStore(embeddings=self.embeddings)
+            self._hybrid_retriever = HybridRetrieverService(vectorstore=self._vectorstore)
         except Exception as e:
             print(f"清空向量库失败：{e}")
 

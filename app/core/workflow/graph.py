@@ -6,11 +6,13 @@ from langgraph.graph import StateGraph, END
 
 from app.core.config.config_manager import config_manager
 from app.core.workflow.nodes.assemble_prompt import assemble_prompt_node
+from app.core.workflow.nodes.grader import grader_node
 from app.core.workflow.nodes.generate import generate_node
 from app.core.workflow.nodes.retrieve_docs import retrieve_docs_node
 from app.core.workflow.nodes.rerank_docs import rerank_docs_node
 from app.core.workflow.nodes.retrieve_memories import retrieve_memories_node
 from app.core.workflow.nodes.router import router_node
+from app.core.workflow.nodes.web_search import web_search_node
 from app.core.workflow.state import AgentState
 
 
@@ -40,6 +42,33 @@ def _after_docs_key(state: AgentState) -> Literal["assemble", "memories"]:
         return "memories"
     return "assemble"
 
+
+def _get_max_self_correction_attempts() -> int:
+    cfg = config_manager.get_config() or {}
+    sc_cfg = cfg.get("self_correction", {}) or {}
+    val = sc_cfg.get("max_attempts")
+    if val is None:
+        return 2
+    try:
+        return max(0, int(val))
+    except Exception:
+        return 2
+
+
+def _grader_key(state: AgentState) -> Literal["accept", "rewrite", "search"]:
+    trace = state.get("trace") or {}
+    attempts = int(trace.get("self_correction_attempts") or 0)
+    if attempts >= _get_max_self_correction_attempts():
+        return "accept"
+    grade = (state.get("context") or {}).get("grade") or {}
+    verdict = str(grade.get("verdict") or "accept").strip().lower()
+    if verdict == "search":
+        return "search"
+    if verdict == "rewrite":
+        return "rewrite"
+    return "accept"
+
+
 def run_app():
     """
     构建并编译 LangGraph 工作流应用。
@@ -48,6 +77,9 @@ def run_app():
         CompiledStateGraph: 编译后的工作流图
     """
     workflow = StateGraph(AgentState)
+    cfg = config_manager.get_config() or {}
+    flags = cfg.get("feature_flags", {}) or {}
+    enable_self_correction = bool(flags.get("enable_self_correction", False))
 
     # 添加节点
     workflow.add_node("router", router_node)
@@ -56,6 +88,9 @@ def run_app():
     workflow.add_node("retrieve_memories", retrieve_memories_node)
     workflow.add_node("assemble", assemble_prompt_node)
     workflow.add_node("generate", generate_node)
+    if enable_self_correction:
+        workflow.add_node("grader", grader_node)
+        workflow.add_node("web_search", web_search_node)
 
     # 定义边和流程
     workflow.set_entry_point("router")
@@ -77,7 +112,16 @@ def run_app():
     )
     workflow.add_edge("retrieve_memories", "assemble")
     workflow.add_edge("assemble", "generate")
-    workflow.add_edge("generate", END)
+    if enable_self_correction:
+        workflow.add_edge("generate", "grader")
+        workflow.add_conditional_edges(
+            "grader",
+            _grader_key,
+            {"accept": END, "rewrite": "assemble", "search": "web_search"},
+        )
+        workflow.add_edge("web_search", "assemble")
+    else:
+        workflow.add_edge("generate", END)
 
     return workflow.compile()
 

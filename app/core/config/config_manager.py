@@ -31,7 +31,9 @@ class ConfigManager:
             "llm": {
                 "api_key": os.getenv("LLM_API_KEY", os.getenv("OPENAI_API_KEY", "")),
                 "base_url": os.getenv("LLM_BASE_URL", "https://api.openai.com/v1"),
-                "model": os.getenv("LLM_MODEL", "gpt-4o")
+                "model": os.getenv("LLM_MODEL", "gpt-4o"),
+                "structured_output_mode": os.getenv("LLM_STRUCTURED_OUTPUT_MODE", "native_first"),
+                "json_mode_response_format": os.getenv("LLM_JSON_MODE_RESPONSE_FORMAT", "true").lower() == "true",
             },
             "model_manager": {
                 "provider": os.getenv("MODEL_MANAGER_PROVIDER", "modelscope"),
@@ -117,9 +119,13 @@ class ConfigManager:
             "feature_flags": {
                 "enable_docs_rag": os.getenv("ENABLE_DOCS_RAG", "true").lower() == "true",
                 "enable_chat_memory": os.getenv("ENABLE_CHAT_MEMORY", "true").lower() == "true",
+                "enable_self_correction": os.getenv("ENABLE_SELF_CORRECTION", "true").lower() == "true",
                 "allow_dangerous_deserialization": os.getenv("ALLOW_DANGEROUS_DESERIALIZATION", "false").lower() == "true",
                 "enable_tools_write_file": os.getenv("ENABLE_TOOLS_WRITE_FILE", "false").lower() == "true",
                 "enable_tools_python_repl": os.getenv("ENABLE_TOOLS_PYTHON_REPL", "false").lower() == "true",
+            },
+            "self_correction": {
+                "max_attempts": int(os.getenv("SELF_CORRECTION_MAX_ATTEMPTS", "2")),
             },
         }
 

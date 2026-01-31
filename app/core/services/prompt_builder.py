@@ -88,6 +88,8 @@ def build_system_prompt(
     recent_history_lines: Sequence[str],
     docs: Sequence[Document],
     memories: Sequence[Document],
+    web_search: Optional[Dict[str, Any]] = None,
+    self_correction: Optional[str] = None,
     budget: Optional[PromptBudget] = None,
 ) -> Tuple[str, List[Dict[str, Any]]]:
     b = budget or PromptBudget()
@@ -117,6 +119,16 @@ def build_system_prompt(
     doc_block = "\n".join(_take_with_budget(doc_items, max_total_chars=b.max_doc_chars_total))
     mem_block = "\n".join(_take_with_budget(mem_items, max_total_chars=b.max_memory_chars_total))
 
+    web_search_block = ""
+    if web_search:
+        query = _truncate(str(web_search.get("query") or ""), 200)
+        result = _truncate(str(web_search.get("result") or ""), b.max_item_chars)
+        web_search_block = f"\n\n<web_search query={query!r}>\n{result}\n</web_search>"
+
+    self_correction_block = ""
+    if self_correction:
+        self_correction_block = f"\n\n<self_correction>\n{_truncate(str(self_correction), b.max_item_chars)}\n</self_correction>"
+
     system_prompt = (
         "你是一个严谨的助理。回答时优先使用提供的上下文与用户画像。\n"
         "当引用文档内容时，尽量给出对应 Doc 编号；当引用历史记忆时，尽量给出 Memory 编号。\n"
@@ -125,6 +137,7 @@ def build_system_prompt(
         f"<recent_history>\n{chr(10).join(recent_lines) if recent_lines else ''}\n</recent_history>\n\n"
         f"<retrieved_docs>\n{doc_block}\n</retrieved_docs>\n\n"
         f"<retrieved_memories>\n{mem_block}\n</retrieved_memories>\n"
+        f"{web_search_block}{self_correction_block}"
     )
 
     citations = build_citations(

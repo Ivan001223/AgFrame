@@ -63,6 +63,8 @@ async def assemble_prompt_node(state: AgentState) -> Dict[str, Any]:
         recent_history_lines=recent_history_lines,
         docs=docs,
         memories=memories,
+        web_search=ctx.get("web_search"),
+        self_correction=ctx.get("self_correction"),
         budget=budget,
     )
 

@@ -11,6 +11,7 @@ from app.core.workflow.nodes.generate import generate_node
 from app.core.workflow.nodes.retrieve_docs import retrieve_docs_node
 from app.core.workflow.nodes.rerank_docs import rerank_docs_node
 from app.core.workflow.nodes.retrieve_memories import retrieve_memories_node
+from app.core.workflow.nodes.retrieve_profile import retrieve_profile_node
 from app.core.workflow.nodes.router import router_node
 from app.core.workflow.nodes.web_search import web_search_node
 from app.core.workflow.state import AgentState
@@ -33,14 +34,14 @@ def _route_key(state: AgentState) -> Literal["none", "docs", "history", "both"]:
     return "none"
 
 
-def _after_docs_key(state: AgentState) -> Literal["assemble", "memories"]:
+def _after_docs_key(state: AgentState) -> Literal["profile", "memories"]:
     cfg = config_manager.get_config() or {}
     flags = cfg.get("feature_flags", {}) or {}
     enable_chat_memory = bool(flags.get("enable_chat_memory", True))
     route = state.get("route") or (state.get("context") or {}).get("route") or {}
     if bool(route.get("needs_history")) and enable_chat_memory:
         return "memories"
-    return "assemble"
+    return "profile"
 
 
 def _get_max_self_correction_attempts() -> int:
@@ -86,6 +87,7 @@ def run_app():
     workflow.add_node("retrieve_docs", retrieve_docs_node)
     workflow.add_node("rerank_docs", rerank_docs_node)
     workflow.add_node("retrieve_memories", retrieve_memories_node)
+    workflow.add_node("retrieve_profile", retrieve_profile_node)
     workflow.add_node("assemble", assemble_prompt_node)
     workflow.add_node("generate", generate_node)
     if enable_self_correction:
@@ -101,25 +103,26 @@ def run_app():
             "both": "retrieve_docs",
             "docs": "retrieve_docs",
             "history": "retrieve_memories",
-            "none": "assemble",
+            "none": "retrieve_profile",
         },
     )
     workflow.add_edge("retrieve_docs", "rerank_docs")
     workflow.add_conditional_edges(
         "rerank_docs",
         _after_docs_key,
-        {"memories": "retrieve_memories", "assemble": "assemble"},
+        {"memories": "retrieve_memories", "profile": "retrieve_profile"},
     )
-    workflow.add_edge("retrieve_memories", "assemble")
+    workflow.add_edge("retrieve_memories", "retrieve_profile")
+    workflow.add_edge("retrieve_profile", "assemble")
     workflow.add_edge("assemble", "generate")
     if enable_self_correction:
         workflow.add_edge("generate", "grader")
         workflow.add_conditional_edges(
             "grader",
             _grader_key,
-            {"accept": END, "rewrite": "assemble", "search": "web_search"},
+            {"accept": END, "rewrite": "retrieve_profile", "search": "web_search"},
         )
-        workflow.add_edge("web_search", "assemble")
+        workflow.add_edge("web_search", "retrieve_profile")
     else:
         workflow.add_edge("generate", END)
 

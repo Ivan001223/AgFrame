@@ -13,6 +13,7 @@ class PromptBudget:
     max_memories: int = 3
     max_doc_chars_total: int = 6000
     max_memory_chars_total: int = 3000
+    max_profile_chars_total: int = 2500
     max_item_chars: int = 2000
 
 
@@ -95,6 +96,7 @@ def build_system_prompt(
     b = budget or PromptBudget()
 
     recent_lines = list(recent_history_lines)[-b.max_recent_history_lines :]
+    profile_block = _truncate(str(profile), b.max_profile_chars_total)
 
     doc_items: List[str] = []
     for i, d in enumerate(list(docs)[: b.max_docs], start=1):
@@ -133,7 +135,7 @@ def build_system_prompt(
         "你是一个严谨的助理。回答时优先使用提供的上下文与用户画像。\n"
         "当引用文档内容时，尽量给出对应 Doc 编号；当引用历史记忆时，尽量给出 Memory 编号。\n"
         "如果上下文不足以回答细节，明确说明缺失点并给出下一步需要的信息。\n\n"
-        f"<user_profile>\n{profile}\n</user_profile>\n\n"
+        f"<user_profile>\n{profile_block}\n</user_profile>\n\n"
         f"<recent_history>\n{chr(10).join(recent_lines) if recent_lines else ''}\n</recent_history>\n\n"
         f"<retrieved_docs>\n{doc_block}\n</retrieved_docs>\n\n"
         f"<retrieved_memories>\n{mem_block}\n</retrieved_memories>\n"

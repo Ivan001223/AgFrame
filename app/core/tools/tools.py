@@ -3,6 +3,7 @@ from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_experimental.utilities import PythonREPL
 from app.core.services.rag_engine import get_rag_engine
 from app.core.services.ocr_engine import ocr_engine
+from app.core.config.config_manager import config_manager
 import os
 import datetime
 
@@ -26,6 +27,9 @@ def calculator(expression: str) -> str:
     输入应为合法的 Python 表达式字符串，例如 "123 * 456" 或 "math.sqrt(25)"。
     """
     try:
+        flags = (config_manager.get_config() or {}).get("feature_flags", {}) or {}
+        if not bool(flags.get("enable_tools_python_repl", False)):
+            return "Tool disabled: calculator"
         repl = PythonREPL()
         full_code = f"import math\nprint({expression})"
         result = repl.run(full_code)
@@ -81,13 +85,22 @@ def write_file(file_path: str, content: str) -> str:
         content: 要写入的文本内容。
     """
     try:
-        directory = os.path.dirname(file_path)
+        flags = (config_manager.get_config() or {}).get("feature_flags", {}) or {}
+        if not bool(flags.get("enable_tools_write_file", False)):
+            return "Tool disabled: write_file"
+
+        data_dir = os.path.abspath(os.path.join(os.getcwd(), "data"))
+        abs_path = os.path.abspath(file_path)
+        if os.path.commonpath([abs_path, data_dir]) != data_dir:
+            return f"Write blocked: path must be under {data_dir}"
+
+        directory = os.path.dirname(abs_path)
         if directory and not os.path.exists(directory):
             os.makedirs(directory)
             
-        with open(file_path, 'w', encoding='utf-8') as f:
+        with open(abs_path, 'w', encoding='utf-8') as f:
             f.write(content)
-        return f"Successfully wrote to file: {file_path}"
+        return f"Successfully wrote to file: {abs_path}"
     except Exception as e:
         return f"Write failed: {str(e)}"
 

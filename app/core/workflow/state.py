@@ -1,6 +1,22 @@
-from typing import TypedDict, Annotated, List, Dict, Any
+from typing import TypedDict, Annotated, List, Dict, Any, Literal, Optional
 from langchain_core.messages import BaseMessage
+from langchain_core.documents import Document
 from langgraph.graph.message import add_messages
+
+
+class RouteDecision(TypedDict, total=False):
+    needs_docs: bool
+    needs_history: bool
+    reasoning: str
+
+
+class Citation(TypedDict, total=False):
+    kind: Literal["doc", "memory"]
+    label: str
+    doc_id: Optional[str]
+    session_id: Optional[str]
+    page: Optional[int]
+    source: Optional[str]
 
 class AgentState(TypedDict, total=False):
     """
@@ -24,5 +40,10 @@ class AgentState(TypedDict, total=False):
     context: Dict[str, Any]
     user_id: str
     
-    # 在此添加自定义状态字段
+    route: RouteDecision
+    retrieved_docs: List[Document]
+    retrieved_memories: List[Document]
+    citations: List[Citation]
+    errors: List[str]
+    trace: Dict[str, Any]
 

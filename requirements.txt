@@ -29,6 +29,7 @@ unstructured
 
 # Search
 duckduckgo-search
+rank-bm25
 
 # Utils
 python-dotenv

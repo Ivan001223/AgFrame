@@ -49,3 +49,4 @@ tiktoken
 streamlit
 mysql-connector-python
 SQLAlchemy>=2.0.0
+pytest

@@ -19,10 +19,12 @@ from app.core.database.schema import ensure_schema_if_possible
 from app.core.database.stores import MySQLConversationStore
 from app.core.services.memory_update_service import memory_update_service
 from app.core.services.profile_engine import UserProfileEngine
+from app.core.utils.logging import init_logging
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动钩子（例如模型下载）可放在这里
+    init_logging()
     print("后端脚手架已启动")
     ensure_schema_if_possible()
     yield
@@ -63,16 +65,19 @@ async def upload_documents(background_tasks: BackgroundTasks, files: List[Upload
     results = []
     
     for file in files:
-        if not file.filename.endswith('.pdf'):
+        original_name = os.path.basename(file.filename or "")
+        if not original_name.lower().endswith(".pdf"):
             results.append({"filename": file.filename, "status": "skipped", "message": "Only PDF supported"})
             continue
         try:
-            file_path = os.path.join(upload_dir, file.filename)
+            safe_name = original_name or f"{uuid.uuid4()}.pdf"
+            safe_name = f"{uuid.uuid4()}_{safe_name}"
+            file_path = os.path.join(upload_dir, safe_name)
             with open(file_path, "wb") as f:
                 f.write(await file.read())
             
             background_tasks.add_task(get_rag_engine().add_knowledge_base, file_path)
-            results.append({"filename": file.filename, "status": "uploaded"}) 
+            results.append({"filename": safe_name, "status": "uploaded"})
         except Exception as e:
             results.append({"filename": file.filename, "status": "error", "message": str(e)})
             
@@ -82,12 +87,15 @@ async def upload_documents(background_tasks: BackgroundTasks, files: List[Upload
 @app.post("/upload/image")
 async def upload_image(file: UploadFile = File(...)):
     uploads_dir = "data/uploads"
-    file_path = os.path.join(uploads_dir, file.filename)
+    original_name = os.path.basename(file.filename or "")
+    safe_name = original_name or "upload.bin"
+    safe_name = f"{uuid.uuid4()}_{safe_name}"
+    file_path = os.path.join(uploads_dir, safe_name)
     with open(file_path, "wb") as f:
         f.write(await file.read())
         
     # text = ocr_engine.process_file(file_path)  # 若已配置 OCR 引擎可取消注释启用
-    return {"url": f"/uploads/{file.filename}", "text": "OCR Placeholder"}
+    return {"url": f"/uploads/{safe_name}", "text": "OCR Placeholder"}
 
 # 配置
 @app.get("/settings")

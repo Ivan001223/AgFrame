@@ -8,7 +8,7 @@ def load_faiss(
     persist_directory: str,
     embeddings: Any,
     *,
-    allow_dangerous_deserialization: bool = True,
+    allow_dangerous_deserialization: bool = False,
 ) -> Optional[FAISS]:
     """
     加载本地持久化的 FAISS 索引。

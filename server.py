@@ -47,11 +47,29 @@ app.add_middleware(
 )
 
 # 路由（LangServe）
+# 导入 observability
+from app.core.observability import get_langfuse_callback
+
+def per_req_config_modifier(config: Dict[str, Any], request: Any) -> Dict[str, Any]:
+    """
+    Injects Langfuse callback into the config for every request.
+    """
+    handler = get_langfuse_callback()
+    if handler:
+        existing_callbacks = config.get("callbacks", [])
+        if isinstance(existing_callbacks, list):
+            config["callbacks"] = existing_callbacks + [handler]
+        else:
+            config["callbacks"] = [handler]
+    return config
+
+# 路由（LangServe）
 add_routes(
     app,
     graph_app,
     path="/chat",
     enable_feedback_endpoint=True,
+    per_req_config_modifier=per_req_config_modifier,
 )
 
 # 静态文件

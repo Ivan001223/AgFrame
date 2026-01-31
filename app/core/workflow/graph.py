@@ -8,6 +8,7 @@ from app.core.config.config_manager import config_manager
 from app.core.workflow.nodes.assemble_prompt import assemble_prompt_node
 from app.core.workflow.nodes.generate import generate_node
 from app.core.workflow.nodes.retrieve_docs import retrieve_docs_node
+from app.core.workflow.nodes.rerank_docs import rerank_docs_node
 from app.core.workflow.nodes.retrieve_memories import retrieve_memories_node
 from app.core.workflow.nodes.router import router_node
 from app.core.workflow.state import AgentState
@@ -51,6 +52,7 @@ def run_app():
     # 添加节点
     workflow.add_node("router", router_node)
     workflow.add_node("retrieve_docs", retrieve_docs_node)
+    workflow.add_node("rerank_docs", rerank_docs_node)
     workflow.add_node("retrieve_memories", retrieve_memories_node)
     workflow.add_node("assemble", assemble_prompt_node)
     workflow.add_node("generate", generate_node)
@@ -67,8 +69,9 @@ def run_app():
             "none": "assemble",
         },
     )
+    workflow.add_edge("retrieve_docs", "rerank_docs")
     workflow.add_conditional_edges(
-        "retrieve_docs",
+        "rerank_docs",
         _after_docs_key,
         {"memories": "retrieve_memories", "assemble": "assemble"},
     )

@@ -56,6 +56,9 @@
     "password": "password",
     "db_name": "agent_app"
   },
+  "queue": {
+    "redis_url": "redis://localhost:6379/0"
+  },
   "general": {
     "app_name": "My Agent App"
   }

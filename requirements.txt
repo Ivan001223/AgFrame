@@ -45,6 +45,8 @@ torch
 torchvision
 matplotlib
 tiktoken
+redis
+arq
 
 # UI
 streamlit

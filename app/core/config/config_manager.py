@@ -87,6 +87,9 @@ class ConfigManager:
                 "password": os.getenv("DB_PASSWORD", "password"),
                 "db_name": os.getenv("DB_NAME", "agent_app")
             },
+            "queue": {
+                "redis_url": os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+            },
             "general": {
                 "app_name": os.getenv("APP_NAME", "My Agent App")
             },

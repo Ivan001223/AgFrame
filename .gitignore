@@ -69,6 +69,7 @@ model_cache/
 hf_cache/
 .hf_cache/
 .cache/huggingface/
+app/examples/*_smoke.py
 
 data/uploads/
 data/documents/

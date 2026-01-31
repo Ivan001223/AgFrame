@@ -17,6 +17,7 @@ from app.core.llm.reranker import ModelReranker
 from app.core.services.ocr_engine import ocr_engine
 from app.core.database.schema import ensure_schema_if_possible
 from app.core.database.stores import MySQLDocStore
+from app.core.config.config_manager import config_manager
 from app.core.utils.faiss_store import load_faiss, save_faiss
 from app.core.utils.files import sha256_file
 from app.core.utils.text_split import split_text_by_chars
@@ -45,8 +46,11 @@ class RAGEngine:
             os.path.join(self.persist_directory, "index.faiss")
         ):
             print(f"正在从 {self.persist_directory} 加载 FAISS 索引")
+            flags = (config_manager.get_config() or {}).get("feature_flags", {}) or {}
             self._vectorstore = load_faiss(
-                self.persist_directory, self.embeddings, allow_dangerous_deserialization=True
+                self.persist_directory,
+                self.embeddings,
+                allow_dangerous_deserialization=bool(flags.get("allow_dangerous_deserialization", False)),
             )
             if self._vectorstore is None:
                 print("加载 FAISS 索引失败")

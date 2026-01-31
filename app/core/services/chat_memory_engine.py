@@ -10,6 +10,7 @@ from langchain_core.documents import Document
 from app.core.llm.embeddings import ModelEmbeddings
 from app.core.llm.llm_factory import get_llm
 from app.core.llm.reranker import ModelReranker
+from app.core.config.config_manager import config_manager
 from app.core.utils.faiss_store import load_faiss, save_faiss
 
 
@@ -73,7 +74,12 @@ class ChatSummaryIndex:
         if user_id in self._stores:
             return self._stores[user_id]
         user_dir = self._user_dir(user_id)
-        store = load_faiss(user_dir, self.embeddings, allow_dangerous_deserialization=True)
+        flags = (config_manager.get_config() or {}).get("feature_flags", {}) or {}
+        store = load_faiss(
+            user_dir,
+            self.embeddings,
+            allow_dangerous_deserialization=bool(flags.get("allow_dangerous_deserialization", False)),
+        )
         self._stores[user_id] = store
         return store
 

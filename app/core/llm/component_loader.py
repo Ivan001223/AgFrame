@@ -9,6 +9,10 @@ from app.core.llm.model_manager import torch_dtype_for_device
 
 
 def resolve_pretrained_source_for_spec(spec: Any) -> str:
+    """
+    根据 ModelSpec 解析预训练模型源路径。
+    自动处理 ModelScope/HuggingFace 的下载逻辑。
+    """
     imported = resolve_pretrained_source(
         provider=spec.provider,
         model_ref=spec.model_ref,
@@ -26,6 +30,10 @@ def load_transformers_model(
     device: str,
     model_type: str = "auto",
 ) -> Any:
+    """
+    加载 Transformers 模型。
+    支持自动模型 (AutoModel) 和序列分类模型 (AutoModelForSequenceClassification)。
+    """
     if model_type == "sequence_classification":
         from transformers import AutoModelForSequenceClassification
 
@@ -46,6 +54,7 @@ def load_transformers_model(
 
 
 def try_load_transformers_processor(pretrained_source: str, *, trust_remote_code: bool) -> Optional[Any]:
+    """尝试加载 Transformers Processor，失败返回 None"""
     try:
         return AutoProcessor.from_pretrained(pretrained_source, trust_remote_code=trust_remote_code)
     except Exception:
@@ -53,6 +62,7 @@ def try_load_transformers_processor(pretrained_source: str, *, trust_remote_code
 
 
 def load_transformers_tokenizer(pretrained_source: str, *, trust_remote_code: bool) -> Any:
+    """加载 Transformers Tokenizer"""
     return AutoTokenizer.from_pretrained(pretrained_source, trust_remote_code=trust_remote_code)
 
 
@@ -62,6 +72,7 @@ def load_sentence_transformers_embedder(
     device: str,
     max_length: Optional[int] = None,
 ) -> Any:
+    """加载 SentenceTransformer 嵌入模型"""
     from sentence_transformers import SentenceTransformer
 
     model = SentenceTransformer(pretrained_source, device=device)
@@ -79,6 +90,7 @@ def load_sentence_transformers_cross_encoder(
     device: str,
     max_length: Optional[int] = None,
 ) -> Any:
+    """加载 SentenceTransformer CrossEncoder 模型"""
     from sentence_transformers import CrossEncoder
 
     return CrossEncoder(pretrained_source, device=device, max_length=max_length)

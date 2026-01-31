@@ -44,6 +44,28 @@ async def assemble_prompt_node(state: AgentState) -> Dict[str, Any]:
     except Exception:
         profile = {"basic_info": {}, "tech_profile": {}, "preferences": {}, "facts": []}
 
+    retrieved_profile_items = (
+        state.get("retrieved_profile_items")
+        or ctx.get("retrieved_profile_items")
+        or ctx.get("retrieved_profile")
+        or []
+    )
+    prefs = profile.get("preferences") if isinstance(profile, dict) else {}
+    if not isinstance(prefs, dict):
+        prefs = {}
+    pinned_prefs: Dict[str, Any] = {}
+    for key in ["language", "communication_style", "interaction_protocol", "tone_instruction"]:
+        val = prefs.get(key)
+        if val is not None:
+            pinned_prefs[key] = val
+
+    profile_view = {
+        "basic_info": (profile.get("basic_info") if isinstance(profile, dict) else {}) or {},
+        "tech_profile": (profile.get("tech_profile") if isinstance(profile, dict) else {}) or {},
+        "preferences": pinned_prefs,
+        "retrieved_profile_items": retrieved_profile_items,
+    }
+
     docs = state.get("retrieved_docs") or ctx.get("retrieved_docs") or []
     memories = state.get("retrieved_memories") or ctx.get("retrieved_memories") or []
 
@@ -55,11 +77,12 @@ async def assemble_prompt_node(state: AgentState) -> Dict[str, Any]:
         max_memories=int(budget_cfg.get("max_memories", 3)),
         max_doc_chars_total=int(budget_cfg.get("max_doc_chars_total", 6000)),
         max_memory_chars_total=int(budget_cfg.get("max_memory_chars_total", 3000)),
+        max_profile_chars_total=int(budget_cfg.get("max_profile_chars_total", 2500)),
         max_item_chars=int(budget_cfg.get("max_item_chars", 2000)),
     )
 
     system_prompt, citations = build_system_prompt(
-        profile=profile,
+        profile=profile_view,
         recent_history_lines=recent_history_lines,
         docs=docs,
         memories=memories,

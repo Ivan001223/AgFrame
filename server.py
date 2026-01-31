@@ -19,6 +19,8 @@ from app.core.database.schema import ensure_schema_if_possible
 from app.core.database.stores import MySQLConversationStore
 from app.core.services.memory_update_service import memory_update_service
 from app.core.services.profile_engine import UserProfileEngine
+from app.core.task_queue.client import enqueue_ingest_pdf
+from app.core.task_queue.redis_client import get_task, init_task
 from app.core.utils.logging import init_logging
 
 @asynccontextmanager
@@ -60,7 +62,7 @@ app.mount("/uploads", StaticFiles(directory="data/uploads"), name="uploads")
 
 # 上传（RAG）
 @app.post("/upload")
-async def upload_documents(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...)):
+async def upload_documents(files: List[UploadFile] = File(...)):
     upload_dir = "data/documents"
     results = []
     
@@ -75,13 +77,35 @@ async def upload_documents(background_tasks: BackgroundTasks, files: List[Upload
             file_path = os.path.join(upload_dir, safe_name)
             with open(file_path, "wb") as f:
                 f.write(await file.read())
-            
-            background_tasks.add_task(get_rag_engine().add_knowledge_base, file_path)
-            results.append({"filename": safe_name, "status": "uploaded"})
+
+            task_id = str(uuid.uuid4())
+            await init_task(
+                task_id,
+                {
+                    "task_id": task_id,
+                    "status": "queued",
+                    "progress": 0,
+                    "step": "queued",
+                    "message": "已入队",
+                    "file_path": file_path,
+                    "filename": safe_name,
+                    "created_at": int(__import__("time").time()),
+                },
+            )
+            await enqueue_ingest_pdf(task_id, file_path)
+            results.append({"filename": safe_name, "status": "queued", "task_id": task_id})
         except Exception as e:
             results.append({"filename": file.filename, "status": "error", "message": str(e)})
             
     return {"results": results}
+
+
+@app.get("/tasks/{task_id}")
+async def get_task_status(task_id: str):
+    task = await get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
 
 # 上传（OCR）
 @app.post("/upload/image")

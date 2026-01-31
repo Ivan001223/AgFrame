@@ -4,6 +4,11 @@ import time
 from app.core.config.config_manager import config_manager
 
 class DatabaseManager:
+    """
+    原生 MySQL 数据库连接池管理器（单例模式）。
+    提供基础的数据库连接获取和 SQL 执行能力。
+    主要用于一些不需要 ORM 的底层操作或旧代码兼容。
+    """
     _instance = None
     _pool = None
 
@@ -14,7 +19,7 @@ class DatabaseManager:
         return cls._instance
 
     def _init_pool(self):
-        """初始化连接池。"""
+        """初始化连接池。支持重试机制。"""
         db_config = config_manager.get_config().get("database", {})
         
         # 数据库连接重试逻辑
@@ -42,7 +47,7 @@ class DatabaseManager:
                     self._pool = None
 
     def get_connection(self):
-        """从连接池获取连接。"""
+        """从连接池获取一个数据库连接。"""
         if not self._pool:
             self._init_pool()
             if not self._pool:
@@ -51,7 +56,16 @@ class DatabaseManager:
         return self._pool.get_connection()
 
     def execute_query(self, query, params=None):
-        """执行查询并返回结果（用于 SELECT）。"""
+        """
+        执行查询语句 (SELECT) 并返回字典格式的结果列表。
+        
+        Args:
+            query: SQL 查询语句
+            params: SQL 参数元组
+            
+        Returns:
+            list[dict]: 查询结果列表
+        """
         conn = None
         cursor = None
         try:
@@ -70,7 +84,16 @@ class DatabaseManager:
                 conn.close()
 
     def execute_update(self, query, params=None):
-        """执行更新语句（INSERT/UPDATE/DELETE）并返回最后插入的行 ID。"""
+        """
+        执行更新语句 (INSERT/UPDATE/DELETE) 并返回最后插入的行 ID。
+        
+        Args:
+            query: SQL 更新语句
+            params: SQL 参数元组
+            
+        Returns:
+            int: lastrowid (对于 INSERT 语句)
+        """
         conn = None
         cursor = None
         try:

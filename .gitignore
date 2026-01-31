@@ -9,11 +9,12 @@ __pycache__/
 .env
 .env.*
 *.env
-config.json
+configs/config.json
 *.pem
 *.key
 *.p12
 *.pfx
+AGENTS.md
 
 .venv/
 venv/

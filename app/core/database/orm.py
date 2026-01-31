@@ -53,7 +53,13 @@ def get_sessionmaker() -> sessionmaker:
     """获取 Session 工厂"""
     global _SessionLocal
     if _SessionLocal is None:
-        _SessionLocal = sessionmaker(bind=get_engine(), autoflush=False, autocommit=False, future=True)
+        _SessionLocal = sessionmaker(
+            bind=get_engine(), 
+            autoflush=False, 
+            autocommit=False, 
+            expire_on_commit=False, 
+            future=True
+        )
     return _SessionLocal
 
 

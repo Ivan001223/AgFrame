@@ -44,7 +44,7 @@ class ModelEmbeddings(Embeddings):
             env_var=emb_cfg.get("env_var") or "MODEL_PATH_EMBEDDING",
             config_path=("embeddings", "model_name"),
             explicit=model_name or configured_model,
-            default=configured_model or "Qwen/Qwen3-VL-Embedding-2B",
+            default=configured_model or "Qwen/Qwen3-Embedding-0.6B",
         )
         self.model_name = self._spec.model_ref
         if not self.model_name:

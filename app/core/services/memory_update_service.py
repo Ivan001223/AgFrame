@@ -5,8 +5,9 @@ from typing import Any, Dict, List
 
 from app.core.database.schema import ensure_schema_if_possible
 from app.core.database.stores import MySQLConversationStore
-from app.core.services.chat_memory_engine import ChatSummaryIndex, split_messages_for_memory, summarize_chat_messages
+from app.core.services.chat_memory_engine import split_messages_for_memory, summarize_chat_messages
 from app.core.services.profile_engine import UserProfileEngine, incremental_update_profile, extract_base_profile
+from app.core.services.user_memory_engine import UserMemoryEngine
 
 
 class MemoryUpdateService:
@@ -48,9 +49,8 @@ class MemoryUpdateService:
         # 1. 检查是否需要更新摘要
         if older_end > last_summarized and older_end - last_summarized >= 6:
             segment = older[last_summarized:older_end]
-            summary_index = ChatSummaryIndex()
             summary_text = summarize_chat_messages(segment)
-            summary_index.add_summary(
+            _memory_engine.add_chat_summary(
                 user_id=user_id,
                 session_id=session_id,
                 summary_text=summary_text,
@@ -72,15 +72,24 @@ class MemoryUpdateService:
                 new_profile = incremental_update_profile(profile, chat_log=chat_log)
                 version = int(time.time())
                 profile_engine.upsert_profile(user_id, new_profile, version=version)
+                try:
+                    _memory_engine.replace_profile_semantic_memory(user_id=user_id, profile=new_profile)
+                except Exception:
+                    pass
             else:
                 # 首次全量提取
                 full_log = "\n".join([f"{m.get('role')}: {m.get('content')}" for m in messages])
                 base_profile = extract_base_profile(full_log)
                 version = int(time.time())
                 profile_engine.upsert_profile(user_id, base_profile, version=version)
+                try:
+                    _memory_engine.replace_profile_semantic_memory(user_id=user_id, profile=base_profile)
+                except Exception:
+                    pass
             # 更新画像进度标记
             store.update_session_markers(user_id, session_id, last_profiled_msg_id=len(messages))
 
 
+_memory_engine = UserMemoryEngine()
 memory_update_service = MemoryUpdateService()
 

@@ -3,10 +3,19 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import bindparam, delete, select, update, func
+from sqlalchemy import bindparam, delete, select, update, func, cast, Float
 from pgvector.sqlalchemy import Vector
 
-from app.core.database.models import ChatHistory, ChatSession, DocContent, DocEmbedding, Document, UserProfile
+from app.core.database.models import (
+    ChatHistory,
+    ChatSession,
+    DocContent,
+    DocEmbedding,
+    Document,
+    UserProfile,
+    UserMemoryEmbedding,
+    UserMemoryItem,
+)
 from app.core.database.orm import get_session
 from app.core.database.conversation_utils import derive_session_title, should_bump_updated_at
 
@@ -335,7 +344,8 @@ class PgDocEmbeddingStore:
         if not query_vec or k <= 0:
             return []
         q = bindparam("query_vec", value=list(query_vec), type_=Vector)
-        stmt = select(DocEmbedding).order_by(DocEmbedding.embedding.op("<=>")(q)).limit(int(k))
+        distance = cast(DocEmbedding.embedding.op("<=>")(q), Float)
+        stmt = select(DocEmbedding).order_by(distance).limit(int(k))
         with get_session() as session:
             return list(session.execute(stmt).scalars().all())
 
@@ -353,3 +363,142 @@ class PgDocEmbeddingStore:
         )
         with get_session() as session:
             return list(session.execute(stmt).scalars().all())
+
+
+class PgUserMemoryStore:
+    def upsert_items(self, rows: List[Dict[str, Any]]) -> int:
+        if not rows:
+            return 0
+        now = int(time.time())
+        count = 0
+        with get_session() as session:
+            grouped: Dict[tuple[str, str], List[Dict[str, Any]]] = {}
+            for r in rows:
+                user_id = str(r.get("user_id") or "")
+                kind = str(r.get("kind") or "")
+                if not user_id or not kind:
+                    continue
+                grouped.setdefault((user_id, kind), []).append(r)
+
+            existing_by_key: Dict[tuple[str, str, str], UserMemoryItem] = {}
+            for (user_id, kind), g in grouped.items():
+                hashes = [str(x.get("item_hash") or "") for x in g if str(x.get("item_hash") or "")]
+                if not hashes:
+                    continue
+                found = session.execute(
+                    select(UserMemoryItem).where(
+                        UserMemoryItem.user_id == user_id,
+                        UserMemoryItem.kind == kind,
+                        UserMemoryItem.item_hash.in_(hashes),
+                    )
+                ).scalars().all()
+                for it in found:
+                    if it.item_hash:
+                        existing_by_key[(str(it.user_id), str(it.kind), str(it.item_hash))] = it
+
+            for r in rows:
+                user_id = str(r.get("user_id") or "")
+                kind = str(r.get("kind") or "")
+                item_hash = str(r.get("item_hash") or "")
+                if not user_id or not kind or not item_hash:
+                    continue
+                key = (user_id, kind, item_hash)
+                subkind = r.get("subkind")
+                session_id = r.get("session_id")
+                text = str(r.get("text") or "")
+                embedding = list(r.get("embedding") or [])
+                metadata_json = r.get("metadata_json")
+                confidence_score = r.get("confidence_score")
+                last_verified_at = r.get("last_verified_at")
+
+                it = existing_by_key.get(key)
+                if it is None:
+                    it = UserMemoryItem(
+                        user_id=user_id,
+                        kind=kind,
+                        subkind=str(subkind) if subkind is not None else None,
+                        session_id=str(session_id) if session_id is not None else None,
+                        text=text,
+                        item_hash=item_hash,
+                        confidence_score=float(confidence_score) if confidence_score is not None else None,
+                        last_verified_at=int(last_verified_at) if last_verified_at is not None else None,
+                        created_at=now,
+                        updated_at=now,
+                        metadata_json=metadata_json,
+                    )
+                    session.add(it)
+                    session.flush()
+                    session.add(UserMemoryEmbedding(item_id=int(it.item_id), embedding=embedding))
+                else:
+                    it.subkind = str(subkind) if subkind is not None else it.subkind
+                    it.session_id = str(session_id) if session_id is not None else it.session_id
+                    it.text = text or it.text
+                    it.confidence_score = float(confidence_score) if confidence_score is not None else it.confidence_score
+                    it.last_verified_at = int(last_verified_at) if last_verified_at is not None else it.last_verified_at
+                    it.updated_at = now
+                    it.metadata_json = metadata_json if metadata_json is not None else it.metadata_json
+                    emb = session.get(UserMemoryEmbedding, int(it.item_id))
+                    if emb is None:
+                        session.add(UserMemoryEmbedding(item_id=int(it.item_id), embedding=embedding))
+                    else:
+                        emb.embedding = embedding
+                count += 1
+        return count
+
+    def delete_by_user(self, user_id: str, *, kind: Optional[str] = None, subkind: Optional[str] = None) -> int:
+        uid = str(user_id or "").strip()
+        if not uid:
+            return 0
+        with get_session() as session:
+            stmt = delete(UserMemoryItem).where(UserMemoryItem.user_id == uid)
+            if kind:
+                stmt = stmt.where(UserMemoryItem.kind == str(kind))
+            if subkind:
+                stmt = stmt.where(UserMemoryItem.subkind == str(subkind))
+            res = session.execute(stmt)
+            return int(res.rowcount or 0)
+
+    def dense_search(
+        self,
+        query_vec: List[float],
+        *,
+        user_id: str,
+        kind: str,
+        k: int,
+        subkind: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        uid = str(user_id or "").strip()
+        knd = str(kind or "").strip()
+        if not uid or not knd or not query_vec or k <= 0:
+            return []
+        q = bindparam("query_vec", value=list(query_vec), type_=Vector)
+        distance = cast(UserMemoryEmbedding.embedding.op("<=>")(q), Float)
+        stmt = (
+            select(UserMemoryItem, distance.label("distance"))
+            .join(UserMemoryEmbedding, UserMemoryEmbedding.item_id == UserMemoryItem.item_id)
+            .where(UserMemoryItem.user_id == uid, UserMemoryItem.kind == knd)
+        )
+        if subkind:
+            stmt = stmt.where(UserMemoryItem.subkind == str(subkind))
+        stmt = stmt.order_by(distance).limit(int(k))
+        with get_session() as session:
+            rows = session.execute(stmt).all()
+            out: List[Dict[str, Any]] = []
+            for it, dist in rows:
+                out.append(
+                    {
+                        "item_id": int(it.item_id),
+                        "user_id": str(it.user_id),
+                        "kind": str(it.kind),
+                        "subkind": it.subkind,
+                        "session_id": it.session_id,
+                        "text": it.text,
+                        "confidence_score": it.confidence_score,
+                        "last_verified_at": it.last_verified_at,
+                        "created_at": int(it.created_at),
+                        "updated_at": int(it.updated_at),
+                        "metadata_json": it.metadata_json,
+                        "distance": float(dist) if dist is not None else None,
+                    }
+                )
+            return out

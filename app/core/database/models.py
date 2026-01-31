@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, ForeignKey, Index, Integer, JSON, String, Text
+from sqlalchemy import BigInteger, ForeignKey, Index, Integer, JSON, String, Text, Float
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
 
@@ -21,6 +21,40 @@ class UserProfile(Base):
     profile_json: Mapped[dict] = mapped_column(JSON, nullable=False)  # 完整的画像 JSON 数据
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)  # 版本控制
     updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class UserMemoryItem(Base):
+    __tablename__ = "user_memory_item"
+
+    item_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    subkind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    session_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    item_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_verified_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    __table_args__ = (
+        Index("idx_user_memory_user_kind_updated", "user_id", "kind", "updated_at"),
+        Index("uq_user_memory_user_kind_hash", "user_id", "kind", "item_hash", unique=True),
+        Index("idx_user_memory_user_session", "user_id", "session_id"),
+    )
+
+
+class UserMemoryEmbedding(Base):
+    __tablename__ = "user_memory_embedding"
+
+    item_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("user_memory_item.item_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    embedding: Mapped[list[float]] = mapped_column(Vector, nullable=False)
 
 
 class ChatSession(Base):

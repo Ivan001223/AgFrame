@@ -24,6 +24,11 @@ from app.core.utils.text_split import split_text_by_chars
 DOC_VECTOR_STORE_PATH = os.path.join("data", "vector_store_docs_child")
 
 class RAGEngine:
+    """
+    RAG (Retrieval-Augmented Generation) 引擎核心类。
+    负责管理文档的摄取、切片、向量化存储以及检索增强。
+    支持多种文件格式，并集成了 OCR 能力。
+    """
     def __init__(self, persist_directory: str = DOC_VECTOR_STORE_PATH):
         self.persist_directory = persist_directory
         
@@ -50,6 +55,16 @@ class RAGEngine:
             self._vectorstore = None
 
     def load_documents(self, file_path: str) -> List[Document]:
+        """
+        根据文件扩展名加载文档内容。
+        支持 PDF/图片 (OCR), DOCX, XLSX, MD, TXT。
+        
+        Args:
+            file_path: 文件绝对路径
+            
+        Returns:
+            List[Document]: 加载的文档对象列表
+        """
         docs: List[Document] = []
         ext = os.path.splitext(file_path)[1].lower()
 
@@ -79,6 +94,7 @@ class RAGEngine:
         return docs
 
     def _persist_vectorstore(self) -> bool:
+        """持久化保存 FAISS 索引到磁盘"""
         ok = save_faiss(self.persist_directory, self._vectorstore)
         if not ok:
             print("保存向量存储失败")
@@ -86,8 +102,21 @@ class RAGEngine:
 
     def add_knowledge_base(self, file_path: str):
         """
-        将文件（PDF, DOCX, XLSX, MD, TXT, Images）摄取到向量存储中。
-        使用 DeepSeek-OCR 处理 PDF 和 图像。
+        将文件摄取到知识库中。
+        
+        流程：
+        1. 加载文档（文本或 OCR）。
+        2. 如果数据库可用，使用 Parent Retrieval 策略：
+           - 将大块父文档存入 MySQL。
+           - 将子切片存入 FAISS 向量库。
+        3. 如果数据库不可用，降级为普通向量存储模式（语义切分）。
+        4. 持久化向量索引。
+        
+        Args:
+            file_path: 文件路径
+            
+        Returns:
+            bool: 是否成功添加
         """
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"未找到文件: {file_path}")
@@ -111,12 +140,14 @@ class RAGEngine:
 
             parent_chunks: List[Dict[str, Any]] = []
             for d in docs:
+                # 父文档切分：较大粒度，保留更多上下文
                 parent_parts = split_text_by_chars(d.page_content, chunk_size=6000, overlap=400)
                 for p in parent_parts:
                     parent_chunks.append({"content": p, "page_num": d.metadata.get("page")})
 
             parent_ids = doc_store.insert_parent_chunks(doc_id, parent_chunks)
             for parent_id, parent in zip(parent_ids, parent_chunks):
+                # 子文档切分：较小粒度，用于精确向量检索
                 child_parts = split_text_by_chars(parent["content"], chunk_size=1400, overlap=120)
                 for idx, cp in enumerate(child_parts):
                     splits.append(
@@ -158,9 +189,19 @@ class RAGEngine:
     def retrieve_context(self, query: str, k: int = 3, fetch_k: int = 20) -> List[Document]:
         """
         检索查询的前 k 个相关文档。
+        
         流程:
-        1. 召回: 通过相似度搜索获取 fetch_k 个候选文档。
-        2. 重排: 使用 Qwen3-VL-Reranker 选出前 k 个结果。
+        1. 召回 (Recall): 使用 FAISS 进行相似度搜索，获取 fetch_k 个候选文档。
+        2. 重排 (Rerank): 使用 Reranker 模型对候选文档打分，选出前 k 个最相关的。
+        3. 还原 (Restore): 如果使用了 Parent Retrieval，返回对应的父文档块以提供更完整的上下文。
+        
+        Args:
+            query: 用户查询
+            k: 最终返回的文档数量
+            fetch_k: 初步召回的文档数量
+            
+        Returns:
+            List[Document]: 检索到的相关文档列表
         """
         try:
             if self._vectorstore is None:
@@ -185,6 +226,7 @@ class RAGEngine:
                     final_docs.append(doc)
                 return final_docs
 
+            # 3. 还原父文档上下文
             parent_scores: Dict[int, float] = {}
             parent_order: List[int] = []
             for _, score, idx in reranked_results:
@@ -224,7 +266,8 @@ class RAGEngine:
 
     def clear(self):
         """
-        清除向量存储（危险！）
+        清除向量存储（危险操作！）。
+        删除磁盘上的 FAISS 索引文件并重置内存中的实例。
         """
         try:
             if os.path.exists(self.persist_directory):
@@ -238,6 +281,7 @@ _rag_engine: Optional[RAGEngine] = None
 
 
 def get_rag_engine() -> RAGEngine:
+    """获取 RAGEngine 单例"""
     global _rag_engine
     if _rag_engine is None:
         _rag_engine = RAGEngine()

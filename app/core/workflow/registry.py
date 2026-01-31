@@ -1,0 +1,37 @@
+from __future__ import annotations
+
+from typing import Any, Awaitable, Callable, Dict, Optional, Union
+
+from app.core.workflow.state import AgentState
+
+NodeFn = Callable[[AgentState], Union[Dict[str, Any], Awaitable[Dict[str, Any]]]]
+
+
+class NodeRegistry:
+    def __init__(self) -> None:
+        self._nodes: Dict[str, NodeFn] = {}
+
+    def register(self, name: str, fn: NodeFn) -> None:
+        if name in self._nodes:
+            raise ValueError(f"Node already registered: {name}")
+        self._nodes[name] = fn
+
+    def get(self, name: str) -> NodeFn:
+        try:
+            return self._nodes[name]
+        except KeyError as e:
+            raise KeyError(f"Node not found: {name}") from e
+
+    def maybe_get(self, name: str) -> Optional[NodeFn]:
+        return self._nodes.get(name)
+
+
+node_registry = NodeRegistry()
+
+
+def register_node(name: str) -> Callable[[NodeFn], NodeFn]:
+    def decorator(fn: NodeFn) -> NodeFn:
+        node_registry.register(name, fn)
+        return fn
+
+    return decorator

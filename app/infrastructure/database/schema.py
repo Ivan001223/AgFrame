@@ -3,8 +3,8 @@ from __future__ import annotations
 import time
 from sqlalchemy import text
 
-from app.core.database.models import Base
-from app.core.database.orm import get_engine
+from app.infrastructure.database.models import Base
+from app.infrastructure.database.orm import get_engine
 
 
 def ensure_schema() -> None:

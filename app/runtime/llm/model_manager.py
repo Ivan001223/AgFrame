@@ -7,7 +7,7 @@ from typing import Any, Optional, Tuple, Type
 import torch
 from transformers import AutoModel, AutoProcessor
 
-from app.core.llm.model_importer import resolve_pretrained_source
+from app.runtime.llm.model_importer import resolve_pretrained_source
 
 def get_best_device() -> str:
     """获取当前环境可用的最佳计算设备 (cuda > mps > cpu)"""

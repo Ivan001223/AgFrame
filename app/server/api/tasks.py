@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from app.core.task_queue.redis_client import get_task
+from app.infrastructure.queue.redis_client import get_task
 
 router = APIRouter()
 

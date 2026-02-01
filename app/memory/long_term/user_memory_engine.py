@@ -6,9 +6,9 @@ from typing import Any, Dict, List, Optional
 
 from langchain_core.documents import Document
 
-from app.core.database.stores import PgUserMemoryStore
-from app.core.llm.embeddings import ModelEmbeddings
-from app.core.llm.reranker import ModelReranker
+from app.infrastructure.database.stores import PgUserMemoryStore
+from app.runtime.llm.embeddings import ModelEmbeddings
+from app.runtime.llm.reranker import ModelReranker
 
 
 def _sha256_hex(text: str) -> str:

@@ -1,6 +1,6 @@
 from typing import Dict, Any
 from fastapi import APIRouter
-from app.core.config.config_manager import config_manager
+from app.infrastructure.config.config_manager import config_manager
 
 router = APIRouter()
 

@@ -2,10 +2,10 @@ import uuid
 from typing import Dict, Any
 from fastapi import APIRouter, BackgroundTasks
 
-from app.core.database.history_manager import history_manager
-from app.core.database.schema import ensure_schema_if_possible
-from app.core.database.stores import MySQLConversationStore
-from app.core.services.memory_update_service import memory_update_service
+from app.infrastructure.database.history_manager import history_manager
+from app.infrastructure.database.schema import ensure_schema_if_possible
+from app.infrastructure.database.stores import MySQLConversationStore
+from app.memory.long_term.memory_update_service import memory_update_service
 
 router = APIRouter()
 

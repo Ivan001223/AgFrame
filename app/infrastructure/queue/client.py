@@ -6,7 +6,7 @@ from typing import Optional
 from arq import ArqRedis, create_pool
 from arq.connections import RedisSettings
 
-from app.core.config.config_manager import config_manager
+from app.infrastructure.config.config_manager import config_manager
 
 
 def _redis_settings() -> RedisSettings:

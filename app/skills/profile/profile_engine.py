@@ -4,9 +4,9 @@ import time
 import json
 from typing import Any, Dict, List, Optional
 
-from app.core.database.stores import MySQLProfileStore
-from app.core.llm.llm_factory import get_llm
-from app.core.utils.json_parser import parse_json_from_llm
+from app.infrastructure.database.stores import MySQLProfileStore
+from app.runtime.llm.llm_factory import get_llm
+from app.infrastructure.utils.json_parser import parse_json_from_llm
 
 
 def _default_profile() -> Dict[str, Any]:

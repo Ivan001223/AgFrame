@@ -8,13 +8,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from langserve import add_routes
 
-from app.core.workflow.graph import app as graph_app
-from app.core.database.schema import ensure_schema_if_possible
-from app.core.utils.logging import init_logging
-from app.core.observability import get_langfuse_callback
+from app.runtime.graph.graph import app as graph_app
+from app.infrastructure.database.schema import ensure_schema_if_possible
+from app.infrastructure.utils.logging import init_logging
+from app.infrastructure.observability import get_langfuse_callback
 
 # Import routers
-from app.api.routers import upload, tasks, settings, history, profile, vectorstore
+from app.server.api import upload, tasks, settings, history, profile, vectorstore
 
 
 @asynccontextmanager

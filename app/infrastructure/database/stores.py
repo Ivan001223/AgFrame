@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import bindparam, delete, select, update, func, cast, Float
 from pgvector.sqlalchemy import Vector
 
-from app.core.database.models import (
+from app.infrastructure.database.models import (
     ChatHistory,
     ChatSession,
     DocContent,
@@ -16,8 +16,8 @@ from app.core.database.models import (
     UserMemoryEmbedding,
     UserMemoryItem,
 )
-from app.core.database.orm import get_session
-from app.core.database.conversation_utils import derive_session_title, should_bump_updated_at
+from app.infrastructure.database.orm import get_session
+from app.infrastructure.database.conversation_utils import derive_session_title, should_bump_updated_at
 
 
 class MySQLConversationStore:

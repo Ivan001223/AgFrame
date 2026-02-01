@@ -4,7 +4,7 @@ from typing import Any, Dict
 
 from pydantic import BaseModel, Field
 
-from app.core.workflow.json_router import run_json_router
+from app.runtime.graph.json_router import run_json_router
 
 
 class MemoryRouteDecision(BaseModel):

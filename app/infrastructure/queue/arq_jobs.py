@@ -5,9 +5,9 @@ from typing import Any, Dict
 
 import anyio
 
-from app.core.services.rag_engine import get_rag_engine
-from app.core.task_queue.redis_client import update_task
-from app.core.utils.logging import bind_logger, get_logger
+from app.skills.rag.rag_engine import get_rag_engine
+from app.infrastructure.queue.redis_client import update_task
+from app.infrastructure.utils.logging import bind_logger, get_logger
 
 
 _log = get_logger("task_queue.arq_jobs")

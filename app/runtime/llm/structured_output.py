@@ -7,9 +7,9 @@ import anyio
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from pydantic import BaseModel
 
-from app.core.llm.llm_factory import get_llm
-from app.core.utils.json_parser import parse_json_from_llm
-from app.core.utils.message_utils import sanitize_messages_for_routing
+from app.runtime.llm.llm_factory import get_llm
+from app.infrastructure.utils.json_parser import parse_json_from_llm
+from app.infrastructure.utils.message_utils import sanitize_messages_for_routing
 
 T = TypeVar("T", bound=BaseModel)
 

@@ -6,11 +6,11 @@ import anyio
 import time
 from langchain_core.messages import BaseMessage
 
-from app.core.database.schema import ensure_schema_if_possible
-from app.core.services.user_memory_engine import UserMemoryEngine
-from app.core.utils.logging import bind_logger, get_logger
-from app.core.workflow.registry import register_node
-from app.core.workflow.state import AgentState
+from app.infrastructure.database.schema import ensure_schema_if_possible
+from app.memory.long_term.user_memory_engine import UserMemoryEngine
+from app.infrastructure.utils.logging import bind_logger, get_logger
+from app.runtime.graph.registry import register_node
+from app.runtime.graph.state import AgentState
 
 _log = get_logger("workflow.retrieve_profile")
 _memory_engine = UserMemoryEngine()

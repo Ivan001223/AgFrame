@@ -6,11 +6,11 @@ from langchain_core.messages import BaseMessage
 import anyio
 import time
 
-from app.core.config.config_manager import config_manager
-from app.core.services.rag_engine import get_rag_engine
-from app.core.workflow.registry import register_node
-from app.core.workflow.state import AgentState
-from app.core.utils.logging import bind_logger, get_logger
+from app.infrastructure.config.config_manager import config_manager
+from app.skills.rag.rag_engine import get_rag_engine
+from app.runtime.graph.registry import register_node
+from app.runtime.graph.state import AgentState
+from app.infrastructure.utils.logging import bind_logger, get_logger
 
 _log = get_logger("workflow.retrieve_docs")
 

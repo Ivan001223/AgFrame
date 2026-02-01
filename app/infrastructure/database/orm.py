@@ -8,7 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.config.config_manager import config_manager
+from app.infrastructure.config.config_manager import config_manager
 
 
 _engine: Optional[Engine] = None

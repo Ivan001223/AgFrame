@@ -6,10 +6,10 @@ ROOT = str(Path(__file__).resolve().parents[2])
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from app.core.database.schema import ensure_schema_if_possible
-from app.core.services.profile_engine import UserProfileEngine
-from app.core.services.prompt_builder import PromptBudget, build_system_prompt
-from app.core.services.user_memory_engine import UserMemoryEngine
+from app.infrastructure.database.schema import ensure_schema_if_possible
+from app.skills.profile.profile_engine import UserProfileEngine
+from app.runtime.prompts.prompt_builder import PromptBudget, build_system_prompt
+from app.memory.long_term.user_memory_engine import UserMemoryEngine
 
 
 def main():

@@ -1,7 +1,7 @@
 import mysql.connector
 from mysql.connector import pooling
 import time
-from app.core.config.config_manager import config_manager
+from app.infrastructure.config.config_manager import config_manager
 
 class DatabaseManager:
     """

@@ -1,7 +1,7 @@
 from typing import Dict, Any
 from pydantic import BaseModel, Field
 
-from app.core.workflow.json_router import run_json_router
+from app.runtime.graph.json_router import run_json_router
 
 class RouteDecision(BaseModel):
     """通用路由决策模型"""

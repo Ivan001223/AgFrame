@@ -7,11 +7,11 @@ from typing import Any, Dict, List, Optional, Tuple
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 
-from app.core.llm.embeddings import ModelEmbeddings
-from app.core.llm.llm_factory import get_llm
-from app.core.llm.reranker import ModelReranker
-from app.core.config.config_manager import config_manager
-from app.core.utils.faiss_store import load_faiss, save_faiss
+from app.runtime.llm.embeddings import ModelEmbeddings
+from app.runtime.llm.llm_factory import get_llm
+from app.runtime.llm.reranker import ModelReranker
+from app.infrastructure.config.config_manager import config_manager
+from app.memory.vector_stores.faiss_store import load_faiss, save_faiss
 
 
 CHAT_SUMMARY_STORE_BASE = os.path.join("data", "vector_store_chat_summary")

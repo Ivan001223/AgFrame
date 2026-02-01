@@ -7,11 +7,11 @@ from langchain_core.documents import Document
 from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import BaseModel, Field
 
-from app.core.config.config_manager import config_manager
-from app.core.llm.structured_output import StructuredOutputMode, invoke_structured
-from app.core.utils.logging import bind_logger, get_logger
-from app.core.workflow.registry import register_node
-from app.core.workflow.state import AgentState
+from app.infrastructure.config.config_manager import config_manager
+from app.runtime.llm.structured_output import StructuredOutputMode, invoke_structured
+from app.infrastructure.utils.logging import bind_logger, get_logger
+from app.runtime.graph.registry import register_node
+from app.runtime.graph.state import AgentState
 
 _log = get_logger("workflow.grader")
 

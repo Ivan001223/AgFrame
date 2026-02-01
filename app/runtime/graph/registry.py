@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable, Dict, Optional, Union
 
-from app.core.workflow.state import AgentState
+from app.runtime.graph.state import AgentState
 
 NodeFn = Callable[[AgentState], Union[Dict[str, Any], Awaitable[Dict[str, Any]]]]
 

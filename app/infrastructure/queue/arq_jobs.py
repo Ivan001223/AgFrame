@@ -13,7 +13,9 @@ from app.infrastructure.utils.logging import bind_logger, get_logger
 _log = get_logger("task_queue.arq_jobs")
 
 
-async def ingest_pdf(ctx: Dict[str, Any], task_id: str, file_path: str) -> bool:
+async def ingest_pdf(
+    ctx: Dict[str, Any], task_id: str, file_path: str, user_id: str = None
+) -> bool:
     logger = bind_logger(_log, session_id=task_id, node="ingest_pdf")
     started_at = int(time.time())
     await update_task(
@@ -25,12 +27,20 @@ async def ingest_pdf(ctx: Dict[str, Any], task_id: str, file_path: str) -> bool:
             "started_at": started_at,
             "message": "开始处理",
             "error": "",
+            "user_id": user_id or "unknown",
         },
     )
 
     try:
-        await update_task(task_id, {"progress": 5, "step": "ingest", "message": "开始摄取"})
-        ok = await anyio.to_thread.run_sync(lambda: bool(get_rag_engine().add_knowledge_base(file_path)))
+        await update_task(
+            task_id, {"progress": 5, "step": "ingest", "message": "开始摄取"}
+        )
+        # 传递 user_id 给 RAG 引擎
+        ok = await anyio.to_thread.run_sync(
+            lambda: bool(
+                get_rag_engine().add_knowledge_base(file_path, user_id=user_id)
+            )
+        )
         finished_at = int(time.time())
         if ok:
             await update_task(
@@ -72,4 +82,3 @@ async def ingest_pdf(ctx: Dict[str, Any], task_id: str, file_path: str) -> bool:
         )
         logger.exception("task exception file_path=%s", file_path)
         return False
-

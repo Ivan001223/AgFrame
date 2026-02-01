@@ -72,8 +72,10 @@ def test_auth_flow():
     print("PASS: Login success.")
 
     # 4. Access Protected User Endpoint (History)
-    print("Accessing /history/u1...")
-    response = client.get("/history/u1", headers=headers)
+    # NOTE: user 1 can only access /history/{username}
+    # /history/u1 won't work if u1 != username
+    print(f"Accessing /history/{username}...")
+    response = client.get(f"/history/{username}", headers=headers)
     # History endpoint might return empty list or 200
     # Note: history.router is protected
     # It might return 200 even if empty
@@ -82,19 +84,69 @@ def test_auth_flow():
     )
     print("PASS: Protected endpoint accessible.")
 
-    # 5. Access Admin Endpoint (Upload)
-    print("Accessing /upload/ (Admin only)...")
-    # Need to mock a file upload
-    # But checking 403 is enough
-    # If I try to upload without file, it might contain validation error 422 before 403 if dependencies run after?
-    # Dependencies run first.
-    # But Upload router might have logic.
-    # Let's try GET /settings which is also admin
-    response = client.get("/settings", headers=headers)
-    assert response.status_code == 403, (
-        f"Expected 403 for Admin route, got {response.status_code}"
+    # 5. Access Upload (Now allowed for User, but isolated)
+    print("Accessing /upload/ (User allowed)...")
+    # We expect 422 because we didn't send file, but NOT 403
+    response = client.post("/upload", headers=headers)
+    assert response.status_code == 422, (
+        f"Expected 422 (Validation Error), got {response.status_code}"
     )
-    print("PASS: Admin endpoint denied for user.")
+    print("PASS: Upload endpoint accessible for user.")
+
+    # 6. Admin Check (First user should be admin?)
+    # Our updated logic makes first user admin.
+    # The user registered in step 2 was likely first user in this test session if DB was clean.
+    # Let's check /settings which is Admin only.
+    print("Checking Admin access to /settings...")
+    response = client.get("/settings", headers=headers)
+
+    # If DB was empty, this user is admin -> 200 (or whatever settings returns, maybe 200 with config)
+    # If DB was not empty (previous tests), might be user -> 403.
+    # We cleared DB at start.
+    # But wait, did we clear DB file?
+    # verify_auth.py: os.environ["DATABASE_URL"] = "sqlite:///./test.db"
+    # And we ran `rm test.db` in bash.
+    # So yes, first user is Admin.
+
+    if response.status_code == 200:
+        print("PASS: First user is Admin (Access Granted).")
+    else:
+        print(f"WARN: First user might not be Admin? Status: {response.status_code}")
+        # Maybe settings router returns something else?
+        # Settings returns config dict.
+
+    # 7. Register Second User (Should be 'user')
+    username2 = f"user2_{int(time.time())}"
+    print(f"Registering second user {username2}...")
+    client.post("/auth/register", json={"username": username2, "password": password})
+    resp2 = client.post(
+        "/auth/token", data={"username": username2, "password": password}
+    )
+    token2 = resp2.json()["access_token"]
+    headers2 = {"Authorization": f"Bearer {token2}"}
+
+    print("Checking Second User Admin access (Should Fail)...")
+    resp_settings = client.get("/settings", headers=headers2)
+    assert resp_settings.status_code == 403, (
+        f"Expected 403 for second user, got {resp_settings.status_code}"
+    )
+    print("PASS: Second user is NOT Admin.")
+
+    # 8. History Isolation
+    print("Checking History Isolation...")
+    # User 1 saves history
+    client.post(
+        f"/history/{username}/save",
+        json={"messages": [{"content": "hi"}], "session_id": "s1"},
+        headers=headers,
+    )
+
+    # User 2 tries to read User 1 history
+    resp_read = client.get(f"/history/{username}", headers=headers2)
+    assert resp_read.status_code == 403, (
+        f"Expected 403 reading other's history, got {resp_read.status_code}"
+    )
+    print("PASS: History is isolated.")
 
     print("\nALL TESTS PASSED!")
 

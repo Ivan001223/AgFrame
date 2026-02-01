@@ -1,0 +1,49 @@
+import uuid
+from typing import Dict, Any
+from fastapi import APIRouter, BackgroundTasks
+
+from app.core.database.history_manager import history_manager
+from app.core.database.schema import ensure_schema_if_possible
+from app.core.database.stores import MySQLConversationStore
+from app.core.services.memory_update_service import memory_update_service
+
+router = APIRouter()
+
+
+# 历史记录
+@router.get("/history/{user_id}")
+async def get_history(user_id: str):
+    if ensure_schema_if_possible():
+        store = MySQLConversationStore()
+        return {"history": store.list_sessions(user_id)}
+    return {"history": history_manager.get_history(user_id)}
+
+
+@router.post("/history/{user_id}/save")
+async def save_history(
+    user_id: str, payload: Dict[str, Any], background_tasks: BackgroundTasks
+):
+    session_id = payload.get("session_id") or str(uuid.uuid4())
+    messages = payload.get("messages") or []
+    title = payload.get("title")
+
+    if not ensure_schema_if_possible():
+        return history_manager.save_session(user_id, session_id, messages, title)
+
+    store = MySQLConversationStore()
+    saved = store.save_session(user_id, session_id, messages, title)
+    background_tasks.add_task(
+        memory_update_service.update_after_save, user_id, session_id, messages
+    )
+
+    return saved
+
+
+@router.delete("/history/{user_id}/{session_id}")
+async def delete_history(user_id: str, session_id: str):
+    if ensure_schema_if_possible():
+        store = MySQLConversationStore()
+        store.delete_session(user_id, session_id)
+    else:
+        history_manager.delete_session(user_id, session_id)
+    return {"message": "Deleted"}

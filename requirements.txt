@@ -48,6 +48,11 @@ tiktoken
 redis
 arq
 
+# Auth & Security
+passlib[bcrypt]
+pyjwt
+fastapi-limiter
+
 # UI
 streamlit
 mysql-connector-python

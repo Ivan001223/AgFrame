@@ -19,16 +19,11 @@ async def upload_documents(
     files: List[UploadFile] = File(...),
     current_user: Annotated[User, Depends(get_current_active_user)] = None,
 ):
-    upload_dir = "data/documents"
-    os.makedirs(upload_dir, exist_ok=True)
-
-    results = []
-
-    # 允许普通用户上传，因为数据现在是隔离的
-    # 如果希望限制 admin，在 main.py 或这里加 Depends(get_current_admin_user)
-    # 根据用户需求：“上传的文件等都应该由用户来管理” -> 普通用户可以上传
-
     user_id = current_user.username if current_user else "unknown"
+
+    # 物理路径隔离：data/documents/{user_id}/
+    upload_dir = os.path.join("data/documents", user_id)
+    os.makedirs(upload_dir, exist_ok=True)
 
     for file in files:
         original_name = os.path.basename(file.filename or "")
@@ -84,7 +79,8 @@ async def upload_image(
 ):
     # Image upload logic usually for quick OCR or multimodal,
     # not necessarily RAG ingestion. But could verify user.
-    uploads_dir = "data/uploads"
+    user_id = current_user.username if current_user else "unknown"
+    uploads_dir = os.path.join("data/uploads", user_id)
     os.makedirs(uploads_dir, exist_ok=True)
 
     original_name = os.path.basename(file.filename or "")

@@ -150,9 +150,7 @@ app.mount("/uploads", StaticFiles(directory="data/uploads"), name="uploads")
 app.include_router(auth.router)
 app.include_router(upload.router)  # 移除 admin 限制，内部已根据 user 隔离
 app.include_router(tasks.router)
-app.include_router(
-    settings.router, dependencies=[Depends(get_current_admin_user)]
-)  # Admin 配置
+app.include_router(settings.router)  # 内部已处理 Admin 限制
 app.include_router(history.router, dependencies=[Depends(get_current_active_user)])
 app.include_router(profile.router, dependencies=[Depends(get_current_active_user)])
 app.include_router(vectorstore.router, dependencies=[Depends(get_current_admin_user)])

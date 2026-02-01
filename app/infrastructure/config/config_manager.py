@@ -3,12 +3,14 @@ import json
 from typing import Dict, Any, Optional
 from app.infrastructure.config.env import init_env
 
+
 class ConfigManager:
     """
     配置管理器（单例模式）。
     负责加载、合并和提供全局配置信息。
     支持从 config.json 文件加载，并回退到默认值和环境变量。
     """
+
     _instance = None
     CONFIG_FILE = os.path.join("configs", "config.json")
 
@@ -24,7 +26,7 @@ class ConfigManager:
         self.config = self._load_from_file() or self._load_defaults()
         defaults = self._load_defaults()
         self._deep_merge(self.config, defaults)
-        
+
     def _load_defaults(self) -> Dict[str, Any]:
         """加载默认配置结构，优先使用环境变量"""
         return {
@@ -32,15 +34,26 @@ class ConfigManager:
                 "api_key": os.getenv("LLM_API_KEY", os.getenv("OPENAI_API_KEY", "")),
                 "base_url": os.getenv("LLM_BASE_URL", "https://api.openai.com/v1"),
                 "model": os.getenv("LLM_MODEL", "gpt-4o"),
-                "structured_output_mode": os.getenv("LLM_STRUCTURED_OUTPUT_MODE", "native_first"),
-                "json_mode_response_format": os.getenv("LLM_JSON_MODE_RESPONSE_FORMAT", "true").lower() == "true",
+                "structured_output_mode": os.getenv(
+                    "LLM_STRUCTURED_OUTPUT_MODE", "native_first"
+                ),
+                "json_mode_response_format": os.getenv(
+                    "LLM_JSON_MODE_RESPONSE_FORMAT", "true"
+                ).lower()
+                == "true",
             },
             "model_manager": {
                 "provider": os.getenv("MODEL_MANAGER_PROVIDER", "modelscope"),
                 "cache_dir": os.getenv("MODEL_MANAGER_CACHE_DIR", ""),
                 "revision": os.getenv("MODEL_MANAGER_REVISION", ""),
-                "trust_remote_code": os.getenv("MODEL_MANAGER_TRUST_REMOTE_CODE", "true").lower() == "true",
-                "modelscope_fallback_to_hf": os.getenv("MODELSCOPE_FALLBACK_TO_HF", "true").lower() == "true",
+                "trust_remote_code": os.getenv(
+                    "MODEL_MANAGER_TRUST_REMOTE_CODE", "true"
+                ).lower()
+                == "true",
+                "modelscope_fallback_to_hf": os.getenv(
+                    "MODELSCOPE_FALLBACK_TO_HF", "true"
+                ).lower()
+                == "true",
             },
             "local_models": {
                 "ocr_model": os.getenv("MODEL_PATH_OCR", ""),
@@ -56,7 +69,8 @@ class ConfigManager:
                 "batch_size": int(os.getenv("EMBEDDINGS_BATCH_SIZE", "32")),
                 "max_length": int(os.getenv("EMBEDDINGS_MAX_LENGTH", "512")),
                 "pooling": os.getenv("EMBEDDINGS_POOLING", "mean"),
-                "normalize": os.getenv("EMBEDDINGS_NORMALIZE", "true").lower() == "true",
+                "normalize": os.getenv("EMBEDDINGS_NORMALIZE", "true").lower()
+                == "true",
                 "query_prefix": os.getenv("EMBEDDINGS_QUERY_PREFIX", ""),
                 "doc_prefix": os.getenv("EMBEDDINGS_DOC_PREFIX", ""),
             },
@@ -72,7 +86,9 @@ class ConfigManager:
                 "doc_prefix": os.getenv("RERANKER_DOC_PREFIX", ""),
                 "window_size": None,
                 "stride": None,
-                "transformers_model_type": os.getenv("RERANKER_TRANSFORMERS_MODEL_TYPE", "auto"),
+                "transformers_model_type": os.getenv(
+                    "RERANKER_TRANSFORMERS_MODEL_TYPE", "auto"
+                ),
             },
             "search": {
                 "provider": os.getenv("SEARCH_PROVIDER", "duckduckgo"),
@@ -85,14 +101,21 @@ class ConfigManager:
                 "port": int(os.getenv("DB_PORT", 5432)),
                 "user": os.getenv("DB_USER", "postgres"),
                 "password": os.getenv("DB_PASSWORD", "password"),
-                "db_name": os.getenv("DB_NAME", "agent_app")
+                "db_name": os.getenv("DB_NAME", "agent_app"),
             },
             "queue": {
                 "redis_url": os.getenv("REDIS_URL", "redis://localhost:6379/0"),
             },
-            "general": {
-                "app_name": os.getenv("APP_NAME", "My Agent App")
+            "auth": {
+                "secret_key": os.getenv(
+                    "AUTH_SECRET_KEY", "your-secret-key-keep-it-secret"
+                ),
+                "algorithm": os.getenv("AUTH_ALGORITHM", "HS256"),
+                "access_token_expire_minutes": int(
+                    os.getenv("AUTH_ACCESS_TOKEN_EXPIRE_MINUTES", "30")
+                ),
             },
+            "general": {"app_name": os.getenv("APP_NAME", "My Agent App")},
             "rag": {
                 "retrieval": {
                     "mode": os.getenv("RAG_RETRIEVAL_MODE", "hybrid"),
@@ -109,24 +132,51 @@ class ConfigManager:
             },
             "prompt": {
                 "budget": {
-                    "max_recent_history_lines": int(os.getenv("PROMPT_MAX_RECENT_HISTORY_LINES", "10")),
+                    "max_recent_history_lines": int(
+                        os.getenv("PROMPT_MAX_RECENT_HISTORY_LINES", "10")
+                    ),
                     "max_docs": int(os.getenv("PROMPT_MAX_DOCS", "3")),
                     "max_memories": int(os.getenv("PROMPT_MAX_MEMORIES", "3")),
-                    "max_doc_chars_total": int(os.getenv("PROMPT_MAX_DOC_CHARS_TOTAL", "6000")),
-                    "max_memory_chars_total": int(os.getenv("PROMPT_MAX_MEMORY_CHARS_TOTAL", "3000")),
+                    "max_doc_chars_total": int(
+                        os.getenv("PROMPT_MAX_DOC_CHARS_TOTAL", "6000")
+                    ),
+                    "max_memory_chars_total": int(
+                        os.getenv("PROMPT_MAX_MEMORY_CHARS_TOTAL", "3000")
+                    ),
                     "max_item_chars": int(os.getenv("PROMPT_MAX_ITEM_CHARS", "2000")),
                 }
             },
             "nodes": {
-                "enabled": ["router", "retrieve_docs", "rerank_docs", "retrieve_memories", "assemble", "generate"]
+                "enabled": [
+                    "router",
+                    "retrieve_docs",
+                    "rerank_docs",
+                    "retrieve_memories",
+                    "assemble",
+                    "generate",
+                ]
             },
             "feature_flags": {
-                "enable_docs_rag": os.getenv("ENABLE_DOCS_RAG", "true").lower() == "true",
-                "enable_chat_memory": os.getenv("ENABLE_CHAT_MEMORY", "true").lower() == "true",
-                "enable_self_correction": os.getenv("ENABLE_SELF_CORRECTION", "true").lower() == "true",
-                "allow_dangerous_deserialization": os.getenv("ALLOW_DANGEROUS_DESERIALIZATION", "false").lower() == "true",
-                "enable_tools_write_file": os.getenv("ENABLE_TOOLS_WRITE_FILE", "false").lower() == "true",
-                "enable_tools_python_repl": os.getenv("ENABLE_TOOLS_PYTHON_REPL", "false").lower() == "true",
+                "enable_docs_rag": os.getenv("ENABLE_DOCS_RAG", "true").lower()
+                == "true",
+                "enable_chat_memory": os.getenv("ENABLE_CHAT_MEMORY", "true").lower()
+                == "true",
+                "enable_self_correction": os.getenv(
+                    "ENABLE_SELF_CORRECTION", "true"
+                ).lower()
+                == "true",
+                "allow_dangerous_deserialization": os.getenv(
+                    "ALLOW_DANGEROUS_DESERIALIZATION", "false"
+                ).lower()
+                == "true",
+                "enable_tools_write_file": os.getenv(
+                    "ENABLE_TOOLS_WRITE_FILE", "false"
+                ).lower()
+                == "true",
+                "enable_tools_python_repl": os.getenv(
+                    "ENABLE_TOOLS_PYTHON_REPL", "false"
+                ).lower()
+                == "true",
             },
             "self_correction": {
                 "max_attempts": int(os.getenv("SELF_CORRECTION_MAX_ATTEMPTS", "2")),
@@ -165,7 +215,11 @@ class ConfigManager:
     def _recursive_update(self, target: Dict, source: Dict):
         """递归更新目标字典"""
         for key, value in source.items():
-            if isinstance(value, dict) and key in target and isinstance(target[key], dict):
+            if (
+                isinstance(value, dict)
+                and key in target
+                and isinstance(target[key], dict)
+            ):
                 self._recursive_update(target[key], value)
             else:
                 target[key] = value
@@ -173,9 +227,10 @@ class ConfigManager:
     def _save_to_file(self):
         """保存配置到 config.json"""
         try:
-            with open(self.CONFIG_FILE, 'w', encoding='utf-8') as f:
+            with open(self.CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(self.config, f, indent=2, ensure_ascii=False)
         except Exception as e:
             print(f"保存配置文件失败：{e}")
+
 
 config_manager = ConfigManager()

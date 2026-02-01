@@ -10,9 +10,10 @@ from app.infrastructure.database.orm import get_engine
 def ensure_schema() -> None:
     """初始化数据库表结构 (create_all)"""
     engine = get_engine()
-    with engine.connect() as conn:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        conn.commit()
+    if engine.dialect.name == "postgresql":
+        with engine.connect() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            conn.commit()
     Base.metadata.create_all(bind=engine)
 
 
@@ -20,21 +21,22 @@ _db_ready_cache = None
 _last_check_time = 0
 CHECK_INTERVAL = 30  # seconds
 
+
 def is_database_ready() -> bool:
     """检查数据库连接是否可用（带简单缓存）"""
     global _db_ready_cache, _last_check_time
-    
+
     # 如果缓存有效且是 True，直接返回
     if _db_ready_cache is True and (time.time() - _last_check_time < CHECK_INTERVAL):
         return True
-        
+
     try:
         # 复用 get_engine() 单例
         engine = get_engine()
         # 尝试快速连接检查
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
-        
+
         _db_ready_cache = True
         _last_check_time = time.time()
         return True
@@ -47,7 +49,7 @@ def is_database_ready() -> bool:
 def ensure_schema_if_possible() -> bool:
     """
     如果数据库可用，则确保表结构已创建。
-    
+
     Returns:
         bool: 数据库是否可用且初始化成功
     """

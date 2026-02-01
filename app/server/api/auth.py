@@ -133,15 +133,17 @@ async def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Username already registered")
 
     hashed_password = get_password_hash(user_in.password)
-    # 默认第一个注册的是 admin (简化逻辑)，或者硬编码
-    # 这里简单起见，默认 user，如果想测试 admin，需手动改数据库或增加 admin_token
-    # 为了演示，如果数据库是空的，或者是第一个用户，设为 admin?
-    # 不，先默认 user。可通过 header 或 secret code 注册 admin (ToDo)
+
+    # 检查是否是第一个用户
+    count_stmt = select(User).limit(1)
+    first_user = db.execute(count_stmt).scalar_one_or_none()
+
+    role = "admin" if first_user is None else "user"
 
     new_user = User(
         username=user_in.username,
         hashed_password=hashed_password,
-        role="user",
+        role=role,
         is_active=True,
         created_at=int(time.time()),
     )

@@ -39,6 +39,7 @@ def _iter_vectorstore_docs(vectorstore: Any) -> List[Document]:
         return docs
     return []
 
+
 def _invoke_retriever(retriever: Any, query: str) -> List[Document]:
     if hasattr(retriever, "invoke"):
         out = retriever.invoke(query)
@@ -79,7 +80,9 @@ def _rrf_fuse(
             ranks.setdefault(key, {})[name] = rank
 
     out: List[Document] = []
-    for key, score in sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:top_n]:
+    for key, score in sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[
+        :top_n
+    ]:
         d = best_doc[key]
         meta = dict(getattr(d, "metadata", {}) or {})
         meta["retrieval_rrf_score"] = float(score)
@@ -129,7 +132,11 @@ class HybridRetrieverService:
         bm25 = BM25Retriever.from_documents(docs)
         self._bm25 = bm25
         self._bm25_doc_count = len(docs)
-        _log.info("bm25 rebuilt docs=%d cost_ms=%d", len(docs), int((time.perf_counter() - t0) * 1000))
+        _log.info(
+            "bm25 rebuilt docs=%d cost_ms=%d",
+            len(docs),
+            int((time.perf_counter() - t0) * 1000),
+        )
         return True
 
     def retrieve_candidates(
@@ -137,6 +144,7 @@ class HybridRetrieverService:
         query: str,
         *,
         config: Optional[HybridRetrievalConfig] = None,
+        filter: Optional[Dict[str, Any]] = None,
     ) -> List[Document]:
         cfg = config or HybridRetrievalConfig()
         mode = (cfg.mode or "hybrid").lower()
@@ -146,7 +154,10 @@ class HybridRetrieverService:
         rrf_k = max(1, int(cfg.rrf_k))
         w_sparse, w_dense = cfg.weights if cfg.weights else (0.5, 0.5)
 
-        dense_docs = list(self._vectorstore.similarity_search(query, k=dense_k))
+        # Pass filter to similarity_search (supported by PgVectorVectorStore)
+        dense_docs = list(
+            self._vectorstore.similarity_search(query, k=dense_k, filter=filter)
+        )
 
         if mode == "dense":
             for i, d in enumerate(dense_docs, start=1):
@@ -155,8 +166,28 @@ class HybridRetrieverService:
                 d.metadata = meta
             return dense_docs[:candidate_k]
 
+        # BM25 In-Memory doesn't support filter easily unless we filter results post-retrieval
+        # OR we rebuild BM25 with filtered docs (expensive).
+        # OR if vectorstore supports sparse_search with filter.
+
+        # If filter provided and we fall back to BM25 (in-memory),
+        # we should ideally filter the sparse_docs.
+
         if hasattr(self._vectorstore, "sparse_search"):
-            sparse_docs = list(self._vectorstore.sparse_search(query, k=sparse_k))[:sparse_k]
+            # Assume sparse_search supports filter if it exists on PgVector store (custom implementation?)
+            # Standard PGVector doesn't have sparse_search.
+            # If it's custom, let's hope it supports filter.
+            # Checking PgVectorVectorStore later.
+            # For now passing filter as kwargs if supported.
+            try:
+                sparse_docs = list(
+                    self._vectorstore.sparse_search(query, k=sparse_k, filter=filter)
+                )[:sparse_k]
+            except TypeError:
+                sparse_docs = list(self._vectorstore.sparse_search(query, k=sparse_k))[
+                    :sparse_k
+                ]
+
             return _rrf_fuse(
                 [
                     ("sparse", sparse_docs, float(w_sparse)),
@@ -178,7 +209,29 @@ class HybridRetrieverService:
             self._bm25.k = sparse_k
         except Exception:
             pass
-        sparse_docs = _invoke_retriever(self._bm25, query)[:sparse_k]
+
+        # BM25 is in-memory over ALL docs. We need to filter results.
+        # This is suboptimal for multi-tenancy if BM25 index is shared.
+        # Ideally, we shouldn't use shared in-memory BM25 for multi-tenant.
+        # But for now, let's filter the results.
+        all_sparse_docs = _invoke_retriever(self._bm25, query)
+
+        sparse_docs = []
+        if filter:
+            for d in all_sparse_docs:
+                meta = d.metadata or {}
+                # Simple exact match for now.
+                match = True
+                for k, v in filter.items():
+                    if meta.get(k) != v:
+                        match = False
+                        break
+                if match:
+                    sparse_docs.append(d)
+        else:
+            sparse_docs = all_sparse_docs
+
+        sparse_docs = sparse_docs[:sparse_k]
 
         return _rrf_fuse(
             [

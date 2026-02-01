@@ -132,9 +132,7 @@ class ChatHistory(Base):
 
     __tablename__ = "chat_history"
 
-    msg_id: Mapped[int] = mapped_column(
-        BigInteger, primary_key=True, autoincrement=True
-    )
+    msg_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(
         String(128),
         ForeignKey("chat_session.session_id", ondelete="CASCADE"),

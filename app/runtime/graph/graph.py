@@ -4,17 +4,17 @@ from typing import Any, Literal
 
 from langgraph.graph import StateGraph, END
 
-from app.core.config.config_manager import config_manager
-from app.core.workflow.nodes.assemble_prompt import assemble_prompt_node
-from app.core.workflow.nodes.grader import grader_node
-from app.core.workflow.nodes.generate import generate_node
-from app.core.workflow.nodes.retrieve_docs import retrieve_docs_node
-from app.core.workflow.nodes.rerank_docs import rerank_docs_node
-from app.core.workflow.nodes.retrieve_memories import retrieve_memories_node
-from app.core.workflow.nodes.retrieve_profile import retrieve_profile_node
-from app.core.workflow.nodes.router import router_node
-from app.core.workflow.nodes.web_search import web_search_node
-from app.core.workflow.state import AgentState
+from app.infrastructure.config.config_manager import config_manager
+from app.skills.common.assemble_prompt import assemble_prompt_node
+from app.skills.common.grader import grader_node
+from app.skills.common.generate import generate_node
+from app.skills.rag.retrieve_docs import retrieve_docs_node
+from app.skills.rag.rerank_docs import rerank_docs_node
+from app.skills.memory.retrieve_memories import retrieve_memories_node
+from app.skills.profile.retrieve_profile import retrieve_profile_node
+from app.skills.common.router import router_node
+from app.skills.research.web_search import web_search_node
+from app.runtime.graph.state import AgentState
 
 
 def _route_key(state: AgentState) -> Literal["none", "docs", "history", "both"]:

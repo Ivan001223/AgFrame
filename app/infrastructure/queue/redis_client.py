@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 
 from redis.asyncio import Redis
 
-from app.core.config.config_manager import config_manager
+from app.infrastructure.config.config_manager import config_manager
 
 
 def _get_redis_url() -> str:

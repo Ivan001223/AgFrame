@@ -4,9 +4,9 @@ import time
 from typing import List
 
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from app.core.task_queue.client import enqueue_ingest_pdf
-from app.core.task_queue.redis_client import init_task
-from app.core.services.ocr_engine import ocr_engine
+from app.infrastructure.queue.client import enqueue_ingest_pdf
+from app.infrastructure.queue.redis_client import init_task
+from app.skills.ocr.ocr_engine import ocr_engine
 
 router = APIRouter()
 

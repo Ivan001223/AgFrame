@@ -2,15 +2,15 @@ import torch
 from typing import List, Optional
 from langchain_core.embeddings import Embeddings
 
-from app.core.config.config_manager import config_manager
-from app.core.llm.component_loader import (
+from app.infrastructure.config.config_manager import config_manager
+from app.runtime.llm.component_loader import (
     load_sentence_transformers_embedder,
     load_transformers_model,
     load_transformers_tokenizer,
     resolve_pretrained_source_for_spec,
     try_load_transformers_processor,
 )
-from app.core.llm.model_manager import (
+from app.runtime.llm.model_manager import (
     build_model_spec,
     get_best_device,
 )

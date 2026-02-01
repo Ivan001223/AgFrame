@@ -5,14 +5,14 @@ from typing import Any, Dict, List
 import anyio
 import time
 
-from app.core.config.config_manager import config_manager
-from app.core.database.schema import ensure_schema_if_possible
-from app.core.database.stores import MySQLConversationStore
-from app.core.services.prompt_builder import PromptBudget, build_system_prompt
-from app.core.services.profile_engine import UserProfileEngine
-from app.core.utils.logging import bind_logger, get_logger
-from app.core.workflow.registry import register_node
-from app.core.workflow.state import AgentState
+from app.infrastructure.config.config_manager import config_manager
+from app.infrastructure.database.schema import ensure_schema_if_possible
+from app.infrastructure.database.stores import MySQLConversationStore
+from app.runtime.prompts.prompt_builder import PromptBudget, build_system_prompt
+from app.skills.profile.profile_engine import UserProfileEngine
+from app.infrastructure.utils.logging import bind_logger, get_logger
+from app.runtime.graph.registry import register_node
+from app.runtime.graph.state import AgentState
 
 _profile_engine = UserProfileEngine()
 _log = get_logger("workflow.assemble_prompt")

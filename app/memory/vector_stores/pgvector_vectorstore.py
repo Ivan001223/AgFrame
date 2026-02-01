@@ -4,8 +4,8 @@ from typing import List
 
 from langchain_core.documents import Document
 
-from app.core.database.stores import PgDocEmbeddingStore
-from app.core.llm.embeddings import ModelEmbeddings
+from app.infrastructure.database.stores import PgDocEmbeddingStore
+from app.runtime.llm.embeddings import ModelEmbeddings
 
 
 class PgVectorVectorStore:

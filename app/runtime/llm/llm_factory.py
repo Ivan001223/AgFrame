@@ -1,6 +1,6 @@
 from langchain_openai import ChatOpenAI
-from app.core.config.config_manager import config_manager
-from app.core.llm.local_qwen import LocalQwen2VL
+from app.infrastructure.config.config_manager import config_manager
+from app.runtime.llm.local_qwen import LocalQwen2VL
 
 # 全局单例，避免重复加载模型
 _local_qwen_instance = None

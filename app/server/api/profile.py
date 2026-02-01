@@ -1,6 +1,6 @@
 from fastapi import APIRouter
-from app.core.database.schema import ensure_schema_if_possible
-from app.core.services.profile_engine import UserProfileEngine
+from app.infrastructure.database.schema import ensure_schema_if_possible
+from app.skills.profile.profile_engine import UserProfileEngine
 
 router = APIRouter()
 

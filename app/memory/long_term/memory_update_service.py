@@ -3,11 +3,11 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List
 
-from app.core.database.schema import ensure_schema_if_possible
-from app.core.database.stores import MySQLConversationStore
-from app.core.services.chat_memory_engine import split_messages_for_memory, summarize_chat_messages
-from app.core.services.profile_engine import UserProfileEngine, incremental_update_profile, extract_base_profile
-from app.core.services.user_memory_engine import UserMemoryEngine
+from app.infrastructure.database.schema import ensure_schema_if_possible
+from app.infrastructure.database.stores import MySQLConversationStore
+from app.memory.long_term.chat_memory_engine import split_messages_for_memory, summarize_chat_messages
+from app.skills.profile.profile_engine import UserProfileEngine, incremental_update_profile, extract_base_profile
+from app.memory.long_term.user_memory_engine import UserMemoryEngine
 
 
 class MemoryUpdateService:

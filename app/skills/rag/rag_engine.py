@@ -9,18 +9,18 @@ from langchain_experimental.text_splitter import SemanticChunker
 from langchain_core.documents import Document
 
 # 自定义本地模型
-from app.core.llm.embeddings import ModelEmbeddings
-from app.core.llm.reranker import ModelReranker
-from app.core.services.ocr_engine import ocr_engine
-from app.core.database.schema import ensure_schema_if_possible
-from app.core.database.orm import get_session
-from app.core.database.models import DocContent, DocEmbedding, Document as DocumentRow
-from app.core.database.stores import MySQLDocStore, PgDocEmbeddingStore
-from app.core.config.config_manager import config_manager
-from app.core.services.hybrid_retriever_service import HybridRetrieverService, HybridRetrievalConfig
-from app.core.services.pgvector_vectorstore import PgVectorVectorStore
-from app.core.utils.files import sha256_file
-from app.core.utils.text_split import split_text_by_chars
+from app.runtime.llm.embeddings import ModelEmbeddings
+from app.runtime.llm.reranker import ModelReranker
+from app.skills.ocr.ocr_engine import ocr_engine
+from app.infrastructure.database.schema import ensure_schema_if_possible
+from app.infrastructure.database.orm import get_session
+from app.infrastructure.database.models import DocContent, DocEmbedding, Document as DocumentRow
+from app.infrastructure.database.stores import MySQLDocStore, PgDocEmbeddingStore
+from app.infrastructure.config.config_manager import config_manager
+from app.skills.rag.hybrid_retriever_service import HybridRetrieverService, HybridRetrievalConfig
+from app.memory.vector_stores.pgvector_vectorstore import PgVectorVectorStore
+from app.infrastructure.utils.files import sha256_file
+from app.infrastructure.utils.text_split import split_text_by_chars
 
 class RAGEngine:
     """

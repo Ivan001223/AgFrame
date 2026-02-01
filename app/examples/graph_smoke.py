@@ -7,7 +7,7 @@ ROOT = str(Path(__file__).resolve().parents[2])
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from app.core.workflow.nodes.router import router_node
+from app.skills.common.router import router_node
 
 
 async def main():

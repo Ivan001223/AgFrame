@@ -1,9 +1,9 @@
 from langchain_core.tools import tool
 from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_experimental.utilities import PythonREPL
-from app.core.services.rag_engine import get_rag_engine
-from app.core.services.ocr_engine import ocr_engine
-from app.core.config.config_manager import config_manager
+from app.skills.rag.rag_engine import get_rag_engine
+from app.skills.ocr.ocr_engine import ocr_engine
+from app.infrastructure.config.config_manager import config_manager
 import os
 import datetime
 

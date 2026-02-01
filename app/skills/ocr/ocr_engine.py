@@ -3,7 +3,7 @@ import tempfile
 import traceback
 from pdf2image import convert_from_path
 from typing import List
-from app.core.llm.llm_factory import get_local_qwen_provider
+from app.runtime.llm.llm_factory import get_local_qwen_provider
 from langchain_core.messages import HumanMessage
 
 class QwenVLOCR:

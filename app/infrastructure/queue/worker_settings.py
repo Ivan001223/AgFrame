@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 from arq.connections import RedisSettings
 
-from app.core.task_queue.arq_jobs import ingest_pdf
+from app.infrastructure.queue.arq_jobs import ingest_pdf
 
 
 def _redis_settings() -> RedisSettings:

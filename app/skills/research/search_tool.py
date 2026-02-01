@@ -3,7 +3,7 @@ from langchain_community.tools import DuckDuckGoSearchResults, DuckDuckGoSearchR
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_core.tools import tool
 
-from app.core.config.config_manager import config_manager
+from app.infrastructure.config.config_manager import config_manager
 
 
 @tool

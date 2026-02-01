@@ -42,7 +42,7 @@ export DB_NAME="agent_app"
 
 ### 3) 启动服务
 ```bash
-python server.py
+python -m app.server.main
 ```
 
 启动后默认监听 `http://localhost:8000`。
@@ -68,11 +68,12 @@ curl -X POST "http://localhost:8000/history/u1/save" \
 ```
 
 ## 代码导航
-- [server.py](file:///Users/ivan/Documents/Code/Agent_infra/server.py)：FastAPI 入口 + LangServe 路由 + 文件上传/历史/配置 API
-- [graph.py](file:///Users/ivan/Documents/Code/Agent_infra/app/core/workflow/graph.py)：LangGraph 工作流编排入口
-- `app/core/services/`：RAG/OCR/记忆/画像等服务层
-- `app/core/utils/`：消息清洗、JSON 解析、FAISS 持久化等通用工具
-- `app/agents/`：自定义 Agent 与节点工厂（可按业务扩展）
+- [app/server/main.py](app/server/main.py)：FastAPI 入口 + LangServe 路由 + 文件上传/历史/配置 API
+- [app/runtime/graph/graph.py](app/runtime/graph/graph.py)：LangGraph 工作流编排入口
+- `app/skills/`：原子能力 (RAG/OCR/Memory/Profile)
+- `app/infrastructure/`：基础设施 (DB, Redis, Utils)
+- `app/agents/`：Agent 定义与编排
+- `app/memory/`：记忆系统 (Long-term, Vector Stores)
 
 ## 运行时目录
 `data/` 为运行时目录（上传文件、向量索引、历史缓存等），会自动创建并写入内容，通常不建议提交到仓库。

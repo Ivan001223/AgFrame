@@ -2,8 +2,8 @@ from typing import Any, Callable, Optional, Sequence
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-from app.core.llm.llm_factory import get_llm
-from app.core.workflow.state import AgentState
+from app.runtime.llm.llm_factory import get_llm
+from app.runtime.graph.state import AgentState
 
 
 def build_system_prompt_template(system_prompt: str, messages_key: str = "messages") -> ChatPromptTemplate:

@@ -4,8 +4,8 @@ from typing import Any, Optional
 
 from transformers import AutoModel, AutoProcessor, AutoTokenizer
 
-from app.core.llm.model_importer import resolve_pretrained_source
-from app.core.llm.model_manager import torch_dtype_for_device
+from app.runtime.llm.model_importer import resolve_pretrained_source
+from app.runtime.llm.model_manager import torch_dtype_for_device
 
 
 def resolve_pretrained_source_for_spec(spec: Any) -> str:

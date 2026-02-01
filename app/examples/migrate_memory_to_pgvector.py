@@ -11,13 +11,13 @@ ROOT = str(Path(__file__).resolve().parents[2])
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from app.core.config.config_manager import config_manager
-from app.core.database.models import UserProfile
-from app.core.database.orm import get_session
-from app.core.database.schema import ensure_schema_if_possible
-from app.core.llm.embeddings import ModelEmbeddings
-from app.core.services.user_memory_engine import UserMemoryEngine
-from app.core.utils.faiss_store import load_faiss
+from app.infrastructure.config.config_manager import config_manager
+from app.infrastructure.database.models import UserProfile
+from app.infrastructure.database.orm import get_session
+from app.infrastructure.database.schema import ensure_schema_if_possible
+from app.runtime.llm.embeddings import ModelEmbeddings
+from app.memory.long_term.user_memory_engine import UserMemoryEngine
+from app.memory.vector_stores.faiss_store import load_faiss
 
 
 def _sha256_hex(text: str) -> str:

@@ -3,7 +3,7 @@ import json
 import time
 from typing import List, Dict, Any, Optional
 
-from app.core.database.conversation_utils import derive_session_title, should_bump_updated_at
+from app.infrastructure.database.conversation_utils import derive_session_title, should_bump_updated_at
 
 HISTORY_FILE = os.path.join("data", "chat_history.json")
 

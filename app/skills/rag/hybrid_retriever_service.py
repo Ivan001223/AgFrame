@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from langchain_core.documents import Document
 
-from app.core.utils.logging import get_logger
+from app.infrastructure.utils.logging import get_logger
 
 _log = get_logger("services.hybrid_retriever")
 

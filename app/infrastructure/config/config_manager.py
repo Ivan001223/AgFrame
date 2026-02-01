@@ -1,7 +1,7 @@
 import os
 import json
 from typing import Dict, Any, Optional
-from app.core.config.env import init_env
+from app.infrastructure.config.env import init_env
 
 class ConfigManager:
     """

@@ -1,24 +1,22 @@
 from typing import Dict, Any, Annotated
 from fastapi import APIRouter, Depends
 from app.infrastructure.config.config_manager import config_manager
-from app.server.api.auth import get_current_active_user
+from app.server.api.auth import get_current_active_user, get_current_admin_user
 from app.infrastructure.database.models import User, UserProfile
 from app.infrastructure.database.orm import get_session
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 import time
-import json
 
 router = APIRouter()
 
 
 # 系统全局配置（仅 Admin）
-@router.get("/settings")
+@router.get("/settings", dependencies=[Depends(get_current_admin_user)])
 async def get_settings():
     return config_manager.get_config()
 
 
-@router.post("/settings")
+@router.post("/settings", dependencies=[Depends(get_current_admin_user)])
 async def update_settings(config: Dict[str, Any]):
     return config_manager.update_config(config)
 
@@ -56,7 +54,6 @@ async def update_user_settings(
                 updated_at=int(time.time()),
             )
             session.add(new_profile)
-            session.commit()
         else:
             # Update existing
             current_data = dict(profile.profile_json or {})
@@ -66,6 +63,11 @@ async def update_user_settings(
             profile.profile_json = current_data
             profile.updated_at = int(time.time())
             session.add(profile)
-            session.commit()
+
+            # Explicitly merge/add ensures session tracks it
+            # In some cases with SQLite JSON, we might need flag_modified
+            from sqlalchemy.orm.attributes import flag_modified
+
+            flag_modified(profile, "profile_json")
 
     return {"message": "User settings updated"}

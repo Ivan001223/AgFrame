@@ -25,6 +25,8 @@ async def upload_documents(
     upload_dir = os.path.join("data/documents", user_id)
     os.makedirs(upload_dir, exist_ok=True)
 
+    results = []
+
     for file in files:
         original_name = os.path.basename(file.filename or "")
         if not original_name.lower().endswith(".pdf"):

@@ -112,19 +112,6 @@ python -m app.server.main
 
 ## 开发指南
 
-### 核心开发工作流 (D-V-C-N)
-
-项目遵循严谨的微步迭代循环（Micro-Step Loop）：
-
-1.  **Decompose (拆解)**: 将功能拆解为 <50 行代码的最小可验证单元。
-2.  **Develop (开发)**: 
-    - 接口层 (`server`) 仅挂载路由。
-    - 编排层 (`graph`)定义 State 和 Node。
-    - 能力层 (`skills`) 实现核心算法。
-3.  **Verify (验证)**: 必须编写或运行 `app/examples/` 下的脚本进行验证，确保无 Error。
-4.  **Commit (存档)**: 验证通过后立即提交。
-5.  **Next (下一步)**: 进入下一个循环。
-
 ### 常用 API Endpoint
 
 - `POST /auth/token`: 用户登录获取 Token。
@@ -132,7 +119,3 @@ python -m app.server.main
 - `POST /upload`: 上传文件 (RAG 入库)。
 - `GET /history/{user_id}`: 获取用户对话历史。
 - `POST /vectorstore/docs/clear`: 清空向量库 (Admin only)。
-
-## 贡献
-
-欢迎提交 PR 或 Issue 改进本脚手架。

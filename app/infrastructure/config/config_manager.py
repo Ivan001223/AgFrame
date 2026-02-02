@@ -93,6 +93,8 @@ class ConfigManager:
             "search": {
                 "provider": os.getenv("SEARCH_PROVIDER", "duckduckgo"),
                 "tavily_api_key": os.getenv("TAVILY_API_KEY", ""),
+                "serpapi_api_key": os.getenv("SERPAPI_API_KEY", ""),
+                "cache_ttl": int(os.getenv("SEARCH_CACHE_TTL", "3600")),
             },
             "database": {
                 "type": os.getenv("DB_TYPE", "postgres"),
@@ -165,6 +167,10 @@ class ConfigManager:
                     "ENABLE_SELF_CORRECTION", "true"
                 ).lower()
                 == "true",
+                "enable_human_approval": os.getenv(
+                    "ENABLE_HUMAN_APPROVAL", "false"
+                ).lower()
+                == "true",
                 "allow_dangerous_deserialization": os.getenv(
                     "ALLOW_DANGEROUS_DESERIALIZATION", "false"
                 ).lower()
@@ -177,6 +183,17 @@ class ConfigManager:
                     "ENABLE_TOOLS_PYTHON_REPL", "false"
                 ).lower()
                 == "true",
+                "enable_tools_python_executor": os.getenv(
+                    "ENABLE_TOOLS_PYTHON_EXECUTOR", "false"
+                ).lower()
+                == "true",
+            },
+            "sandbox": {
+                "enabled": os.getenv("SANDBOX_ENABLED", "false").lower() == "true",
+                "image": os.getenv("SANDBOX_IMAGE", "python:3.11-slim"),
+                "timeout": int(os.getenv("SANDBOX_TIMEOUT", "30")),
+                "memory_limit": os.getenv("SANDBOX_MEMORY_LIMIT", "256m"),
+                "cpu_limit": float(os.getenv("SANDBOX_CPU_LIMIT", "0.5")),
             },
             "self_correction": {
                 "max_attempts": int(os.getenv("SELF_CORRECTION_MAX_ATTEMPTS", "2")),

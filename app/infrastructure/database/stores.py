@@ -340,16 +340,28 @@ class PgDocEmbeddingStore:
             session.add_all(to_add)
         return len(to_add)
 
-    def dense_search(self, query_vec: List[float], *, k: int) -> List[DocEmbedding]:
+    def dense_search(
+        self, query_vec: List[float], *, k: int, filter: Optional[Dict[str, Any]] = None
+    ) -> List[DocEmbedding]:
         if not query_vec or k <= 0:
             return []
         q = bindparam("query_vec", value=list(query_vec), type_=Vector)
         distance = cast(DocEmbedding.embedding.op("<=>")(q), Float)
         stmt = select(DocEmbedding).order_by(distance).limit(int(k))
+        
+        if filter:
+            for key, value in filter.items():
+                if key == "user_id":
+                     stmt = stmt.where(func.json_extract(DocEmbedding.metadata_json, "$.user_id") == value)
+                else:
+                     stmt = stmt.where(func.json_extract(DocEmbedding.metadata_json, f"$.{key}") == value)
+
         with get_session() as session:
             return list(session.execute(stmt).scalars().all())
 
-    def sparse_search(self, query: str, *, k: int) -> List[DocEmbedding]:
+    def sparse_search(
+        self, query: str, *, k: int, filter: Optional[Dict[str, Any]] = None
+    ) -> List[DocEmbedding]:
         q = str(query or "").strip()
         if not q or k <= 0:
             return []
@@ -361,6 +373,21 @@ class PgDocEmbeddingStore:
             .order_by(func.ts_rank_cd(tsv, tsq).desc())
             .limit(int(k))
         )
+        
+        if filter:
+            # 简单的 metadata_json 过滤支持
+            # 例如: {"user_id": "123", "source": "abc.pdf"}
+            for key, value in filter.items():
+                # 针对 metadata_json 字段的过滤
+                # 注意：这里假设 metadata_json 是 JSONB 或 JSON 类型
+                # SQLAlchemy 的 cast(DocEmbedding.metadata_json[key], String) == str(value) 可能会有性能问题
+                # 更好的方式是使用 @> 操作符 if supported by generic approach, but here logic is simple exact match
+                if key == "user_id":
+                     stmt = stmt.where(func.json_extract(DocEmbedding.metadata_json, "$.user_id") == value)
+                else:
+                     # Fallback check inside metadata_json
+                     stmt = stmt.where(func.json_extract(DocEmbedding.metadata_json, f"$.{key}") == value)
+
         with get_session() as session:
             return list(session.execute(stmt).scalars().all())
 

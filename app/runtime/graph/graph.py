@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.memory import MemorySaver
 
 from app.infrastructure.config.config_manager import config_manager
 from app.skills.common.assemble_prompt import assemble_prompt_node
@@ -14,6 +15,7 @@ from app.skills.memory.retrieve_memories import retrieve_memories_node
 from app.skills.profile.retrieve_profile import retrieve_profile_node
 from app.skills.common.router import router_node
 from app.skills.research.web_search import web_search_node
+from app.runtime.graph.nodes.human_interrupt import human_interrupt_node, check_approval_node
 from app.runtime.graph.state import AgentState
 
 
@@ -70,10 +72,22 @@ def _grader_key(state: AgentState) -> Literal["accept", "rewrite", "search"]:
     return "accept"
 
 
-def run_app():
+def _should_interrupt(state: AgentState) -> bool:
+    context = state.get("context") or {}
+    return bool(context.get("require_human_approval", False))
+
+
+def _check_approval(state: AgentState) -> Literal["approved", "pending"]:
+    action_required = state.get("action_required")
+    if action_required and action_required.get("approved"):
+        return "approved"
+    return "pending"
+
+
+def run_app(checkpointer: Optional[Any] = None):
     """
     构建并编译 LangGraph 工作流应用。
-    
+
     Returns:
         CompiledStateGraph: 编译后的工作流图
     """
@@ -81,8 +95,8 @@ def run_app():
     cfg = config_manager.get_config() or {}
     flags = cfg.get("feature_flags", {}) or {}
     enable_self_correction = bool(flags.get("enable_self_correction", False))
+    enable_human_approval = bool(flags.get("enable_human_approval", False))
 
-    # 添加节点
     workflow.add_node("router", router_node)
     workflow.add_node("retrieve_docs", retrieve_docs_node)
     workflow.add_node("rerank_docs", rerank_docs_node)
@@ -93,8 +107,10 @@ def run_app():
     if enable_self_correction:
         workflow.add_node("grader", grader_node)
         workflow.add_node("web_search", web_search_node)
+    if enable_human_approval:
+        workflow.add_node("human_interrupt", human_interrupt_node)
+        workflow.add_node("check_approval", check_approval_node)
 
-    # 定义边和流程
     workflow.set_entry_point("router")
     workflow.add_conditional_edges(
         "router",
@@ -115,7 +131,21 @@ def run_app():
     workflow.add_edge("retrieve_memories", "retrieve_profile")
     workflow.add_edge("retrieve_profile", "assemble")
     workflow.add_edge("assemble", "generate")
-    if enable_self_correction:
+
+    if enable_human_approval:
+        workflow.add_conditional_edges(
+            "generate",
+            _should_interrupt,
+            {True: "human_interrupt", False: END},
+        )
+        workflow.add_edge("human_interrupt", END)
+
+        workflow.add_conditional_edges(
+            "check_approval",
+            _check_approval,
+            {"approved": "generate", "pending": END},
+        )
+    elif enable_self_correction:
         workflow.add_edge("generate", "grader")
         workflow.add_conditional_edges(
             "grader",
@@ -126,7 +156,11 @@ def run_app():
     else:
         workflow.add_edge("generate", END)
 
-    return workflow.compile()
+    compile_kwargs = {}
+    if checkpointer:
+        compile_kwargs["checkpointer"] = checkpointer
+
+    return workflow.compile(**compile_kwargs)
 
 # 导出应用实例
 app = run_app()

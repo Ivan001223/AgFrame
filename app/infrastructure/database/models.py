@@ -10,6 +10,7 @@ from sqlalchemy import (
     Text,
     Float,
     Boolean,
+    func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
@@ -217,4 +218,7 @@ class DocEmbedding(Base):
     metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
-    __table_args__ = (Index("idx_doc_embedding_doc", "doc_id"),)
+    __table_args__ = (
+        Index("idx_doc_embedding_doc", "doc_id"),
+        Index("idx_doc_embedding_content_tsvector", func.to_tsvector("simple", content), postgresql_using="gin"),
+    )

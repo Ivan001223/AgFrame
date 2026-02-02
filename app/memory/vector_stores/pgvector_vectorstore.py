@@ -13,9 +13,11 @@ class PgVectorVectorStore:
         self._embeddings = embeddings
         self._store = PgDocEmbeddingStore()
 
-    def similarity_search(self, query: str, k: int = 20) -> List[Document]:
+    def similarity_search(
+        self, query: str, k: int = 20, filter: dict = None
+    ) -> List[Document]:
         query_vec = self._embeddings.embed_query(str(query or ""))
-        rows = self._store.dense_search(query_vec, k=int(k))
+        rows = self._store.dense_search(query_vec, k=int(k), filter=filter)
         out: List[Document] = []
         for r in rows:
             meta = dict(r.metadata_json or {})
@@ -30,8 +32,10 @@ class PgVectorVectorStore:
             out.append(Document(page_content=r.content, metadata=meta))
         return out
 
-    def sparse_search(self, query: str, k: int = 20) -> List[Document]:
-        rows = self._store.sparse_search(str(query or ""), k=int(k))
+    def sparse_search(
+        self, query: str, k: int = 20, filter: dict = None
+    ) -> List[Document]:
+        rows = self._store.sparse_search(str(query or ""), k=int(k), filter=filter)
         out: List[Document] = []
         for r in rows:
             meta = dict(r.metadata_json or {})

@@ -5,6 +5,8 @@ from langchain_community.document_loaders import (
     Docx2txtLoader,
     UnstructuredExcelLoader,
 )
+from langchain_community.document_loaders import UnstructuredFileLoader
+from unstructured.partition.pdf import partition_pdf
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_core.documents import Document
 
@@ -53,6 +55,11 @@ class RAGEngine:
                 vectorstore=self._vectorstore
             )
 
+    def _get_hybrid_config(self) -> HybridRetrievalConfig:
+        # TODO: 从配置中心通过 config_manager 读取
+        # 暂时返回默认配置
+        return HybridRetrievalConfig()
+
     def load_documents(self, file_path: str) -> List[Document]:
         """
         根据文件扩展名加载文档内容。
@@ -67,7 +74,28 @@ class RAGEngine:
         docs: List[Document] = []
         ext = os.path.splitext(file_path)[1].lower()
 
-        if ext in [".pdf", ".png", ".jpg", ".jpeg", ".webp", ".tiff", ".bmp"]:
+        if ext == ".pdf":
+            print(f"正在使用 Unstructured 处理 PDF：{file_path}...")
+            try:
+                # 尝试使用 unstructured 进行高级解析（支持表格）
+                elements = partition_pdf(
+                    filename=file_path,
+                    infer_table_structure=True,
+                    strategy="hi_res",
+                )
+                text = "\n\n".join([str(e) for e in elements])
+                docs = [Document(page_content=text, metadata={"source": file_path})]
+            except Exception as e:
+                print(f"Unstructured 解析失败，降级为 OCR: {e}")
+                # 降级到原有的 OCR 逻辑
+                text = ocr_engine.process_file(file_path)
+                if text:
+                    docs = [Document(page_content=text, metadata={"source": file_path})]
+                else:
+                    print(f"警告：OCR 未从 {file_path} 提取到文本")
+                    docs = []
+
+        elif ext in [".png", ".jpg", ".jpeg", ".webp", ".tiff", ".bmp"]:
             print(f"正在使用本地 OCR 处理：{file_path}...")
             text = ocr_engine.process_file(file_path)
             if text:
@@ -245,20 +273,6 @@ class RAGEngine:
         except Exception as e:
             print(f"检索上下文错误: {e}")
             return []
-        cfg = self._get_hybrid_config()
-        cfg = HybridRetrievalConfig(
-            mode=cfg.mode,
-            dense_k=cfg.dense_k,
-            sparse_k=cfg.sparse_k,
-            candidate_k=int(fetch_k),
-            rrf_k=cfg.rrf_k,
-            weights=cfg.weights,
-        )
-        if self._hybrid_retriever is None:
-            self._hybrid_retriever = HybridRetrieverService(
-                vectorstore=self._vectorstore
-            )
-        return self._hybrid_retriever.retrieve_candidates(query, config=cfg)
 
     def rerank_candidates(
         self, query: str, candidates: List[Document], *, k: int
@@ -331,35 +345,7 @@ class RAGEngine:
         out.sort(key=lambda x: x.metadata.get("rerank_score", 0), reverse=True)
         return out[:k]
 
-    def retrieve_context(
-        self, query: str, k: int = 3, fetch_k: int = 20
-    ) -> List[Document]:
-        """
-        检索查询的前 k 个相关文档。
 
-        流程:
-        1. 召回 (Recall): 使用 FAISS 进行相似度搜索，获取 fetch_k 个候选文档。
-        2. 重排 (Rerank): 使用 Reranker 模型对候选文档打分，选出前 k 个最相关的。
-        3. 还原 (Restore): 如果使用了 Parent Retrieval，返回对应的父文档块以提供更完整的上下文。
-
-        Args:
-            query: 用户查询
-            k: 最终返回的文档数量
-            fetch_k: 初步召回的文档数量
-
-        Returns:
-            List[Document]: 检索到的相关文档列表
-        """
-        try:
-            candidates = self.retrieve_candidates(query, fetch_k=fetch_k)
-            if not candidates:
-                return []
-            print(f"正在对 {len(candidates)} 条候选文档进行重排...")
-            reranked = self.rerank_candidates(query, candidates, k=k)
-            return self.restore_parents(reranked, k=k)
-        except Exception as e:
-            print(f"检索上下文错误: {e}")
-            return []
 
     def clear(self):
         """

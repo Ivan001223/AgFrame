@@ -25,7 +25,7 @@ openpyxl
 pandas
 addict
 easydict
-unstructured
+unstructured[all-docs]
 
 # Search
 duckduckgo-search

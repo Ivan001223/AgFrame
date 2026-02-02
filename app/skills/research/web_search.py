@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 import anyio
 from langchain_core.messages import BaseMessage
 
-from app.skills.research.search_tool import get_search_tool
+from app.skills.research.enhanced_search import enhanced_web_search, search_service
 from app.infrastructure.utils.logging import bind_logger, get_logger
 from app.runtime.graph.registry import register_node
 from app.runtime.graph.state import AgentState
@@ -37,9 +37,13 @@ async def web_search_node(state: AgentState) -> Dict[str, Any]:
     if not query:
         return {"context": ctx}
 
-    tool = get_search_tool(return_results_obj=False)
     try:
-        result = await anyio.to_thread.run_sync(lambda: tool.run(query) if hasattr(tool, "run") else tool(query))
+        result = await enhanced_web_search(
+            query=query,
+            provider=None,
+            use_cache=True,
+            max_results=5,
+        )
         ctx["web_search"] = {"query": query, "result": str(result)}
         bind_logger(
             _log,

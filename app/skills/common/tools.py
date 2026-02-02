@@ -74,37 +74,35 @@ def read_document(file_path: str) -> str:
     except Exception as e:
         return f"Error reading file: {str(e)}"
 
-# --- 5. 文件系统工具 ---
+# --- 6. 安全代码执行 ---
 @tool
-def write_file(file_path: str, content: str) -> str:
+def python_executor(code: str) -> str:
     """
-    将文本内容写入文件；若文件已存在则覆盖。
-    
+    在安全的沙箱环境中执行 Python 代码。
+
     参数:
-        file_path: 文件的绝对路径。
-        content: 要写入的文本内容。
+        code: 要执行的 Python 代码。
     """
     try:
         flags = (config_manager.get_config() or {}).get("feature_flags", {}) or {}
-        if not bool(flags.get("enable_tools_write_file", False)):
-            return "Tool disabled: write_file"
+        if not bool(flags.get("enable_tools_python_executor", False)):
+            return "Tool disabled: python_executor"
 
-        data_dir = os.path.abspath(os.path.join(os.getcwd(), "data"))
-        abs_path = os.path.abspath(file_path)
-        if os.path.commonpath([abs_path, data_dir]) != data_dir:
-            return f"Write blocked: path must be under {data_dir}"
+        from app.infrastructure.sandbox.code_sandbox import execute_code
+        import asyncio
 
-        directory = os.path.dirname(abs_path)
-        if directory and not os.path.exists(directory):
-            os.makedirs(directory)
-            
-        with open(abs_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-        return f"Successfully wrote to file: {abs_path}"
+        result = asyncio.run(execute_code(code))
+
+        if result.get("success"):
+            return result.get("output", "Code executed successfully (no output)")
+        else:
+            error = result.get("error") or result.get("output", "Unknown error")
+            return f"Execution failed: {error}"
     except Exception as e:
-        return f"Write failed: {str(e)}"
+        return f"Execution error: {str(e)}"
 
-# --- 6. 实用工具 ---
+
+# --- 7. 实用工具 ---
 @tool
 def get_current_time() -> str:
     """
@@ -112,11 +110,13 @@ def get_current_time() -> str:
     """
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+
 ALL_TOOLS = [
-    web_search, 
-    calculator, 
+    web_search,
+    calculator,
     knowledge_retriever,
     read_document,
     write_file,
-    get_current_time
+    python_executor,
+    get_current_time,
 ]

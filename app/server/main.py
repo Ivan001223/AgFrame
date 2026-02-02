@@ -10,14 +10,15 @@ from langserve import add_routes
 from fastapi_limiter import FastAPILimiter
 from fastapi_limiter.depends import RateLimiter
 
-from app.runtime.graph.graph import app as graph_app
+from app.runtime.graph.graph import run_app
+from app.infrastructure.checkpoint.redis_store import checkpoint_store
 from app.infrastructure.database.schema import ensure_schema_if_possible
 from app.infrastructure.utils.logging import init_logging
 from app.infrastructure.observability import get_langfuse_callback
 from app.infrastructure.queue.redis_client import get_redis
 
 # Import routers
-from app.server.api import upload, tasks, settings, history, profile, vectorstore, auth
+from app.server.api import upload, tasks, settings, history, profile, vectorstore, auth, interrupt
 from app.server.api.auth import get_current_active_user, get_current_admin_user
 
 
@@ -128,6 +129,8 @@ app.add_middleware(AuthMiddleware)
 
 # 路由（LangServe）
 # 保护 /chat 接口：需要登录 + 限流 (10次/60秒)
+graph_app = run_app(checkpointer=checkpoint_store)
+
 add_routes(
     app,
     graph_app,
@@ -148,6 +151,7 @@ app.mount("/uploads", StaticFiles(directory="data/uploads"), name="uploads")
 
 # Include Routers
 app.include_router(auth.router)
+app.include_router(interrupt.router, dependencies=[Depends(get_current_active_user)])
 app.include_router(upload.router)  # 移除 admin 限制，内部已根据 user 隔离
 app.include_router(tasks.router)
 app.include_router(settings.router)  # 内部已处理 Admin 限制

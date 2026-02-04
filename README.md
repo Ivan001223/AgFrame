@@ -1,121 +1,261 @@
-# AgFrame (Agent Backend Scaffold)
+# AgFrame (Agent Framework)
 
-AgFrame 是一个纯净的 Agent/RAG 后端开发脚手架，基于 **FastAPI** + **LangGraph** + **LangServe** 构建。  
-项目移除了具体的业务逻辑，保留了通用的架构、基础设施与核心原子能力，旨在为构建复杂的 Agentic Application 提供坚实、可扩展的基础。
+AgFrame 是一个生产级 Agent/RAG 后端框架，基于 **FastAPI** + **LangGraph** 构建。专注于复杂工作流编排、混合检索、分层记忆与可观测性。
 
-## 核心特性
+## 架构总览
 
-- **现代架构**:  
-  遵循 `FastAPI (Web层) -> LangGraph (编排层) -> Services/Skills (能力层)` 分层设计，职责清晰。
-- **工作流编排 (LangGraph)**:  
-  原生支持 Stateful Graph，易于构建循环、分支、多 Agent 协作等复杂逻辑。
-- **API 服务化 (LangServe)**:  
-  集成 LangServe，自动将 Graph 暴露为标准 REST API (`/chat`)，支持流式输出与反馈。
-- **企业级鉴权**:  
-  内置 JWT 身份认证 (User/Admin 角色体系) 与 `FastAPI-Limiter` 速率限制。
-- **混合存储架构**:
-  - **Vector**: FAISS (本地持久化) / 易于扩展至 pgvector 等。
-  - **Relational**: SQLAlchemy ORM (默认支持 MySQL/PostgreSQL)。
-  - **Cache/Queue**: 深度集成 Redis，用于缓存、限流及异步任务队列。
-- **原子能力 (Skills)**:
-  - **RAG**: PDF/各类文档异步解析、切片、向量化入库。
-  - **OCR**: 图片文字识别模块接口预留。
-  - **Memory**: 分层记忆系统（短期对话上下文 + 长期历史持久化）。
-  - **Profile**: 用户画像构建与更新机制。
-- **可观测性**:  
-  深度集成 **Langfuse**，支持全链路追踪 (Tracing)、Prompt 管理与评估。
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      FastAPI Server                         │
+│                  (Auth / REST / LangServe)                 │
+└─────────────────────────────────────────────────────────────┘
+                              │
+┌─────────────────────────────────────────────────────────────┐
+│                    LangGraph Runtime                        │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
+│   │ Orchestr │  │  State   │  │  Nodes   │  │ Routers  │  │
+│   └──────────┘  └──────────┘  └──────────┘  └──────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                              │
+┌─────────────────────────────────────────────────────────────┐
+│                      Skills / Services                     │
+│  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐   │
+│  │  RAG   │ │ Memory │ │ Profile│ │ Research│ │ Tools  │   │
+│  └────────┘ └────────┘ └────────┘ └────────┘ └────────┘   │
+└─────────────────────────────────────────────────────────────┘
+                              │
+┌─────────────────────────────────────────────────────────────┐
+│                   Infrastructure                           │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐   │
+│  │ pgvector │ │  Redis  │ │ PostgreSQL│ │ Langfuse     │   │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ## 目录结构
 
-```text
+```
 AgFrame/
 ├── app/
-│   ├── server/             # FastAPI 服务入口 (Main, Routers, Middleware)
-│   │   ├── api/            # 路由定义 (Auth, Upload, History, Tasks...)
-│   │   └── main.py         # App 启动入口
-│   ├── runtime/            # 核心运行时
-│   │   ├── graph/          # LangGraph 工作流定义与编排
-│   │   ├── llm/            # LLM 工厂与配置
-│   │   └── prompts/        # Prompt 模板管理
-│   ├── skills/             # 原子能力模块 (RAG, Memory, Profile, OCR...)
-│   ├── infrastructure/     # 基础设施 (Database, Redis, Logging, Utils)
-│   ├── agents/             # Agent 节点构建工厂
-│   └── examples/           # 调试脚本与使用示例
-├── configs/                # 配置文件模板
-├── data/                   # 运行时数据目录 (忽略提交)
-├── docker-compose.yml      # 基础设施编排
-└── requirements.txt        # Python 依赖
+│   ├── server/              # FastAPI 入口
+│   │   ├── api/             # 路由层
+│   │   └── main.py           # 应用启动
+│   ├── runtime/             # 运行时核心
+│   │   ├── graph/           # LangGraph 工作流
+│   │   │   ├── graph.py      # 图定义
+│   │   │   ├── state.py      # State Schema
+│   │   │   ├── orchestrator.py # 编排器
+│   │   │   ├── registry.py   # 节点注册表
+│   │   │   ├── json_router.py # JSON 路由
+│   │   │   ├── memory_router.py
+│   │   │   └── nodes/        # 节点实现
+│   │   ├── llm/             # LLM 工厂
+│   │   │   ├── llm_factory.py
+│   │   │   ├── embeddings.py
+│   │   │   ├── reranker.py
+│   │   │   └── local_qwen.py
+│   │   └── prompts/         # Prompt 模板
+│   ├── skills/              # 原子能力层
+│   │   ├── rag/             # 混合检索
+│   │   ├── memory/          # 分层记忆
+│   │   ├── profile/         # 用户画像
+│   │   ├── research/        # 网络搜索
+│   │   ├── ocr/             # 图片 OCR
+│   │   ├── common/          # 公共技能
+│   │   └── tools/           # 代码执行
+│   ├── infrastructure/      # 基础设施
+│   │   ├── config/          # 配置管理
+│   │   ├── database/        # SQLAlchemy ORM
+│   │   ├── vector_stores/   # pgvector 集成
+│   │   ├── checkpoint/      # Redis Checkpoint
+│   │   ├── queue/           # ARQ 异步任务
+│   │   ├── sandbox/         # 代码沙箱
+│   │   ├── observability/   # 可观测性
+│   │   └── utils/           # 工具函数
+│   ├── agents/              # Agent 节点工厂
+│   ├── memory/              # 记忆模块
+│   │   ├── long_term/       # 长期记忆
+│   │   └── vector_stores/   # 向量存储
+│   └── examples/           # 调试脚本
+├── configs/                 # 配置文件
+│   ├── config.example.json
+│   └── config.json          # 本地配置（需创建）
+├── docker/                  # Docker 初始化脚本
+├── scripts/                 # 工具脚本
+├── data/                    # 运行时数据
+├── tests/                   # 单元测试
+├── docker-compose.yml       # 基础设施编排
+└── requirements.txt         # Python 依赖
 ```
+
+## 核心特性
+
+### 1. 工作流编排 (LangGraph)
+- **Stateful Graph**: 支持循环、分支、条件判断
+- **Checkpoint**: Redis 持久化断点恢复
+- **Human-in-the-Loop**: 支持人工中断与反馈
+- **节点注册表**: 动态节点管理
+
+### 2. 混合 RAG
+- **双路检索**: BM25 (关键词) + Embedding (语义)
+- **重排序**: 支持 Cross-Encoder 重排序
+- **多格式解析**: PDF/DOCX/Excel/图片 OCR
+- **RRF 融合**: RRF 排序融合算法
+
+### 3. 分层记忆系统
+- **短期记忆**: 对话上下文窗口管理
+- **长期记忆**: 用户画像 + 历史向量存储
+- **pgvector**: 向量检索持久化
+- **对话管理**: 历史记录持久化
+
+### 4. LLM 工厂
+- **多模型支持**: OpenAI API / 本地 Qwen (Ollama/VLLM)
+- **嵌入模型**: Sentence-Transformers / ModelScope
+- **重排序**: Cross-Encoder
+- **结构化输出**: 原生 Pydantic + JSON 模式
+
+### 5. 可观测性
+- **Langfuse**: 全链路追踪、Prompt 管理
+- **DeepEval**: RAG 评测 (Context Recall/Precision)
+
+### 6. 基础设施
+- **Redis**: 缓存 / Checkpoint / 任务队列 (ARQ)
+- **PostgreSQL**: 持久化存储
+- **Docker**: 一键启动全部依赖
 
 ## 快速开始
 
 ### 1. 环境准备
 
-推荐使用 Python 3.10+。
-
 ```bash
-# 创建虚拟环境
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# 安装依赖
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
 ### 2. 配置
 
-复制示例配置文件，或直接通过环境变量配置（推荐生产环境使用环境变量）：
-
 ```bash
-cp configs/config.example.json config.json
+cp configs/config.example.json configs/config.json
+# 编辑 configs/config.json 配置各项参数
 ```
 
-**关键配置项 (Environment Variables)**:
+**配置结构**：
+
+```json
+{
+  "llm": {
+    "api_key": "sk-xxx",
+    "base_url": "https://api.openai.com/v1",
+    "model": "gpt-4o"
+  },
+  "model_manager": {
+    "provider": "modelscope",
+    "cache_dir": ""
+  },
+  "local_models": {
+    "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
+    "rerank_model": "Qwen/Qwen3-Reranker-0.6B"
+  },
+  "embeddings": {
+    "provider": "modelscope",
+    "model_name": "Qwen/Qwen3-Embedding-0.6B"
+  },
+  "reranker": {
+    "provider": "modelscope",
+    "model_name": "Qwen/Qwen3-Reranker-0.6B"
+  },
+  "database": {
+    "type": "postgres",
+    "url": "postgresql+psycopg://user:pass@localhost:5432/db"
+  },
+  "queue": {
+    "redis_url": "redis://localhost:6379/0"
+  },
+  "rag": {
+    "retrieval": {
+      "mode": "hybrid",
+      "dense_k": 20,
+      "sparse_k": 20,
+      "final_k": 3
+    }
+  },
+  "auth": {
+    "secret_key": "your-secret-key",
+    "algorithm": "HS256"
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8000
+  }
+}
+```
+
+**环境变量覆盖**：
+
+敏感配置可通过环境变量覆盖：
 
 ```bash
-# LLM Settings
-export OPENAI_API_KEY="sk-..."
-export LLM_MODEL="gpt-4o"
-export LLM_BASE_URL="https://api.openai.com/v1"
-
-# Auth Settings
-export SECRET_KEY="your-super-secret-key"  # 用于 JWT 签名
-export ALGORITHM="HS256"
-
-# Infrastructure
+export LLM_API_KEY="sk-xxx"
+export DATABASE_URL="postgresql+psycopg://user:pass@localhost:5432/db"
 export REDIS_URL="redis://localhost:6379/0"
-export DATABASE_URL="mysql+mysqlconnector://user:pass@localhost/dbname" # 或 sqlite
-
-# Observability
-export LANGFUSE_PUBLIC_KEY="..."
-export LANGFUSE_SECRET_KEY="..."
 ```
 
-### 3. 启动基础设施
-
-使用 Docker Compose 启动 Redis、MySQL 等依赖服务：
+### 3. 启动依赖
 
 ```bash
 docker-compose up -d
 ```
 
-### 4. 启动后端服务
+### 4. 启动服务
 
 ```bash
 python -m app.server.main
 ```
 
-服务启动后默认监听 `http://localhost:8000`。
+服务运行在 `http://localhost:8000`
 
-- **Swagger API 文档**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **LangServe Playground**: [http://localhost:8000/chat/playground](http://localhost:8000/chat/playground)
+- **Swagger Docs**: http://localhost:8000/docs
 
 ## 开发指南
 
-### 常用 API Endpoint
+### 新增 Skill 流程
 
-- `POST /auth/token`: 用户登录获取 Token。
-- `POST /chat/invoke`: 核心对话接口 (LangServe)。
-- `POST /upload`: 上传文件 (RAG 入库)。
-- `GET /history/{user_id}`: 获取用户对话历史。
-- `POST /vectorstore/docs/clear`: 清空向量库 (Admin only)。
+1. **定义能力** → `app/skills/<领域>/<能力>.py`
+2. **注册节点** → `app/runtime/graph/nodes/<节点>.py`
+3. **编排流程** → `app/runtime/graph/graph.py` 更新 Graph
+4. **验证** → `python -m app.examples.graph_demo`
+
+### 配置管理
+
+```python
+from app.infrastructure.config.config_manager import config_manager
+
+# 获取配置
+config = config_manager.get_config()
+llm_config = config.get("llm")
+
+# 更新配置
+config_manager.update_config({"llm": {"model": "gpt-4-turbo"}})
+```
+
+### 核心 API
+
+| 端点 | 功能 |
+|------|------|
+| `POST /auth/token` | JWT 登录 |
+| `POST /chat/invoke` | 对话触发 |
+| `POST /upload` | 文件上传 (RAG 入库) |
+| `GET /history/{user_id}` | 对话历史 |
+| `GET /settings` | 获取配置 |
+| `POST /tasks/background` | 异步任务提交 |
+
+### 运行评测
+
+```bash
+# RAG 评测
+python -m tests.test_deepeval_rag
+
+# 或使用评测脚本
+./scripts/run_evals.sh
+```

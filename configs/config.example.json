@@ -59,8 +59,119 @@
   "queue": {
     "redis_url": "redis://localhost:6379/0"
   },
+  "storage": {
+    "s3_endpoint": "",
+    "s3_access_key": "",
+    "s3_secret_key": "",
+    "s3_bucket": "agframe",
+    "s3_secure": false
+  },
+  "auth": {
+    "secret_key": "your-secret-key-keep-it-secret",
+    "algorithm": "HS256",
+    "access_token_expire_minutes": 30
+  },
   "general": {
     "app_name": "My Agent App"
+  },
+  "rag": {
+    "retrieval": {
+      "mode": "hybrid",
+      "dense_k": 20,
+      "sparse_k": 20,
+      "candidate_k": 20,
+      "final_k": 3,
+      "rrf_k": 60,
+      "weights": [0.5, 0.5]
+    }
+  },
+  "prompt": {
+    "budget": {
+      "max_recent_history_lines": 10,
+      "max_docs": 3,
+      "max_memories": 3,
+      "max_doc_chars_total": 6000,
+      "max_memory_chars_total": 3000,
+      "max_item_chars": 2000
+    }
+  },
+  "nodes": {
+    "enabled": [
+      "router",
+      "retrieve_docs",
+      "rerank_docs",
+      "retrieve_memories",
+      "assemble",
+      "generate"
+    ]
+  },
+  "feature_flags": {
+    "enable_docs_rag": true,
+    "enable_chat_memory": true,
+    "enable_self_correction": true,
+    "enable_human_approval": false,
+    "allow_dangerous_deserialization": false,
+    "enable_tools_write_file": false,
+    "enable_tools_python_repl": false,
+    "enable_tools_python_executor": false,
+    "pgvector_dimension": 1024
+  },
+  "sandbox": {
+    "enabled": false,
+    "image": "python:3.11-slim",
+    "timeout": 30,
+    "memory_limit": "256m",
+    "cpu_limit": 0.5
+  },
+  "self_correction": {
+    "max_attempts": 2
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "cors_origins": ["*"]
+  },
+  "storage": {
+    "documents_dir": "data/documents",
+    "uploads_dir": "data/uploads",
+    "data_dir": "data"
+  },
+  "env_overrides": {
+    "llm.api_key": "LLM_API_KEY",
+    "llm.base_url": "LLM_BASE_URL",
+    "llm.model": "LLM_MODEL",
+    "model_manager.provider": "MODEL_MANAGER_PROVIDER",
+    "model_manager.cache_dir": "MODEL_MANAGER_CACHE_DIR",
+    "local_models.ocr_model": "MODEL_PATH_OCR",
+    "local_models.embedding_model": "MODEL_PATH_EMBEDDING",
+    "local_models.rerank_model": "MODEL_PATH_RERANKER",
+    "embeddings.model_name": "EMBEDDINGS_MODEL_NAME",
+    "embeddings.device": "EMBEDDINGS_DEVICE",
+    "reranker.model_name": "RERANKER_MODEL_NAME",
+    "reranker.device": "RERANKER_DEVICE",
+    "search.provider": "SEARCH_PROVIDER",
+    "search.tavily_api_key": "TAVILY_API_KEY",
+    "database.type": "DB_TYPE",
+    "database.url": "DATABASE_URL",
+    "database.host": "DB_HOST",
+    "database.port": "DB_PORT",
+    "database.user": "DB_USER",
+    "database.password": "DB_PASSWORD",
+    "queue.redis_url": "REDIS_URL",
+    "storage.s3_endpoint": "S3_ENDPOINT",
+    "storage.s3_access_key": "S3_ACCESS_KEY",
+    "storage.s3_secret_key": "S3_SECRET_KEY",
+    "storage.s3_bucket": "S3_BUCKET",
+    "auth.secret_key": "AUTH_SECRET_KEY",
+    "auth.algorithm": "AUTH_ALGORITHM",
+    "general.app_name": "APP_NAME",
+    "server.host": "SERVER_HOST",
+    "server.port": "SERVER_PORT",
+    "server.cors_origins": "CORS_ORIGINS",
+    "storage.documents_dir": "STORAGE_DOCUMENTS_DIR",
+    "storage.uploads_dir": "STORAGE_UPLOADS_DIR",
+    "feature_flags.enable_docs_rag": "ENABLE_DOCS_RAG",
+    "feature_flags.enable_chat_memory": "ENABLE_CHAT_MEMORY",
+    "feature_flags.enable_self_correction": "ENABLE_SELF_CORRECTION"
   }
 }
-

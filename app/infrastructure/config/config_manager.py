@@ -8,7 +8,7 @@ class ConfigManager:
     """
     配置管理器（单例模式）。
     负责加载、合并和提供全局配置信息。
-    支持从 config.json 文件加载，并回退到默认值和环境变量。
+    支持从 config.json 文件加载 env_overrides 映射，并应用环境变量覆盖。
     """
 
     _instance = None
@@ -21,141 +21,117 @@ class ConfigManager:
         return cls._instance
 
     def _init_config(self):
-        """初始化配置：加载默认值 -> 合并文件配置（文件覆盖默认）"""
+        """初始化配置：加载默认值 -> 加载 env_overrides 映射 -> 应用环境变量覆盖"""
         init_env()
         self.config = self._load_defaults()
+
         file_config = self._load_from_file()
         if file_config:
             self._recursive_update(self.config, file_config)
 
+        self._apply_env_overrides()
+
     def _load_defaults(self) -> Dict[str, Any]:
-        """加载默认配置结构，优先使用环境变量"""
+        """加载默认配置结构"""
         return {
             "llm": {
-                "api_key": os.getenv("LLM_API_KEY", os.getenv("OPENAI_API_KEY", "")),
-                "base_url": os.getenv("LLM_BASE_URL", "https://api.openai.com/v1"),
-                "model": os.getenv("LLM_MODEL", "gpt-4o"),
-                "structured_output_mode": os.getenv(
-                    "LLM_STRUCTURED_OUTPUT_MODE", "native_first"
-                ),
-                "json_mode_response_format": os.getenv(
-                    "LLM_JSON_MODE_RESPONSE_FORMAT", "true"
-                ).lower()
-                == "true",
+                "api_key": "",
+                "base_url": "https://api.openai.com/v1",
+                "model": "gpt-4o",
+                "structured_output_mode": "native_first",
+                "json_mode_response_format": False,
             },
             "model_manager": {
-                "provider": os.getenv("MODEL_MANAGER_PROVIDER", "modelscope"),
-                "cache_dir": os.getenv("MODEL_MANAGER_CACHE_DIR", ""),
-                "revision": os.getenv("MODEL_MANAGER_REVISION", ""),
-                "trust_remote_code": os.getenv(
-                    "MODEL_MANAGER_TRUST_REMOTE_CODE", "true"
-                ).lower()
-                == "true",
-                "modelscope_fallback_to_hf": os.getenv(
-                    "MODELSCOPE_FALLBACK_TO_HF", "true"
-                ).lower()
-                == "true",
+                "provider": "modelscope",
+                "cache_dir": "",
+                "revision": "",
+                "trust_remote_code": True,
+                "modelscope_fallback_to_hf": True,
             },
             "local_models": {
-                "ocr_model": os.getenv("MODEL_PATH_OCR", ""),
-                "embedding_model": os.getenv("MODEL_PATH_EMBEDDING", ""),
-                "rerank_model": os.getenv("MODEL_PATH_RERANKER", ""),
+                "ocr_model": "",
+                "embedding_model": "",
+                "rerank_model": "",
             },
             "embeddings": {
-                "provider": os.getenv("EMBEDDINGS_PROVIDER", "modelscope"),
-                "backend": os.getenv("EMBEDDINGS_BACKEND", "sentence_transformers"),
-                "model_name": os.getenv("EMBEDDINGS_MODEL_NAME", ""),
-                "env_var": os.getenv("EMBEDDINGS_ENV_VAR", "MODEL_PATH_EMBEDDING"),
-                "device": os.getenv("EMBEDDINGS_DEVICE", "auto"),
-                "batch_size": int(os.getenv("EMBEDDINGS_BATCH_SIZE", "32")),
-                "max_length": int(os.getenv("EMBEDDINGS_MAX_LENGTH", "512")),
-                "pooling": os.getenv("EMBEDDINGS_POOLING", "mean"),
-                "normalize": os.getenv("EMBEDDINGS_NORMALIZE", "true").lower()
-                == "true",
-                "query_prefix": os.getenv("EMBEDDINGS_QUERY_PREFIX", ""),
-                "doc_prefix": os.getenv("EMBEDDINGS_DOC_PREFIX", ""),
+                "provider": "modelscope",
+                "backend": "sentence_transformers",
+                "model_name": "",
+                "env_var": "MODEL_PATH_EMBEDDING",
+                "device": "auto",
+                "batch_size": 32,
+                "max_length": 512,
+                "pooling": "mean",
+                "normalize": True,
+                "query_prefix": "",
+                "doc_prefix": "",
             },
             "reranker": {
-                "provider": os.getenv("RERANKER_PROVIDER", "modelscope"),
-                "backend": os.getenv("RERANKER_BACKEND", "sentence_transformers"),
-                "model_name": os.getenv("RERANKER_MODEL_NAME", ""),
-                "env_var": os.getenv("RERANKER_ENV_VAR", "MODEL_PATH_RERANKER"),
-                "device": os.getenv("RERANKER_DEVICE", "auto"),
-                "batch_size": int(os.getenv("RERANKER_BATCH_SIZE", "16")),
-                "max_length": int(os.getenv("RERANKER_MAX_LENGTH", "512")),
-                "query_prefix": os.getenv("RERANKER_QUERY_PREFIX", ""),
-                "doc_prefix": os.getenv("RERANKER_DOC_PREFIX", ""),
+                "provider": "modelscope",
+                "backend": "sentence_transformers",
+                "model_name": "",
+                "env_var": "MODEL_PATH_RERANKER",
+                "device": "auto",
+                "batch_size": 16,
+                "max_length": 512,
+                "query_prefix": "",
+                "doc_prefix": "",
                 "window_size": None,
                 "stride": None,
-                "transformers_model_type": os.getenv(
-                    "RERANKER_TRANSFORMERS_MODEL_TYPE", "auto"
-                ),
+                "transformers_model_type": "auto",
             },
             "search": {
-                "provider": os.getenv("SEARCH_PROVIDER", "duckduckgo"),
-                "tavily_api_key": os.getenv("TAVILY_API_KEY", ""),
-                "serpapi_api_key": os.getenv("SERPAPI_API_KEY", ""),
-                "cache_ttl": int(os.getenv("SEARCH_CACHE_TTL", "3600")),
+                "provider": "duckduckgo",
+                "tavily_api_key": "",
+                "serpapi_api_key": "",
+                "cache_ttl": 3600,
             },
             "database": {
-                "type": os.getenv("DB_TYPE", "postgres"),
-                "url": os.getenv("DATABASE_URL", ""),
-                "host": os.getenv("DB_HOST", "localhost"),
-                "port": int(os.getenv("DB_PORT", 5432)),
-                "user": os.getenv("DB_USER", "postgres"),
-                "password": os.getenv("DB_PASSWORD", "password"),
-                "db_name": os.getenv("DB_NAME", "agent_app"),
+                "type": "postgres",
+                "url": "",
+                "host": "localhost",
+                "port": 5432,
+                "user": "postgres",
+                "password": "password",
+                "db_name": "agent_app",
             },
             "queue": {
-                "redis_url": os.getenv("REDIS_URL", "redis://localhost:6379/0"),
-                "rabbitmq_url": os.getenv("RABBITMQ_URL", ""),
-                "rabbitmq_management_url": os.getenv("RABBITMQ_MANAGEMENT_URL", ""),
+                "redis_url": "redis://localhost:6379/0",
+                "rabbitmq_url": "",
+                "rabbitmq_management_url": "",
             },
             "storage": {
-                "s3_endpoint": os.getenv("S3_ENDPOINT", ""),
-                "s3_access_key": os.getenv("S3_ACCESS_KEY", ""),
-                "s3_secret_key": os.getenv("S3_SECRET_KEY", ""),
-                "s3_bucket": os.getenv("S3_BUCKET", "agframe"),
-                "s3_secure": os.getenv("S3_SECURE", "false").lower() == "true",
+                "s3_endpoint": "",
+                "s3_access_key": "",
+                "s3_secret_key": "",
+                "s3_bucket": "agframe",
+                "s3_secure": False,
             },
             "auth": {
-                "secret_key": os.getenv(
-                    "AUTH_SECRET_KEY", "your-secret-key-keep-it-secret"
-                ),
-                "algorithm": os.getenv("AUTH_ALGORITHM", "HS256"),
-                "access_token_expire_minutes": int(
-                    os.getenv("AUTH_ACCESS_TOKEN_EXPIRE_MINUTES", "30")
-                ),
+                "secret_key": "your-secret-key-keep-it-secret",
+                "algorithm": "HS256",
+                "access_token_expire_minutes": 30,
             },
-            "general": {"app_name": os.getenv("APP_NAME", "My Agent App")},
+            "general": {"app_name": "My Agent App"},
             "rag": {
                 "retrieval": {
-                    "mode": os.getenv("RAG_RETRIEVAL_MODE", "hybrid"),
-                    "dense_k": int(os.getenv("RAG_DENSE_K", "20")),
-                    "sparse_k": int(os.getenv("RAG_SPARSE_K", "20")),
-                    "candidate_k": int(os.getenv("RAG_CANDIDATE_K", "20")),
-                    "final_k": int(os.getenv("RAG_FINAL_K", "3")),
-                    "rrf_k": int(os.getenv("RAG_RRF_K", "60")),
-                    "weights": [
-                        float(os.getenv("RAG_WEIGHT_SPARSE", "0.5")),
-                        float(os.getenv("RAG_WEIGHT_DENSE", "0.5")),
-                    ],
+                    "mode": "hybrid",
+                    "dense_k": 20,
+                    "sparse_k": 20,
+                    "candidate_k": 20,
+                    "final_k": 3,
+                    "rrf_k": 60,
+                    "weights": [0.5, 0.5],
                 }
             },
             "prompt": {
                 "budget": {
-                    "max_recent_history_lines": int(
-                        os.getenv("PROMPT_MAX_RECENT_HISTORY_LINES", "10")
-                    ),
-                    "max_docs": int(os.getenv("PROMPT_MAX_DOCS", "3")),
-                    "max_memories": int(os.getenv("PROMPT_MAX_MEMORIES", "3")),
-                    "max_doc_chars_total": int(
-                        os.getenv("PROMPT_MAX_DOC_CHARS_TOTAL", "6000")
-                    ),
-                    "max_memory_chars_total": int(
-                        os.getenv("PROMPT_MAX_MEMORY_CHARS_TOTAL", "3000")
-                    ),
-                    "max_item_chars": int(os.getenv("PROMPT_MAX_ITEM_CHARS", "2000")),
+                    "max_recent_history_lines": 10,
+                    "max_docs": 3,
+                    "max_memories": 3,
+                    "max_doc_chars_total": 6000,
+                    "max_memory_chars_total": 3000,
+                    "max_item_chars": 2000,
                 }
             },
             "nodes": {
@@ -169,49 +145,70 @@ class ConfigManager:
                 ]
             },
             "feature_flags": {
-                "enable_docs_rag": os.getenv("ENABLE_DOCS_RAG", "true").lower()
-                == "true",
-                "enable_chat_memory": os.getenv("ENABLE_CHAT_MEMORY", "true").lower()
-                == "true",
-                "enable_self_correction": os.getenv(
-                    "ENABLE_SELF_CORRECTION", "true"
-                ).lower()
-                == "true",
-                "enable_human_approval": os.getenv(
-                    "ENABLE_HUMAN_APPROVAL", "false"
-                ).lower()
-                == "true",
-                "allow_dangerous_deserialization": os.getenv(
-                    "ALLOW_DANGEROUS_DESERIALIZATION", "false"
-                ).lower()
-                == "true",
-                "enable_tools_write_file": os.getenv(
-                    "ENABLE_TOOLS_WRITE_FILE", "false"
-                ).lower()
-                == "true",
-                "enable_tools_python_repl": os.getenv(
-                    "ENABLE_TOOLS_PYTHON_REPL", "false"
-                ).lower()
-                == "true",
-                "enable_tools_python_executor": os.getenv(
-                    "ENABLE_TOOLS_PYTHON_EXECUTOR", "false"
-                ).lower()
-                == "true",
-                "pgvector_dimension": int(
-                    os.getenv("PGVECTOR_DIMENSION", "1024")
-                ),
+                "enable_docs_rag": True,
+                "enable_chat_memory": True,
+                "enable_self_correction": True,
+                "enable_human_approval": False,
+                "allow_dangerous_deserialization": False,
+                "enable_tools_write_file": False,
+                "enable_tools_python_repl": False,
+                "enable_tools_python_executor": False,
+                "pgvector_dimension": 1024,
             },
             "sandbox": {
-                "enabled": os.getenv("SANDBOX_ENABLED", "false").lower() == "true",
-                "image": os.getenv("SANDBOX_IMAGE", "python:3.11-slim"),
-                "timeout": int(os.getenv("SANDBOX_TIMEOUT", "30")),
-                "memory_limit": os.getenv("SANDBOX_MEMORY_LIMIT", "256m"),
-                "cpu_limit": float(os.getenv("SANDBOX_CPU_LIMIT", "0.5")),
+                "enabled": False,
+                "image": "python:3.11-slim",
+                "timeout": 30,
+                "memory_limit": "256m",
+                "cpu_limit": 0.5,
             },
             "self_correction": {
-                "max_attempts": int(os.getenv("SELF_CORRECTION_MAX_ATTEMPTS", "2")),
+                "max_attempts": 2,
+            },
+            "server": {
+                "host": "0.0.0.0",
+                "port": 8000,
+                "cors_origins": ["*"],
+            },
+            "storage": {
+                "documents_dir": "data/documents",
+                "uploads_dir": "data/uploads",
+                "data_dir": "data",
             },
         }
+
+    def _apply_env_overrides(self):
+        """根据 env_overrides 映射应用环境变量覆盖"""
+        env_overrides = self.config.get("env_overrides", {})
+        if not env_overrides:
+            return
+
+        for path_str, env_var in env_overrides.items():
+            env_value = os.getenv(env_var)
+            if env_value is not None:
+                self._set_nested_value(path_str, env_value)
+
+    def _set_nested_value(self, path_str: str, value: Any):
+        """根据点分路径设置嵌套值"""
+        keys = path_str.split(".")
+        target = self.config
+        for key in keys[:-1]:
+            if key not in target:
+                return
+            target = target[key]
+        last_key = keys[-1]
+        if last_key in target:
+            original = target[last_key]
+            if isinstance(original, bool):
+                target[last_key] = value.lower() == "true"
+            elif isinstance(original, int):
+                target[last_key] = int(value)
+            elif isinstance(original, float):
+                target[last_key] = float(value)
+            elif isinstance(original, list) and value.startswith("[") and value.endswith("]"):
+                pass
+            else:
+                target[last_key] = value
 
     def _load_from_file(self) -> Optional[Dict[str, Any]]:
         """从 configs/config.json 文件加载配置"""
@@ -224,24 +221,6 @@ class ConfigManager:
                 return None
         return None
 
-    def _deep_merge(self, target: Dict, source: Dict):
-        """递归合并字典，确保默认值补充缺失字段"""
-        for key, value in source.items():
-            if key not in target:
-                target[key] = value
-            elif isinstance(value, dict) and isinstance(target.get(key), dict):
-                self._deep_merge(target[key], value)
-
-    def get_config(self) -> Dict[str, Any]:
-        """获取当前配置字典"""
-        return self.config
-
-    def update_config(self, new_config: Dict[str, Any]) -> Dict[str, Any]:
-        """更新配置并持久化到文件"""
-        self._recursive_update(self.config, new_config)
-        self._save_to_file()
-        return self.config
-
     def _recursive_update(self, target: Dict, source: Dict):
         """递归更新目标字典"""
         for key, value in source.items():
@@ -253,6 +232,16 @@ class ConfigManager:
                 self._recursive_update(target[key], value)
             else:
                 target[key] = value
+
+    def get_config(self) -> Dict[str, Any]:
+        """获取当前配置字典"""
+        return self.config
+
+    def update_config(self, new_config: Dict[str, Any]) -> Dict[str, Any]:
+        """更新配置并持久化到文件"""
+        self._recursive_update(self.config, new_config)
+        self._save_to_file()
+        return self.config
 
     def _save_to_file(self):
         """保存配置到 config.json"""

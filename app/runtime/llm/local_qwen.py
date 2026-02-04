@@ -17,14 +17,13 @@ from typing import Iterator
 
 from app.infrastructure.config.config_manager import config_manager
 
-class LocalQwen2VL(BaseChatModel):
-    model_name: str = "Qwen/Qwen2-VL-2B-Instruct"
+class LocalQwen3VL(BaseChatModel):
+    model_name: str = "Qwen/Qwen3-VL-2B-Instruct"
     model: Any = None
     processor: Any = None
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # 若配置中指定了模型，则更新模型名
         config_model = config_manager.get_config().get("local_models", {}).get("ocr_model")
         if config_model:
             self.model_name = config_model
@@ -33,14 +32,38 @@ class LocalQwen2VL(BaseChatModel):
         
     def _load_model(self):
         if self.model is None:
-            print(f"正在加载本地 Qwen2-VL：{self.model_name}...")
-            # 检查设备
+            print(f"正在加载本地 Qwen3-VL：{self.model_name}...")
             device = "cuda" if torch.cuda.is_available() else "cpu"
             dtype = torch.bfloat16 if device == "cuda" else torch.float32
-            
-            # 使用带 device_map 的 from_pretrained 加载
+
             try:
-                # 使用 AutoModelForImageTextToText（对 Qwen2-VL 与 Qwen3-VL 都较通用）
+                from tqdm.auto import tqdm
+                from huggingface_hub import HfApi
+
+                tqdm.write(f"📦 正在下载视觉语言模型 {self.model_name}...")
+
+                try:
+                    api = HfApi()
+                    repo_info = api.repo_info(self.model_name, repo_type="model")
+                    siblings = getattr(repo_info, 'siblings', [])
+                    total_files = len(siblings) if siblings else 30
+
+                    with tqdm(total=total_files, desc=f"下载 {self.model_name}", unit="文件") as pbar:
+                        for sibling in siblings:
+                            filename = sibling.rfilename if hasattr(sibling, 'rfilename') else sibling
+                            try:
+                                api.hf_hub_download(
+                                    filename=filename,
+                                    repo_id=self.model_name,
+                                    repo_type="model",
+                                    resume_download=True,
+                                )
+                            except Exception:
+                                pass
+                            pbar.update(1)
+                except Exception:
+                    pass
+
                 self.model = AutoModelForImageTextToText.from_pretrained(
                     self.model_name, 
                     torch_dtype=dtype, 
@@ -51,20 +74,20 @@ class LocalQwen2VL(BaseChatModel):
                     self.model = self.model.to("cpu")
                     
                 self.processor = AutoProcessor.from_pretrained(self.model_name, trust_remote_code=True)
-                print(f"本地 Qwen2-VL 已在 {device} 上加载完成。")
+                print(f"本地 Qwen3-VL 已在 {device} 上加载完成。")
             except Exception as e:
-                print(f"加载本地 Qwen2-VL 失败：{e}")
+                print(f"加载本地 Qwen3-VL 失败：{e}")
                 raise e
 
     @property
     def _llm_type(self) -> str:
-        return "local-qwen2-vl"
+        return "local-qwen3-vl"
 
     def bind_tools(self, tools: Sequence[Union[Dict[str, Any], Type[BaseModel], Callable, BaseTool]], **kwargs: Any) -> Runnable:
         """
         Local Qwen 的 bind_tools 伪实现。
         """
-        print("警告：LocalQwen2VL 暂不支持原生工具绑定，将忽略传入的 tools。")
+        print("警告：LocalQwen3VL 暂不支持原生工具绑定，将忽略传入的 tools。")
         return self
     
     def _messages_to_conversation(self, messages: List[BaseMessage]) -> List[Dict[str, Any]]:

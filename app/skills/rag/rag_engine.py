@@ -128,8 +128,8 @@ class RAGEngine:
         1. 加载文档（文本或 OCR）。
         2. 如果数据库可用，使用 Parent Retrieval 策略：
            - 将大块父文档存入 MySQL。
-           - 将子切片存入 FAISS 向量库。
-        3. 如果数据库不可用，降级为普通向量存储模式（语义切分）。
+           - 将子切片存入 pgvector 向量库。
+        3. 如果数据库不可用，返回错误。
         4. 持久化向量索引。
 
         Args:
@@ -217,10 +217,15 @@ class RAGEngine:
             PgDocEmbeddingStore().add_embeddings(rows)
 
             if self._vectorstore is None:
-                self._vectorstore = PgVectorVectorStore(embeddings=self.embeddings)
-                self._hybrid_retriever = HybridRetrieverService(
-                    vectorstore=self._vectorstore
-                )
+                try:
+                    self._vectorstore = PgVectorVectorStore(embeddings=self.embeddings)
+                    self._hybrid_retriever = HybridRetrieverService(
+                        vectorstore=self._vectorstore
+                    )
+                except Exception as vector_error:
+                    print(f"初始化向量存储失败：{vector_error}")
+                    self._vectorstore = None
+                    self._hybrid_retriever = None
 
             print(f"成功添加了来自 {file_path} 的 {len(splits)} 个块")
             return True
@@ -350,7 +355,7 @@ class RAGEngine:
     def clear(self):
         """
         清除向量存储（危险操作！）。
-        删除磁盘上的 FAISS 索引文件并重置内存中的实例。
+        删除 pgvector 中的向量记录并重置内存中的实例。
         """
         try:
             if not ensure_schema_if_possible():

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlalchemy.dialects.postgresql
 from sqlalchemy import (
     BigInteger,
     ForeignKey,
@@ -93,7 +94,7 @@ class UserMemoryEmbedding(Base):
         ForeignKey("user_memory_item.item_id", ondelete="CASCADE"),
         primary_key=True,
     )
-    embedding: Mapped[list[float]] = mapped_column(Vector, nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(Vector(1024), nullable=False)
 
 
 class ChatSession(Base):
@@ -214,11 +215,10 @@ class DocEmbedding(Base):
     child_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding: Mapped[list[float]] = mapped_column(Vector, nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(Vector(1024), nullable=False)
     metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     __table_args__ = (
         Index("idx_doc_embedding_doc", "doc_id"),
-        Index("idx_doc_embedding_content_tsvector", func.to_tsvector("simple", content), postgresql_using="gin"),
     )

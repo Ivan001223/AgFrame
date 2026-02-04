@@ -10,10 +10,6 @@ from app.infrastructure.database.orm import get_engine
 def ensure_schema() -> None:
     """初始化数据库表结构 (create_all)"""
     engine = get_engine()
-    if engine.dialect.name == "postgresql":
-        with engine.connect() as conn:
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            conn.commit()
     Base.metadata.create_all(bind=engine)
 
 

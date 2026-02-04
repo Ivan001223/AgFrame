@@ -55,14 +55,15 @@ class TestEvaluationFramework:
 
     def test_deepeval_import(self):
         """测试 DeepEval 导入"""
-        try:
-            from deepeval.test_case import test_case
-            from deepeval.metrics import AnswerRelevancyMetric, FaithfulnessMetric
+        from deepeval.test_case import LLMTestCase
+        from deepeval.metrics import AnswerRelevancyMetric, FaithfulnessMetric
+        from deepeval.dataset import Golden, EvaluationDataset
 
-            assert AnswerRelevancyMetric is not None
-            assert FaithfulnessMetric is not None
-        except ImportError:
-            pytest.skip("DeepEval not installed")
+        assert LLMTestCase is not None
+        assert AnswerRelevancyMetric is not None
+        assert FaithfulnessMetric is not None
+        assert Golden is not None
+        assert EvaluationDataset is not None
 
     def test_ragas_import(self):
         """测试 Ragas 导入"""

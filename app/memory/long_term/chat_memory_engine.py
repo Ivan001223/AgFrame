@@ -1,20 +1,14 @@
 from __future__ import annotations
 
-import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 
 from app.runtime.llm.embeddings import ModelEmbeddings
 from app.runtime.llm.llm_factory import get_llm
 from app.runtime.llm.reranker import ModelReranker
-from app.infrastructure.config.config_manager import config_manager
-from app.memory.vector_stores.faiss_store import load_faiss, save_faiss
-
-
-CHAT_SUMMARY_STORE_BASE = os.path.join("data", "vector_store_chat_summary")
+from app.infrastructure.database.stores import PgChatSummaryStore
 
 
 def _format_chat_for_summary(messages: List[Dict[str, Any]]) -> str:
@@ -32,20 +26,20 @@ def _format_chat_for_summary(messages: List[Dict[str, Any]]) -> str:
 def summarize_chat_messages(messages: List[Dict[str, Any]]) -> str:
     """
     使用 LLM 生成对话片段的摘要。
-    
+
     Args:
         messages: 对话消息列表
-        
+
     Returns:
         str: 生成的中文摘要
     """
     llm = get_llm(temperature=0, streaming=False)
     chat_log = _format_chat_for_summary(messages)
     prompt = (
-        "你是长期记忆摘要器。只提炼对未来有价值的信息，忽略寒暄与即时情绪。\n"
-        "输出要求：中文，尽量信息密度高，最多 8 条要点，每条一句话。\n"
-        "优先级：事实与偏好 > 约束条件 > 当前目标 > 已解决/未解决的问题。\n"
-        "不要复述无意义内容（如“你好/谢谢”）。\n\n"
+        "你是长期记忆摘要器。只提炼对未来有价值的信息，忽略寒暄与即时情绪。"
+        "输出要求：中文，尽量信息密度高，最多 8 条要点，每条一句话。"
+        "优先级：事实与偏好 > 约束条件 > 当前目标 > 已解决/未解决的问题。"
+        "不要复述无意义内容（如你好/谢谢）。"
         "<chat_log>\n"
         f"{chat_log}\n"
         "</chat_log>"
@@ -57,36 +51,12 @@ class ChatSummaryIndex:
     """
     聊天摘要索引服务。
     负责管理用户对话历史的摘要，并支持语义检索。
-    每个用户的摘要存储在独立的 FAISS 索引中。
+    使用 pgvector 存储向量，支持分布式部署。
     """
-    def __init__(self, base_dir: str = CHAT_SUMMARY_STORE_BASE):
-        self.base_dir = base_dir
+    def __init__(self):
         self.embeddings = ModelEmbeddings()
         self.reranker = ModelReranker()
-        self._stores: Dict[str, Optional[FAISS]] = {}
-
-    def _user_dir(self, user_id: str) -> str:
-        """获取特定用户的索引存储目录"""
-        return os.path.join(self.base_dir, user_id)
-
-    def _load(self, user_id: str) -> Optional[FAISS]:
-        """加载用户的 FAISS 索引（懒加载模式）"""
-        if user_id in self._stores:
-            return self._stores[user_id]
-        user_dir = self._user_dir(user_id)
-        flags = (config_manager.get_config() or {}).get("feature_flags", {}) or {}
-        store = load_faiss(
-            user_dir,
-            self.embeddings,
-            allow_dangerous_deserialization=bool(flags.get("allow_dangerous_deserialization", False)),
-        )
-        self._stores[user_id] = store
-        return store
-
-    def _persist(self, user_id: str) -> None:
-        """持久化保存用户的 FAISS 索引"""
-        user_dir = self._user_dir(user_id)
-        save_faiss(user_dir, self._stores.get(user_id))
+        self._store = PgChatSummaryStore()
 
     def add_summary(
         self,
@@ -96,10 +66,10 @@ class ChatSummaryIndex:
         start_msg_id: Optional[int] = None,
         end_msg_id: Optional[int] = None,
         created_at: Optional[int] = None,
-    ) -> None:
+    ) -> int:
         """
         添加新的对话摘要到索引中。
-        
+
         Args:
             user_id: 用户 ID
             session_id: 会话 ID
@@ -107,25 +77,20 @@ class ChatSummaryIndex:
             start_msg_id: 摘要对应的起始消息 ID
             end_msg_id: 摘要对应的结束消息 ID
             created_at: 创建时间戳
+
+        Returns:
+            int: 摘要项 ID
         """
-        created_at_val = int(created_at or time.time())
-        doc = Document(
-            page_content=summary_text,
-            metadata={
-                "type": "chat_summary",
-                "user_id": user_id,
-                "session_id": session_id,
-                "start_msg_id": start_msg_id,
-                "end_msg_id": end_msg_id,
-                "created_at": created_at_val,
-            },
+        embedding = self.embeddings.embed_query(summary_text)
+        return self._store.add_summary(
+            user_id=user_id,
+            session_id=session_id,
+            summary_text=summary_text,
+            embedding=embedding,
+            start_msg_id=start_msg_id,
+            end_msg_id=end_msg_id,
+            created_at=created_at,
         )
-        store = self._load(user_id)
-        if store is None:
-            self._stores[user_id] = FAISS.from_documents([doc], self.embeddings)
-        else:
-            store.add_documents([doc])
-        self._persist(user_id)
 
     def retrieve(
         self, user_id: str, query: str, k: int = 3, fetch_k: int = 20
@@ -133,20 +98,34 @@ class ChatSummaryIndex:
         """
         检索相关的历史对话摘要。
         包含召回和重排两个步骤。
-        
+
         Args:
             user_id: 用户 ID
             query: 查询语句
             k: 返回结果数量
             fetch_k: 召回数量
-            
+
         Returns:
             List[Document]: 相关的摘要文档列表
         """
-        store = self._load(user_id)
-        if store is None:
+        query_vec = self.embeddings.embed_query(query)
+        rows = self._store.search(user_id, query_vec, k=fetch_k)
+        if not rows:
             return []
-        candidates = store.similarity_search(query, k=fetch_k)
+        candidates = [
+            Document(
+                page_content=r["text"],
+                metadata={
+                    "type": "chat_summary",
+                    "user_id": r["user_id"],
+                    "session_id": r["session_id"],
+                    "start_msg_id": r.get("start_msg_id"),
+                    "end_msg_id": r.get("end_msg_id"),
+                    "created_at": r.get("created_at"),
+                },
+            )
+            for r in rows
+        ]
         if not candidates:
             return []
         candidate_texts = [d.page_content for d in candidates]
@@ -169,12 +148,12 @@ def select_recent_turn_messages(messages: List[Dict[str, Any]], recent_turns: in
 
 def split_messages_for_memory(messages: List[Dict[str, Any]], recent_turns: int) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
-    将消息列表切分为“旧消息”（用于生成摘要）和“近期消息”（保留在上下文中）。
-    
+    将消息列表切分为"旧消息"（用于生成摘要）和"近期消息"（保留在上下文中）。
+
     Args:
         messages: 完整消息列表
         recent_turns: 保留的最近轮数
-        
+
     Returns:
         Tuple[List, List]: (older_messages, recent_messages)
     """

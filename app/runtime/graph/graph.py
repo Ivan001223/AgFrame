@@ -21,10 +21,11 @@ from app.runtime.graph.state import AgentState
 
 def _route_key(state: AgentState) -> Literal["none", "docs", "history", "both"]:
     cfg = config_manager.get_config() or {}
-    flags = cfg.get("feature_flags", {}) or {}
+    flags = cfg.get("feature_flags", {})
     enable_docs_rag = bool(flags.get("enable_docs_rag", True))
     enable_chat_memory = bool(flags.get("enable_chat_memory", True))
-    route = state.get("route") or (state.get("context") or {}).get("route") or {}
+    context = state.get("context") or {}
+    route = state.get("route") or context.get("route") or {}
     needs_docs = bool(route.get("needs_docs")) and enable_docs_rag
     needs_history = bool(route.get("needs_history")) and enable_chat_memory
     if needs_docs and needs_history:
@@ -38,9 +39,10 @@ def _route_key(state: AgentState) -> Literal["none", "docs", "history", "both"]:
 
 def _after_docs_key(state: AgentState) -> Literal["profile", "memories"]:
     cfg = config_manager.get_config() or {}
-    flags = cfg.get("feature_flags", {}) or {}
+    flags = cfg.get("feature_flags", {})
     enable_chat_memory = bool(flags.get("enable_chat_memory", True))
-    route = state.get("route") or (state.get("context") or {}).get("route") or {}
+    context = state.get("context") or {}
+    route = state.get("route") or context.get("route") or {}
     if bool(route.get("needs_history")) and enable_chat_memory:
         return "memories"
     return "profile"
@@ -48,7 +50,7 @@ def _after_docs_key(state: AgentState) -> Literal["profile", "memories"]:
 
 def _get_max_self_correction_attempts() -> int:
     cfg = config_manager.get_config() or {}
-    sc_cfg = cfg.get("self_correction", {}) or {}
+    sc_cfg = cfg.get("self_correction", {})
     val = sc_cfg.get("max_attempts")
     if val is None:
         return 2

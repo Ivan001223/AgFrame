@@ -204,10 +204,64 @@ export REDIS_URL="redis://localhost:6379/0"
 ### 3. 启动依赖
 
 ```bash
+# 复制环境变量模板
+cp .env.example .env
+
+# 编辑 .env 配置数据库连接等（可选，使用默认值可直接启动）
+# vim .env
+
+# 启动所有基础设施
 docker-compose up -d
+
+# 验证服务状态
+docker-compose ps
 ```
 
-### 4. 启动服务
+**启动的服务：**
+
+| 服务 | 端口 | 用途 |
+|------|------|------|
+| PostgreSQL + pgvector | 5432 | 主数据库 + 向量存储 |
+| Redis | 6379 | 缓存、Checkpoint、任务队列 |
+| RabbitMQ | 5672/15672 | ARQ 异步任务队列 |
+| ClickHouse | 8123 | Langfuse 指标存储 |
+| MinIO | 9000/9001 | S3 对象存储 |
+| Langfuse | 3000 | 可观测性追踪 |
+
+**验证命令：**
+
+```bash
+# PostgreSQL
+psql -h localhost -p 5432 -U agframe -d agframe -c "SELECT 1"
+
+# Redis
+redis-cli -h localhost -p 6379 -a redissecret ping
+
+# RabbitMQ Management
+curl -u agframe:rabbitmq_secret http://localhost:15672/api/overview
+
+# ClickHouse
+curl http://localhost:8123/ping
+
+# MinIO
+mc alias set local http://localhost:9000 minioadmin minioadmin_secret
+mc ls local
+
+# Langfuse
+curl http://localhost:3000/api/public
+```
+
+### 4. 初始化 MinIO Bucket
+
+```bash
+# 创建 bucket
+docker-compose exec minio mc mb local/agframe
+
+# 设置公开访问策略（可选，用于存储公开资源）
+docker-compose exec minio mc anonymous set public local/agframe
+```
+
+### 5. 启动服务
 
 ```bash
 python -m app.server.main
@@ -216,6 +270,16 @@ python -m app.server.main
 服务运行在 `http://localhost:8000`
 
 - **Swagger Docs**: http://localhost:8000/docs
+
+## 停止服务
+
+```bash
+# 停止所有基础设施
+docker-compose down
+
+# 停止并删除数据卷（慎用！）
+docker-compose down -v
+```
 
 ## 开发指南
 

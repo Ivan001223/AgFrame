@@ -108,6 +108,7 @@ services:
     ports:
       - "5435:5432"
     volumes:
+      - ./docker/init-pgvector.sql:/docker-entrypoint-initdb.d/01-pgvector.sql
       - /var/lib/postgresql/data
 
   clickhouse:

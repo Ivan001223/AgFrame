@@ -21,11 +21,12 @@ class ConfigManager:
         return cls._instance
 
     def _init_config(self):
-        """初始化配置：加载环境变量 -> 加载文件 -> 合并默认值"""
+        """初始化配置：加载默认值 -> 合并文件配置（文件覆盖默认）"""
         init_env()
-        self.config = self._load_from_file() or self._load_defaults()
-        defaults = self._load_defaults()
-        self._deep_merge(self.config, defaults)
+        self.config = self._load_defaults()
+        file_config = self._load_from_file()
+        if file_config:
+            self._recursive_update(self.config, file_config)
 
     def _load_defaults(self) -> Dict[str, Any]:
         """加载默认配置结构，优先使用环境变量"""
@@ -107,6 +108,15 @@ class ConfigManager:
             },
             "queue": {
                 "redis_url": os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+                "rabbitmq_url": os.getenv("RABBITMQ_URL", ""),
+                "rabbitmq_management_url": os.getenv("RABBITMQ_MANAGEMENT_URL", ""),
+            },
+            "storage": {
+                "s3_endpoint": os.getenv("S3_ENDPOINT", ""),
+                "s3_access_key": os.getenv("S3_ACCESS_KEY", ""),
+                "s3_secret_key": os.getenv("S3_SECRET_KEY", ""),
+                "s3_bucket": os.getenv("S3_BUCKET", "agframe"),
+                "s3_secure": os.getenv("S3_SECURE", "false").lower() == "true",
             },
             "auth": {
                 "secret_key": os.getenv(
@@ -187,6 +197,9 @@ class ConfigManager:
                     "ENABLE_TOOLS_PYTHON_EXECUTOR", "false"
                 ).lower()
                 == "true",
+                "pgvector_dimension": int(
+                    os.getenv("PGVECTOR_DIMENSION", "1024")
+                ),
             },
             "sandbox": {
                 "enabled": os.getenv("SANDBOX_ENABLED", "false").lower() == "true",

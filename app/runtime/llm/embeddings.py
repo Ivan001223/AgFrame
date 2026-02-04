@@ -74,12 +74,13 @@ class ModelEmbeddings(Embeddings):
             print(f"正在加载向量模型：{self.model_name}（设备：{self._device}，后端：sentence_transformers）...")
             try:
                 self._st_model = load_sentence_transformers_embedder(
-                    self._loaded_source, device=self._device, max_length=self._max_length
+                    self._loaded_source, device=self._device, max_length=self._max_length,
+                    model_name=self.model_name
                 )
                 print("向量模型加载完成。")
             except Exception as e:
                 print(f"加载向量模型失败：{e}")
-                raise e
+                raise
             return
 
         if self._model is None:
@@ -90,6 +91,7 @@ class ModelEmbeddings(Embeddings):
                     self._loaded_source,
                     trust_remote_code=self._spec.trust_remote_code,
                     device=self._device,
+                    model_name=self.model_name,
                 )
                 self._processor = try_load_transformers_processor(
                     self._loaded_source, trust_remote_code=self._spec.trust_remote_code
@@ -101,7 +103,7 @@ class ModelEmbeddings(Embeddings):
                 print("向量模型加载完成。")
             except Exception as e:
                 print(f"加载向量模型失败：{e}")
-                raise e
+                raise
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """

@@ -348,13 +348,13 @@ class PgDocEmbeddingStore:
         q = bindparam("query_vec", value=list(query_vec), type_=Vector)
         distance = cast(DocEmbedding.embedding.op("<=>")(q), Float)
         stmt = select(DocEmbedding).order_by(distance).limit(int(k))
-        
+
         if filter:
+            allowed_keys = {"user_id", "doc_id", "source", "type"}
             for key, value in filter.items():
-                if key == "user_id":
-                     stmt = stmt.where(func.json_extract(DocEmbedding.metadata_json, "$.user_id") == value)
-                else:
-                     stmt = stmt.where(func.json_extract(DocEmbedding.metadata_json, f"$.{key}") == value)
+                if key not in allowed_keys:
+                    continue
+                stmt = stmt.where(func.json_extract(DocEmbedding.metadata_json, f"$.{key}") == value)
 
         with get_session() as session:
             return list(session.execute(stmt).scalars().all())
@@ -375,18 +375,11 @@ class PgDocEmbeddingStore:
         )
         
         if filter:
-            # 简单的 metadata_json 过滤支持
-            # 例如: {"user_id": "123", "source": "abc.pdf"}
+            allowed_keys = {"user_id", "doc_id", "source", "type"}
             for key, value in filter.items():
-                # 针对 metadata_json 字段的过滤
-                # 注意：这里假设 metadata_json 是 JSONB 或 JSON 类型
-                # SQLAlchemy 的 cast(DocEmbedding.metadata_json[key], String) == str(value) 可能会有性能问题
-                # 更好的方式是使用 @> 操作符 if supported by generic approach, but here logic is simple exact match
-                if key == "user_id":
-                     stmt = stmt.where(func.json_extract(DocEmbedding.metadata_json, "$.user_id") == value)
-                else:
-                     # Fallback check inside metadata_json
-                     stmt = stmt.where(func.json_extract(DocEmbedding.metadata_json, f"$.{key}") == value)
+                if key not in allowed_keys:
+                    continue
+                stmt = stmt.where(func.json_extract(DocEmbedding.metadata_json, f"$.{key}") == value)
 
         with get_session() as session:
             return list(session.execute(stmt).scalars().all())
@@ -529,3 +522,103 @@ class PgUserMemoryStore:
                     }
                 )
             return out
+
+
+class PgChatSummaryStore:
+    """聊天摘要向量存储 (pgvector)"""
+
+    def add_summary(
+        self,
+        user_id: str,
+        session_id: str,
+        summary_text: str,
+        embedding: List[float],
+        start_msg_id: Optional[int] = None,
+        end_msg_id: Optional[int] = None,
+        created_at: Optional[int] = None,
+    ) -> int:
+        now = int(created_at or time.time())
+        with get_session() as session:
+            item = UserMemoryItem(
+                user_id=user_id,
+                kind="chat_summary",
+                session_id=session_id,
+                text=summary_text,
+                item_hash=None,
+                created_at=now,
+                updated_at=now,
+                metadata_json={
+                    "start_msg_id": start_msg_id,
+                    "end_msg_id": end_msg_id,
+                },
+            )
+            session.add(item)
+            session.flush()
+            session.add(UserMemoryEmbedding(item_id=int(item.item_id), embedding=embedding))
+            return int(item.item_id)
+
+    def search(
+        self,
+        user_id: str,
+        query_vec: List[float],
+        k: int = 3,
+        filter_session_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        uid = str(user_id or "").strip()
+        if not uid or not query_vec or k <= 0:
+            return []
+        q = bindparam("query_vec", value=list(query_vec), type_=Vector)
+        distance = cast(UserMemoryEmbedding.embedding.op("<=>")(q), Float)
+        stmt = (
+            select(UserMemoryItem, distance.label("distance"))
+            .join(UserMemoryEmbedding, UserMemoryEmbedding.item_id == UserMemoryItem.item_id)
+            .where(UserMemoryItem.user_id == uid, UserMemoryItem.kind == "chat_summary")
+        )
+        if filter_session_id:
+            stmt = stmt.where(UserMemoryItem.session_id == filter_session_id)
+        stmt = stmt.order_by(distance).limit(int(k))
+        with get_session() as session:
+            rows = session.execute(stmt).all()
+            out: List[Dict[str, Any]] = []
+            for it, dist in rows:
+                out.append(
+                    {
+                        "item_id": int(it.item_id),
+                        "user_id": str(it.user_id),
+                        "session_id": it.session_id,
+                        "text": it.text,
+                        "start_msg_id": it.metadata_json.get("start_msg_id") if it.metadata_json else None,
+                        "end_msg_id": it.metadata_json.get("end_msg_id") if it.metadata_json else None,
+                        "created_at": int(it.created_at),
+                        "distance": float(dist) if dist is not None else None,
+                    }
+                )
+            return out
+
+    def delete_by_session(self, user_id: str, session_id: str) -> int:
+        uid = str(user_id or "").strip()
+        sid = str(session_id or "").strip()
+        if not uid or not sid:
+            return 0
+        with get_session() as session:
+            res = session.execute(
+                delete(UserMemoryItem).where(
+                    UserMemoryItem.user_id == uid,
+                    UserMemoryItem.session_id == sid,
+                    UserMemoryItem.kind == "chat_summary",
+                )
+            )
+            return int(res.rowcount or 0)
+
+    def delete_by_user(self, user_id: str) -> int:
+        uid = str(user_id or "").strip()
+        if not uid:
+            return 0
+        with get_session() as session:
+            res = session.execute(
+                delete(UserMemoryItem).where(
+                    UserMemoryItem.user_id == uid,
+                    UserMemoryItem.kind == "chat_summary",
+                )
+            )
+            return int(res.rowcount or 0)

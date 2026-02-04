@@ -1,56 +1,45 @@
-import json
-import redis
-from typing import Optional, Any, Dict
-from datetime import datetime
+from langgraph.checkpoint.redis import AsyncRedisSaver
+from langgraph.checkpoint.base import BaseCheckpointSaver
+import os
+from app.infrastructure.config.config_manager import config_manager
 
 
-class CheckpointStore:
-    def __init__(self, redis_url: str = "redis://localhost:6379/0"):
-        self.redis_url = redis_url
-        self._client: Optional[redis.Redis] = None
-
-    @property
-    def client(self) -> redis.Redis:
-        if self._client is None:
-            self._client = redis.from_url(self.redis_url, decode_responses=True)
-        return self._client
-
-    def _make_key(self, thread_id: str, checkpoint_ns: str = "default") -> str:
-        return f"agframe:checkpoint:{checkpoint_ns}:{thread_id}"
-
-    async def save(self, thread_id: str, checkpoint: Dict[str, Any], metadata: Optional[Dict[str, Any]] = None) -> None:
-        key = self._make_key(thread_id)
-        data = {
-            "checkpoint": json.dumps(checkpoint),
-            "metadata": json.dumps(metadata or {}),
-            "updated_at": datetime.utcnow().isoformat(),
-        }
-        self.client.hset(key, mapping=data)
-        self.client.expire(key, 86400 * 7)
-
-    async def load(self, thread_id: str) -> Optional[Dict[str, Any]]:
-        key = self._make_key(thread_id)
-        data = self.client.hgetall(key)
-        if not data:
-            return None
-        return {
-            "checkpoint": json.loads(data.get("checkpoint", "{}")),
-            "metadata": json.loads(data.get("metadata", "{}")),
-            "updated_at": data.get("updated_at"),
-        }
-
-    async def delete(self, thread_id: str) -> None:
-        key = self._make_key(thread_id)
-        self.client.delete(key)
-
-    async def list_threads(self, namespace: str = "default") -> list:
-        pattern = f"agframe:checkpoint:{namespace}:*"
-        keys = self.client.keys(pattern)
-        return [key.split(":")[-1] for key in keys]
+def _get_redis_url() -> str:
+    cfg = config_manager.get_config() or {}
+    queue_cfg = cfg.get("queue") or {}
+    url = queue_cfg.get("redis_url") or os.getenv("REDIS_URL") or "redis://localhost:6379/0"
+    return str(url)
 
 
-checkpoint_store = CheckpointStore()
+class AsyncRedisSaverWrapper(BaseCheckpointSaver):
+    def __init__(self):
+        self._saver: AsyncRedisSaver = None
+
+    async def get_saver(self) -> AsyncRedisSaver:
+        if self._saver is None:
+            self._saver = AsyncRedisSaver(redis_url=_get_redis_url())
+            await self._saver.setup()
+        return self._saver
+
+    async def aget_tuple(self, config):
+        saver = await self.get_saver()
+        return await saver.aget_tuple(config)
+
+    async def aput(self, config, checkpoint, metadata, new_version):
+        saver = await self.get_saver()
+        return await saver.aput(config, checkpoint, metadata, new_version)
+
+    async def aput_writes(self, config, writes, task_id, task_path=''):
+        saver = await self.get_saver()
+        return await saver.aput_writes(config, writes, task_id, task_path)
+
+    async def adelete_thread(self, thread_id):
+        saver = await self.get_saver()
+        return await saver.adelete_thread(thread_id)
+
+    async def alist(self, config, limit, before, filter=None):
+        saver = await self.get_saver()
+        return await saver.alist(config, limit, before, filter)
 
 
-async def get_checkpoint_store() -> CheckpointStore:
-    return checkpoint_store
+checkpoint_store = AsyncRedisSaverWrapper()

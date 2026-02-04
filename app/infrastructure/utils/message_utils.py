@@ -1,6 +1,6 @@
 from typing import Iterable, List, Union, Dict, Any
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, convert_to_messages
 
 
 def _content_to_text(content: Any) -> str:
@@ -29,8 +29,20 @@ def sanitize_messages_for_routing(messages: Iterable[BaseMessage]) -> List[BaseM
     Returns:
         List[BaseMessage]: 清洗后的纯文本消息列表
     """
-    sanitized: List[BaseMessage] = []
+    # Convert messages to dict format and back to ensure correct types
+    raw_messages = []
     for msg in messages:
+        if hasattr(msg, 'dict'):
+            raw_messages.append(msg.dict())
+        elif hasattr(msg, '__dict__'):
+            raw_messages.append({'type': getattr(msg, 'type', 'unknown'), 'content': getattr(msg, 'content', '')})
+        else:
+            raw_messages.append(msg)
+    
+    converted_messages = convert_to_messages(raw_messages)
+    
+    sanitized: List[BaseMessage] = []
+    for msg in converted_messages:
         content = _content_to_text(getattr(msg, "content", ""))
         msg_type = getattr(msg, "type", None)
 

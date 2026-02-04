@@ -1,54 +1,120 @@
 services:
-  langfuse-worker:
-    image: langfuse/langfuse-worker:3
-    depends_on:
-      db:
-        condition: service_healthy
-      clickhouse:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: agframe-postgres
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agframe}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/postgres
-      - NEXTAUTH_SECRET=mysecret
-      - SALT=mysalt
-      - ENCRYPTION_KEY=e5470501e37d01380220b51858dc30d26cdd6ba6ebfc954263aeeb977947a0c5
-      - NEXTAUTH_URL=http://localhost:3000
-      - TELEMETRY_ENABLED=false
-      - NEXT_TELEMETRY_DISABLED=1
-      - LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES=true
-      - CLICKHOUSE_URL=http://clickhouse:8123
-      - CLICKHOUSE_MIGRATION_URL=clickhouse://clickhouse:9000
-      - CLICKHOUSE_USER=clickhouse
-      - CLICKHOUSE_PASSWORD=clickhouse
-      - CLICKHOUSE_CLUSTER_ENABLED=false
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_AUTH=myredissecret
-      # MinIO / S3 Configuration
-      - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=langfuse
-      - LANGFUSE_S3_EVENT_UPLOAD_REGION=auto
-      - LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=minio
-      - LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=miniosecret
-      - LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT=http://minio:9000
-      - LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE=true
-      # Init Variables
-      - LANGFUSE_INIT_ORG_ID=org-123
-      - LANGFUSE_INIT_ORG_NAME=MyOrg
-      - LANGFUSE_INIT_PROJECT_ID=project-123
-      - LANGFUSE_INIT_PROJECT_NAME=MyProject
-      - LANGFUSE_INIT_PROJECT_PUBLIC_KEY=pk-lf-151b2be3-f847-4e4f-8428-6d4068671248
-      - LANGFUSE_INIT_PROJECT_SECRET_KEY=sk-lf-99299b0d-ebb2-409c-9238-3fb2e6d2d650
-      - LANGFUSE_INIT_USER_EMAIL=admin@langfuse.com
-      - LANGFUSE_INIT_USER_NAME=Admin
-      - LANGFUSE_INIT_USER_PASSWORD=password
+      - POSTGRES_USER=${POSTGRES_USER:-agframe}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-agframe_secret}
+      - POSTGRES_DB=${POSTGRES_DB:-agframe}
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./docker/init-pgvector.sql:/docker-entrypoint-initdb.d/01-pgvector.sql
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - agframe-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: agframe-redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD:-redissecret}
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redissecret}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis_data:/data
+    networks:
+      - agframe-network
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: agframe-rabbitmq
+    restart: unless-stopped
+    hostname: agframe-rabbitmq
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER:-agframe}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:-rabbitmq_secret}
+      - RABBITMQ_MANAGEMENT_ENABLED=true
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ./docker/rabbitmq/defs.json:/etc/rabbitmq/defs.json:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    networks:
+      - agframe-network
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: agframe-clickhouse
+    restart: unless-stopped
+    user: "101:101"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "localhost:8123/ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    environment:
+      - CLICKHOUSE_DB=${CLICKHOUSE_DB:-default}
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-clickhouse}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-clickhouse}
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_log:/var/log/clickhouse-server
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    networks:
+      - agframe-network
+
+  minio:
+    image: minio/minio:latest
+    container_name: agframe-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin_secret}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    networks:
+      - agframe-network
 
   langfuse-server:
     image: langfuse/langfuse:3
+    container_name: agframe-langfuse
+    restart: unless-stopped
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
@@ -59,9 +125,9 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/postgres
-      - NEXTAUTH_SECRET=mysecret
-      - SALT=mysalt
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-agframe}:${POSTGRES_PASSWORD:-agframe_secret}@postgres:5432/${POSTGRES_DB:-agframe}
+      - NEXTAUTH_SECRET=${AUTH_SECRET_KEY:-change-this-in-production}
+      - SALT=${AUTH_SECRET_KEY:-change-this-in-production}
       - ENCRYPTION_KEY=e5470501e37d01380220b51858dc30d26cdd6ba6ebfc954263aeeb977947a0c5
       - NEXTAUTH_URL=http://localhost:3000
       - TELEMETRY_ENABLED=false
@@ -69,107 +135,72 @@ services:
       - LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES=true
       - CLICKHOUSE_URL=http://clickhouse:8123
       - CLICKHOUSE_MIGRATION_URL=clickhouse://clickhouse:9000
-      - CLICKHOUSE_USER=clickhouse
-      - CLICKHOUSE_PASSWORD=clickhouse
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-clickhouse}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-clickhouse}
       - CLICKHOUSE_CLUSTER_ENABLED=false
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - REDIS_AUTH=myredissecret
-      # MinIO / S3 Configuration
-      - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=langfuse
+      - REDIS_AUTH=${REDIS_PASSWORD:-redissecret}
+      - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=${S3_BUCKET:-agframe}
       - LANGFUSE_S3_EVENT_UPLOAD_REGION=auto
-      - LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=minio
-      - LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=miniosecret
+      - LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin_secret}
       - LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT=http://minio:9000
       - LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE=true
-      # Init Variables
-      - LANGFUSE_INIT_ORG_ID=org-123
-      - LANGFUSE_INIT_ORG_NAME=MyOrg
-      - LANGFUSE_INIT_PROJECT_ID=project-123
-      - LANGFUSE_INIT_PROJECT_NAME=MyProject
-      - LANGFUSE_INIT_PROJECT_PUBLIC_KEY=pk-lf-151b2be3-f847-4e4f-8428-6d4068671248
-      - LANGFUSE_INIT_PROJECT_SECRET_KEY=sk-lf-99299b0d-ebb2-409c-9238-3fb2e6d2d650
-      - LANGFUSE_INIT_USER_EMAIL=admin@langfuse.com
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://localhost:3000}
+      - LANGFUSE_INIT_ORG_ID=org-agframe
+      - LANGFUSE_INIT_ORG_NAME=AgFrame
+      - LANGFUSE_INIT_PROJECT_ID=project-agframe
+      - LANGFUSE_INIT_PROJECT_NAME=AgFrame Project
+      - LANGFUSE_INIT_USER_EMAIL=admin@agframe.local
       - LANGFUSE_INIT_USER_NAME=Admin
-      - LANGFUSE_INIT_USER_PASSWORD=password
+      - LANGFUSE_INIT_USER_PASSWORD=${LANGFUSE_ADMIN_PASSWORD:-admin123}
+    networks:
+      - agframe-network
 
-  db:
-    image: postgres:15
-    restart: always
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 3s
-      timeout: 3s
-      retries: 5
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    container_name: agframe-langfuse-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=postgres
-    ports:
-      - "5435:5432"
-    volumes:
-      - ./docker/init-pgvector.sql:/docker-entrypoint-initdb.d/01-pgvector.sql
-      - /var/lib/postgresql/data
-
-  clickhouse:
-    image: clickhouse/clickhouse-server:24.8
-    user: "101:101"
-    restart: always
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "localhost:8123/ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-    environment:
-      - CLICKHOUSE_DB=default
-      - CLICKHOUSE_USER=clickhouse
-      - CLICKHOUSE_PASSWORD=clickhouse
-      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
-    ports:
-      - "8123:8123"
-      - "9002:9000"
-    volumes:
-      - clickhouse_data:/var/lib/clickhouse
-      - clickhouse_log:/var/log/clickhouse-server
-    ulimits:
-      nofile:
-        soft: 262144
-        hard: 262144
-
-  redis:
-    image: redis:7
-    restart: always
-    command: redis-server --requirepass myredissecret
-    ports:
-      - "6379:6379"
-    environment:
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-agframe}:${POSTGRES_PASSWORD:-agframe_secret}@postgres:5432/${POSTGRES_DB:-agframe}
+      - NEXTAUTH_SECRET=${AUTH_SECRET_KEY:-change-this-in-production}
+      - SALT=${AUTH_SECRET_KEY:-change-this-in-production}
+      - ENCRYPTION_KEY=e5470501e37d01380220b51858dc30d26cdd6ba6ebfc954263aeeb977947a0c5
+      - CLICKHOUSE_URL=http://clickhouse:8123
+      - CLICKHOUSE_MIGRATION_URL=clickhouse://clickhouse:9000
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-clickhouse}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-clickhouse}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 3s
-      timeout: 10s
-      retries: 5
+      - REDIS_AUTH=${REDIS_PASSWORD:-redissecret}
+      - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=${S3_BUCKET:-agframe}
+      - LANGFUSE_S3_EVENT_UPLOAD_REGION=auto
+      - LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin_secret}
+      - LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT=http://minio:9000
+      - LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE=true
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://localhost:3000}
+    networks:
+      - agframe-network
 
-  minio:
-    image: minio/minio
-    restart: always
-    command: server /data --console-address ":9001"
-    environment:
-      - MINIO_ROOT_USER=minio
-      - MINIO_ROOT_PASSWORD=miniosecret
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio_data:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+networks:
+  agframe-network:
+    driver: bridge
 
 volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
   clickhouse_data:
   clickhouse_log:
   minio_data:

@@ -16,6 +16,7 @@ from app.infrastructure.database.schema import ensure_schema_if_possible
 from app.infrastructure.utils.logging import init_logging
 from app.infrastructure.observability import get_langfuse_callback
 from app.infrastructure.queue.redis_client import get_redis
+from app.infrastructure.config.config_manager import config_manager
 
 # Import routers
 from app.server.api import upload, tasks, settings, history, profile, vectorstore, auth, interrupt
@@ -100,9 +101,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 app = FastAPI(title="Agent Scaffold API", version="1.0", lifespan=lifespan)
 
+server_config = config_manager.get_config().get("server", {})
+storage_config = config_manager.get_config().get("storage", {})
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=server_config.get("cors_origins", ["*"]),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -126,10 +130,13 @@ add_routes(
 )
 
 # 静态文件
-os.makedirs("data/documents", exist_ok=True)
-os.makedirs("data/uploads", exist_ok=True)
-app.mount("/files", StaticFiles(directory="data/documents"), name="files")
-app.mount("/uploads", StaticFiles(directory="data/uploads"), name="uploads")
+documents_dir = storage_config.get("documents_dir", "data/documents")
+uploads_dir = storage_config.get("uploads_dir", "data/uploads")
+
+os.makedirs(documents_dir, exist_ok=True)
+os.makedirs(uploads_dir, exist_ok=True)
+app.mount("/files", StaticFiles(directory=documents_dir), name="files")
+app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
 # Include Routers
 app.include_router(auth.router)
@@ -142,4 +149,8 @@ app.include_router(profile.router, dependencies=[Depends(get_current_active_user
 app.include_router(vectorstore.router, dependencies=[Depends(get_current_admin_user)])
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        app,
+        host=server_config.get("host", "0.0.0.0"),
+        port=server_config.get("port", 8000)
+    )

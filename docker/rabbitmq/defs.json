@@ -1,0 +1,66 @@
+{
+  "rabbit_version": "3.13",
+  "users": [
+    {
+      "name": "agframe",
+      "password_hash": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "tags": ["administrator"]
+    }
+  ],
+  "vhosts": [
+    {
+      "name": "/",
+      "description": "Default virtual host",
+      "tags": []
+    }
+  ],
+  "permissions": [
+    {
+      "vhost": "/",
+      "user": "agframe",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    }
+  ],
+  "queues": [
+    {
+      "name": "agframe-tasks",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "agframe-tasks-retry",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "",
+        "x-dead-letter-routing-key": "agframe-tasks-retry"
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "agframe-exchange",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
+  "bindings": [
+    {
+      "source": "agframe-exchange",
+      "vhost": "/",
+      "destination": "agframe-tasks",
+      "destination_type": "queue",
+      "routing_key": "agframe-tasks",
+      "arguments": {}
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "metric": {
+    "answer_relevancy": {
+      "use_llm": true
+    },
+    "faithfulness": {
+      "use_llm": true
+    },
+    "contextual_recall": {
+      "use_llm": true
+    },
+    "contextual_precision": {
+      "use_llm": true
+    },
+    "contextual_relevancy": {
+      "use_llm": true
+    }
+  },
+  "completion": {
+    "model": "gpt-4o"
+  }
+}

@@ -85,9 +85,10 @@ text_split.split_text_by_chars = MagicMock(return_value=["chunk1", "chunk2"])
 config = MagicMock()
 infrastructure.config = config
 sys.modules["app.infrastructure.config"] = config
-config_manager = MagicMock()
-config.config_manager = config_manager
-sys.modules["app.infrastructure.config.config_manager"] = config_manager
+# Mock settings module
+settings = MagicMock()
+config.settings = settings
+sys.modules["app.infrastructure.config.settings"] = settings
 
 
 # Memory

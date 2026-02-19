@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from langchain_core.documents import Document
 
@@ -27,9 +27,9 @@ class UserMemoryEngine:
         user_id: str,
         session_id: str,
         summary_text: str,
-        start_msg_id: Optional[int] = None,
-        end_msg_id: Optional[int] = None,
-        created_at: Optional[int] = None,
+        start_msg_id: int | None = None,
+        end_msg_id: int | None = None,
+        created_at: int | None = None,
     ) -> None:
         uid = str(user_id or "").strip()
         sid = str(session_id or "").strip()
@@ -70,7 +70,7 @@ class UserMemoryEngine:
         query: str,
         k: int = 3,
         fetch_k: int = 20,
-    ) -> List[Document]:
+    ) -> list[Document]:
         uid = str(user_id or "").strip()
         q = str(query or "").strip()
         if not uid or not q:
@@ -87,7 +87,7 @@ class UserMemoryEngine:
             return []
         texts = [str(c.get("text") or "") for c in candidates]
         reranked = self.reranker.rerank(q, texts, top_k=min(int(k), len(texts)))
-        out: List[Document] = []
+        out: list[Document] = []
         for _, score, idx in reranked:
             c = candidates[idx]
             meta = dict(c.get("metadata_json") or {})
@@ -95,7 +95,7 @@ class UserMemoryEngine:
             out.append(Document(page_content=str(c.get("text") or ""), metadata=meta))
         return out
 
-    def replace_profile_semantic_memory(self, *, user_id: str, profile: Dict[str, Any]) -> int:
+    def replace_profile_semantic_memory(self, *, user_id: str, profile: dict[str, Any]) -> int:
         uid = str(user_id or "").strip()
         if not uid:
             return 0
@@ -107,7 +107,7 @@ class UserMemoryEngine:
         texts = [it["text"] for it in items]
         embeddings = self.embeddings.embed_documents(texts)
         now = int(time.time())
-        rows: List[Dict[str, Any]] = []
+        rows: list[dict[str, Any]] = []
         for it, emb in zip(items, embeddings):
             rows.append(
                 {
@@ -134,7 +134,7 @@ class UserMemoryEngine:
         query: str,
         k: int = 6,
         fetch_k: int = 30,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         uid = str(user_id or "").strip()
         q = str(query or "").strip()
         if not uid or not q:
@@ -150,7 +150,7 @@ class UserMemoryEngine:
             return []
         texts = [str(c.get("text") or "") for c in candidates]
         reranked = self.reranker.rerank(q, texts, top_k=min(int(k), len(texts)))
-        out: List[Dict[str, Any]] = []
+        out: list[dict[str, Any]] = []
         for _, score, idx in reranked:
             c = dict(candidates[idx])
             meta = dict(c.get("metadata_json") or {})
@@ -160,10 +160,10 @@ class UserMemoryEngine:
             out.append(c)
         return out
 
-    def _profile_items(self, profile: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _profile_items(self, profile: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(profile, dict):
             return []
-        out: List[Dict[str, Any]] = []
+        out: list[dict[str, Any]] = []
         prefs = profile.get("preferences") or {}
         if isinstance(prefs, dict):
             for key in ["language", "communication_style", "interaction_protocol", "tone_instruction"]:

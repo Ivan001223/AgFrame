@@ -1,19 +1,18 @@
 from __future__ import annotations
 
-import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from langchain_core.documents import Document
 
+from app.infrastructure.database.stores import PgChatSummaryStore
 from app.runtime.llm.embeddings import ModelEmbeddings
 from app.runtime.llm.llm_factory import get_llm
 from app.runtime.llm.reranker import ModelReranker
-from app.infrastructure.database.stores import PgChatSummaryStore
 
 
-def _format_chat_for_summary(messages: List[Dict[str, Any]]) -> str:
+def _format_chat_for_summary(messages: list[dict[str, Any]]) -> str:
     """格式化对话消息为文本，用于生成摘要"""
-    lines: List[str] = []
+    lines: list[str] = []
     for m in messages:
         role = m.get("role")
         content = m.get("content", "")
@@ -23,7 +22,7 @@ def _format_chat_for_summary(messages: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def summarize_chat_messages(messages: List[Dict[str, Any]]) -> str:
+def summarize_chat_messages(messages: list[dict[str, Any]]) -> str:
     """
     使用 LLM 生成对话片段的摘要。
 
@@ -63,9 +62,9 @@ class ChatSummaryIndex:
         user_id: str,
         session_id: str,
         summary_text: str,
-        start_msg_id: Optional[int] = None,
-        end_msg_id: Optional[int] = None,
-        created_at: Optional[int] = None,
+        start_msg_id: int | None = None,
+        end_msg_id: int | None = None,
+        created_at: int | None = None,
     ) -> int:
         """
         添加新的对话摘要到索引中。
@@ -94,7 +93,7 @@ class ChatSummaryIndex:
 
     def retrieve(
         self, user_id: str, query: str, k: int = 3, fetch_k: int = 20
-    ) -> List[Document]:
+    ) -> list[Document]:
         """
         检索相关的历史对话摘要。
         包含召回和重排两个步骤。
@@ -130,7 +129,7 @@ class ChatSummaryIndex:
             return []
         candidate_texts = [d.page_content for d in candidates]
         reranked = self.reranker.rerank(query, candidate_texts, top_k=min(k, len(candidates)))
-        out: List[Document] = []
+        out: list[Document] = []
         for _, score, idx in reranked:
             d = candidates[idx]
             d.metadata["rerank_score"] = score
@@ -138,7 +137,7 @@ class ChatSummaryIndex:
         return out
 
 
-def select_recent_turn_messages(messages: List[Dict[str, Any]], recent_turns: int) -> List[Dict[str, Any]]:
+def select_recent_turn_messages(messages: list[dict[str, Any]], recent_turns: int) -> list[dict[str, Any]]:
     """选择最近的 N 轮对话消息（2 * recent_turns 条）"""
     if recent_turns <= 0:
         return []
@@ -146,7 +145,7 @@ def select_recent_turn_messages(messages: List[Dict[str, Any]], recent_turns: in
     return messages[-limit:] if len(messages) > limit else messages
 
 
-def split_messages_for_memory(messages: List[Dict[str, Any]], recent_turns: int) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+def split_messages_for_memory(messages: list[dict[str, Any]], recent_turns: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
     将消息列表切分为"旧消息"（用于生成摘要）和"近期消息"（保留在上下文中）。
 

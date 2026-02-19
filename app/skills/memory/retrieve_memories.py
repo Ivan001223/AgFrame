@@ -1,22 +1,22 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
-
-from langchain_core.messages import BaseMessage
-import anyio
 import time
+from typing import Any
+
+import anyio
+from langchain_core.messages import BaseMessage
 
 from app.infrastructure.database.schema import ensure_schema_if_possible
+from app.infrastructure.utils.logging import bind_logger, get_logger
 from app.memory.long_term.user_memory_engine import UserMemoryEngine
 from app.runtime.graph.registry import register_node
 from app.runtime.graph.state import AgentState
-from app.infrastructure.utils.logging import bind_logger, get_logger
 
 _log = get_logger("workflow.retrieve_memories")
 _memory_engine = UserMemoryEngine()
 
 
-def _get_last_user_query(messages: List[BaseMessage]) -> str:
+def _get_last_user_query(messages: list[BaseMessage]) -> str:
     for m in reversed(messages):
         role = getattr(m, "type", None) or getattr(m, "role", None)
         content = getattr(m, "content", None)
@@ -29,7 +29,7 @@ def _get_last_user_query(messages: List[BaseMessage]) -> str:
 
 
 @register_node("retrieve_memories")
-async def retrieve_memories_node(state: AgentState) -> Dict[str, Any]:
+async def retrieve_memories_node(state: AgentState) -> dict[str, Any]:
     t0 = time.perf_counter()
     messages = list(state.get("messages") or [])
     query = _get_last_user_query(messages)

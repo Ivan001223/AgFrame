@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 from langchain_core.documents import Document
 
@@ -26,7 +27,7 @@ def _stable_doc_key(doc: Document) -> str:
     return "|".join(parts) + "|" + digest
 
 
-def _iter_vectorstore_docs(vectorstore: Any) -> List[Document]:
+def _iter_vectorstore_docs(vectorstore: Any) -> list[Document]:
     docstore = getattr(vectorstore, "docstore", None)
     if docstore is None:
         return []
@@ -40,7 +41,7 @@ def _iter_vectorstore_docs(vectorstore: Any) -> List[Document]:
     return []
 
 
-def _invoke_retriever(retriever: Any, query: str) -> List[Document]:
+def _invoke_retriever(retriever: Any, query: str) -> list[Document]:
     if hasattr(retriever, "invoke"):
         out = retriever.invoke(query)
         if isinstance(out, list):
@@ -63,14 +64,14 @@ def _invoke_retriever(retriever: Any, query: str) -> List[Document]:
 
 
 def _rrf_fuse(
-    ranked_lists: Sequence[Tuple[str, Sequence[Document], float]],
+    ranked_lists: Sequence[tuple[str, Sequence[Document], float]],
     *,
     rrf_k: int,
     top_n: int,
-) -> List[Document]:
-    scores: Dict[str, float] = {}
-    best_doc: Dict[str, Document] = {}
-    ranks: Dict[str, Dict[str, int]] = {}
+) -> list[Document]:
+    scores: dict[str, float] = {}
+    best_doc: dict[str, Document] = {}
+    ranks: dict[str, dict[str, int]] = {}
 
     for name, docs, weight in ranked_lists:
         for rank, doc in enumerate(docs, start=1):
@@ -79,7 +80,7 @@ def _rrf_fuse(
             scores[key] = scores.get(key, 0.0) + float(weight) * (1.0 / (rrf_k + rank))
             ranks.setdefault(key, {})[name] = rank
 
-    out: List[Document] = []
+    out: list[Document] = []
     for key, score in sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[
         :top_n
     ]:
@@ -102,7 +103,7 @@ class HybridRetrievalConfig:
     sparse_k: int = 20
     candidate_k: int = 20
     rrf_k: int = 60
-    weights: Tuple[float, float] = (0.5, 0.5)
+    weights: tuple[float, float] = (0.5, 0.5)
 
 
 class HybridRetrieverService:
@@ -143,9 +144,9 @@ class HybridRetrieverService:
         self,
         query: str,
         *,
-        config: Optional[HybridRetrievalConfig] = None,
-        filter: Optional[Dict[str, Any]] = None,
-    ) -> List[Document]:
+        config: HybridRetrievalConfig | None = None,
+        filter: dict[str, Any] | None = None,
+    ) -> list[Document]:
         cfg = config or HybridRetrievalConfig()
         mode = (cfg.mode or "hybrid").lower()
         dense_k = max(1, int(cfg.dense_k))

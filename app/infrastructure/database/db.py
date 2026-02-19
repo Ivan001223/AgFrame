@@ -1,7 +1,9 @@
-import mysql.connector
-from mysql.connector import pooling
 import time
-from app.infrastructure.config.config_manager import config_manager
+
+import mysql.connector
+
+from app.infrastructure.config.settings import settings
+
 
 class DatabaseManager:
     """
@@ -14,14 +16,14 @@ class DatabaseManager:
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(DatabaseManager, cls).__new__(cls)
+            cls._instance = super().__new__(cls)
             cls._instance._init_pool()
         return cls._instance
 
     def _init_pool(self):
         """初始化连接池。支持重试机制。"""
-        db_config = config_manager.get_config().get("database", {})
-        
+        db_config = settings.database
+
         # 数据库连接重试逻辑
         max_retries = 3
         for attempt in range(max_retries):
@@ -29,11 +31,11 @@ class DatabaseManager:
                 self._pool = mysql.connector.pooling.MySQLConnectionPool(
                     pool_name="agent_pool",
                     pool_size=5,
-                    host=db_config.get("host", "localhost"),
-                    port=db_config.get("port", 3306),
-                    user=db_config.get("user", "root"),
-                    password=db_config.get("password", "password"),
-                    database=db_config.get("db_name", "agent_app"),
+                    host=db_config.host,
+                    port=db_config.port,
+                    user=db_config.user,
+                    password=db_config.password,
+                    database=db_config.db_name,
                     autocommit=True
                 )
                 print("MySQL 连接池初始化成功。")

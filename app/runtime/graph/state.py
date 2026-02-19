@@ -1,6 +1,7 @@
-from typing import TypedDict, Annotated, List, Dict, Any, Literal, Optional
-from langchain_core.messages import BaseMessage
+from typing import Annotated, Any, Literal, TypedDict
+
 from langchain_core.documents import Document
+from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
 
@@ -13,19 +14,19 @@ class RouteDecision(TypedDict, total=False):
 class Citation(TypedDict, total=False):
     kind: Literal["doc", "memory"]
     label: str
-    doc_id: Optional[str]
-    session_id: Optional[str]
-    page: Optional[int]
-    source: Optional[str]
+    doc_id: str | None
+    session_id: str | None
+    page: int | None
+    source: str | None
 
 class ActionRequired(TypedDict, total=False):
     action_type: str
     description: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     requires_approval: bool
     approved: bool
-    approved_by: Optional[str]
-    approved_at: Optional[str]
+    approved_by: str | None
+    approved_at: str | None
 
 
 class AgentState(TypedDict, total=False):
@@ -40,26 +41,26 @@ class AgentState(TypedDict, total=False):
         user_id: 当前用户 ID
     """
     # 消息列表：使用 add_messages 策略，新消息会自动追加到列表中
-    messages: Annotated[List[BaseMessage], add_messages]
+    messages: Annotated[list[BaseMessage], add_messages]
 
     # 核心路由逻辑：记录下一步走向和理由
     next_step: str
     reasoning: str
 
     # 通用上下文：存储跨节点共享的数据
-    context: Dict[str, Any]
+    context: dict[str, Any]
     user_id: str
 
     route: RouteDecision
-    retrieved_docs: List[Document]
-    retrieved_docs_candidates: List[Document]
-    retrieved_memories: List[Document]
-    citations: List[Citation]
-    errors: List[str]
-    retrieval_debug: Dict[str, Any]
-    trace: Dict[str, Any]
+    retrieved_docs: list[Document]
+    retrieved_docs_candidates: list[Document]
+    retrieved_memories: list[Document]
+    citations: list[Citation]
+    errors: list[str]
+    retrieval_debug: dict[str, Any]
+    trace: dict[str, Any]
 
     # 人机协同状态
-    action_required: Optional[ActionRequired]
+    action_required: ActionRequired | None
     interrupted: bool
 

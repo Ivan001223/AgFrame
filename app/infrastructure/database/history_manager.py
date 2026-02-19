@@ -1,9 +1,12 @@
-import os
 import json
+import os
 import time
-from typing import List, Dict, Any, Optional
+from typing import Any
 
-from app.infrastructure.database.conversation_utils import derive_session_title, should_bump_updated_at
+from app.infrastructure.database.conversation_utils import (
+    derive_session_title,
+    should_bump_updated_at,
+)
 
 HISTORY_FILE = os.path.join("data", "chat_history.json")
 
@@ -22,20 +25,20 @@ class HistoryManager:
             with open(HISTORY_FILE, "w", encoding="utf-8") as f:
                 json.dump({}, f)
 
-    def _load_data(self) -> Dict[str, Any]:
+    def _load_data(self) -> dict[str, Any]:
         """加载 JSON 数据"""
         try:
-            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            with open(HISTORY_FILE, encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, FileNotFoundError):
             return {}
 
-    def _save_data(self, data: Dict[str, Any]):
+    def _save_data(self, data: dict[str, Any]):
         """保存 JSON 数据"""
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
-    def get_history(self, user_id: str) -> List[Dict[str, Any]]:
+    def get_history(self, user_id: str) -> list[dict[str, Any]]:
         """获取用户的会话列表，按时间戳倒序排列。"""
         data = self._load_data()
         user_sessions = data.get(user_id, {})
@@ -45,7 +48,7 @@ class HistoryManager:
         sessions_list.sort(key=lambda x: x.get("updated_at", 0), reverse=True)
         return sessions_list
 
-    def save_session(self, user_id: str, session_id: str, messages: List[Dict[str, Any]], title: Optional[str] = None):
+    def save_session(self, user_id: str, session_id: str, messages: list[dict[str, Any]], title: str | None = None):
         """保存或更新一次聊天会话。"""
         data = self._load_data()
         if user_id not in data:

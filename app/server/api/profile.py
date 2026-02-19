@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+
 from app.infrastructure.database.schema import ensure_schema_if_possible
 from app.skills.profile.profile_engine import UserProfileEngine
 

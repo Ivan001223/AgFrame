@@ -1,9 +1,10 @@
-from typing import Any, Dict
+from typing import Any
+
 from app.skills.common.tools import register_tool
 
 
 @register_tool("python_executor")
-async def python_executor(code: str) -> Dict[str, Any]:
+async def python_executor(code: str) -> dict[str, Any]:
     """
     Execute Python code in a secure sandbox environment.
 

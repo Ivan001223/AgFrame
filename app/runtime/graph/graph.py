@@ -1,29 +1,27 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
-from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, StateGraph
 
-from app.infrastructure.config.config_manager import config_manager
+from app.infrastructure.config.settings import settings
+from app.runtime.graph.nodes.human_interrupt import check_approval_node, human_interrupt_node
+from app.runtime.graph.state import AgentState
 from app.skills.common.assemble_prompt import assemble_prompt_node
-from app.skills.common.grader import grader_node
 from app.skills.common.generate import generate_node
-from app.skills.rag.retrieve_docs import retrieve_docs_node
-from app.skills.rag.rerank_docs import rerank_docs_node
+from app.skills.common.grader import grader_node
+from app.skills.common.router import router_node
 from app.skills.memory.retrieve_memories import retrieve_memories_node
 from app.skills.profile.retrieve_profile import retrieve_profile_node
-from app.skills.common.router import router_node
+from app.skills.rag.rerank_docs import rerank_docs_node
+from app.skills.rag.retrieve_docs import retrieve_docs_node
 from app.skills.research.web_search import web_search_node
-from app.runtime.graph.nodes.human_interrupt import human_interrupt_node, check_approval_node
-from app.runtime.graph.state import AgentState
 
 
 def _route_key(state: AgentState) -> Literal["none", "docs", "history", "both"]:
-    cfg = config_manager.get_config() or {}
-    flags = cfg.get("feature_flags", {})
-    enable_docs_rag = bool(flags.get("enable_docs_rag", True))
-    enable_chat_memory = bool(flags.get("enable_chat_memory", True))
+    flags = settings.feature_flags
+    enable_docs_rag = flags.enable_docs_rag
+    enable_chat_memory = flags.enable_chat_memory
     context = state.get("context") or {}
     route = state.get("route") or context.get("route") or {}
     needs_docs = bool(route.get("needs_docs")) and enable_docs_rag
@@ -38,9 +36,7 @@ def _route_key(state: AgentState) -> Literal["none", "docs", "history", "both"]:
 
 
 def _after_docs_key(state: AgentState) -> Literal["profile", "memories"]:
-    cfg = config_manager.get_config() or {}
-    flags = cfg.get("feature_flags", {})
-    enable_chat_memory = bool(flags.get("enable_chat_memory", True))
+    enable_chat_memory = settings.feature_flags.enable_chat_memory
     context = state.get("context") or {}
     route = state.get("route") or context.get("route") or {}
     if bool(route.get("needs_history")) and enable_chat_memory:
@@ -49,15 +45,7 @@ def _after_docs_key(state: AgentState) -> Literal["profile", "memories"]:
 
 
 def _get_max_self_correction_attempts() -> int:
-    cfg = config_manager.get_config() or {}
-    sc_cfg = cfg.get("self_correction", {})
-    val = sc_cfg.get("max_attempts")
-    if val is None:
-        return 2
-    try:
-        return max(0, int(val))
-    except Exception:
-        return 2
+    return settings.self_correction.max_attempts
 
 
 def _grader_key(state: AgentState) -> Literal["accept", "rewrite", "search"]:
@@ -86,7 +74,7 @@ def _check_approval(state: AgentState) -> Literal["approved", "pending"]:
     return "pending"
 
 
-def run_app(checkpointer: Optional[Any] = None):
+def run_app(checkpointer: Any | None = None):
     """
     构建并编译 LangGraph 工作流应用。
 
@@ -94,10 +82,9 @@ def run_app(checkpointer: Optional[Any] = None):
         CompiledStateGraph: 编译后的工作流图
     """
     workflow = StateGraph(AgentState)
-    cfg = config_manager.get_config() or {}
-    flags = cfg.get("feature_flags", {}) or {}
-    enable_self_correction = bool(flags.get("enable_self_correction", False))
-    enable_human_approval = bool(flags.get("enable_human_approval", False))
+    flags = settings.feature_flags
+    enable_self_correction = flags.enable_self_correction
+    enable_human_approval = flags.enable_human_approval
 
     workflow.add_node("router", router_node)
     workflow.add_node("retrieve_docs", retrieve_docs_node)

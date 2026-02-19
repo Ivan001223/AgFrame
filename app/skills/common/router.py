@@ -1,21 +1,21 @@
 from __future__ import annotations
 
-from typing import Any, Dict
-
-import anyio
 import time
 import uuid
+from typing import Any
 
+import anyio
+
+from app.infrastructure.utils.logging import bind_logger, get_logger
 from app.runtime.graph.memory_router import route_memory
 from app.runtime.graph.registry import register_node
 from app.runtime.graph.state import AgentState
-from app.infrastructure.utils.logging import bind_logger, get_logger
 
 _log = get_logger("workflow.router")
 
 
 @register_node("router")
-async def router_node(state: AgentState) -> Dict[str, Any]:
+async def router_node(state: AgentState) -> dict[str, Any]:
     t0 = time.perf_counter()
     ctx = dict(state.get("context") or {})
     trace = dict(state.get("trace") or {})

@@ -1,21 +1,25 @@
+from collections.abc import Callable, Iterator, Sequence
+from threading import Thread
+from typing import Any
+
 import torch
-import os
-from typing import List, Optional, Any, Dict, Sequence, Union, Type, Callable
+from langchain_core.callbacks.manager import CallbackManagerForLLMRun
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    BaseMessage,
+    SystemMessage,
+)
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
-from transformers import AutoModelForImageTextToText, AutoProcessor
 from qwen_vl_utils import process_vision_info
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
-from langchain_core.language_models import BaseChatModel
-from langchain_core.outputs import ChatResult, ChatGeneration, ChatGenerationChunk
-from langchain_core.messages import AIMessageChunk
-from langchain_core.callbacks.manager import CallbackManagerForLLMRun
-from transformers import TextIteratorStreamer
-from threading import Thread
-from typing import Iterator
+from transformers import AutoModelForImageTextToText, AutoProcessor, TextIteratorStreamer
 
-from app.infrastructure.config.config_manager import config_manager
+from app.infrastructure.config.settings import settings
+
 
 class LocalQwen3VL(BaseChatModel):
     model_name: str = "Qwen/Qwen3-VL-2B-Instruct"
@@ -24,7 +28,7 @@ class LocalQwen3VL(BaseChatModel):
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        config_model = config_manager.get_config().get("local_models", {}).get("ocr_model")
+        config_model = settings.local_models.ocr_model
         if config_model:
             self.model_name = config_model
             
@@ -37,8 +41,8 @@ class LocalQwen3VL(BaseChatModel):
             dtype = torch.bfloat16 if device == "cuda" else torch.float32
 
             try:
-                from tqdm.auto import tqdm
                 from huggingface_hub import HfApi
+                from tqdm.auto import tqdm
 
                 tqdm.write(f"📦 正在下载视觉语言模型 {self.model_name}...")
 
@@ -83,22 +87,22 @@ class LocalQwen3VL(BaseChatModel):
     def _llm_type(self) -> str:
         return "local-qwen3-vl"
 
-    def bind_tools(self, tools: Sequence[Union[Dict[str, Any], Type[BaseModel], Callable, BaseTool]], **kwargs: Any) -> Runnable:
+    def bind_tools(self, tools: Sequence[dict[str, Any] | type[BaseModel] | Callable | BaseTool], **kwargs: Any) -> Runnable:
         """
         Local Qwen 的 bind_tools 伪实现。
         """
         print("警告：LocalQwen3VL 暂不支持原生工具绑定，将忽略传入的 tools。")
         return self
     
-    def _messages_to_conversation(self, messages: List[BaseMessage]) -> List[Dict[str, Any]]:
-        conversation: List[Dict[str, Any]] = []
+    def _messages_to_conversation(self, messages: list[BaseMessage]) -> list[dict[str, Any]]:
+        conversation: list[dict[str, Any]] = []
         for msg in messages:
             role = "user"
             if isinstance(msg, AIMessage):
                 role = "assistant"
             elif isinstance(msg, SystemMessage):
                 role = "system"
-            content: List[Dict[str, Any]] = []
+            content: list[dict[str, Any]] = []
             if isinstance(msg.content, str):
                 content.append({"type": "text", "text": msg.content})
             elif isinstance(msg.content, list):
@@ -113,7 +117,7 @@ class LocalQwen3VL(BaseChatModel):
             conversation.append({"role": role, "content": content})
         return conversation
 
-    def _prepare_inputs(self, conversation: List[Dict[str, Any]]):
+    def _prepare_inputs(self, conversation: list[dict[str, Any]]):
         text = self.processor.apply_chat_template(conversation, tokenize=False, add_generation_prompt=True)
         image_inputs, video_inputs = process_vision_info(conversation)
         inputs = self.processor(
@@ -127,9 +131,9 @@ class LocalQwen3VL(BaseChatModel):
 
     def _stream(
         self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> Iterator[ChatGenerationChunk]:
         try:
@@ -158,9 +162,9 @@ class LocalQwen3VL(BaseChatModel):
 
     def _generate(
         self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
         try:

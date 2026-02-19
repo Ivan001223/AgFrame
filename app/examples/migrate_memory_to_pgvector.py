@@ -1,9 +1,9 @@
+import argparse
+import hashlib
 import os
 import sys
 from pathlib import Path
-import argparse
-import hashlib
-from typing import List, Dict, Any
+from typing import Any
 
 from sqlalchemy import select
 
@@ -11,25 +11,25 @@ ROOT = str(Path(__file__).resolve().parents[2])
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from app.infrastructure.config.config_manager import config_manager
+from app.infrastructure.config.settings import settings
 from app.infrastructure.database.models import UserProfile
 from app.infrastructure.database.orm import get_session
 from app.infrastructure.database.schema import ensure_schema_if_possible
-from app.runtime.llm.embeddings import ModelEmbeddings
 from app.memory.long_term.user_memory_engine import UserMemoryEngine
 from app.memory.vector_stores.faiss_store import load_faiss
+from app.runtime.llm.embeddings import ModelEmbeddings
 
 
 def _sha256_hex(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _migrate_faiss_chat_summaries(engine: UserMemoryEngine) -> Dict[str, int]:
+def _migrate_faiss_chat_summaries(engine: UserMemoryEngine) -> dict[str, int]:
     base_dir = os.path.join(os.getcwd(), "data", "vector_store_chat_summary")
     if not os.path.isdir(base_dir):
         return {"users": 0, "docs": 0}
 
-    flags = (config_manager.get_config() or {}).get("feature_flags", {}) or {}
+    flags = settings.feature_flags
     emb = ModelEmbeddings()
     users = 0
     total_docs = 0
@@ -41,7 +41,7 @@ def _migrate_faiss_chat_summaries(engine: UserMemoryEngine) -> Dict[str, int]:
         store = load_faiss(
             user_dir,
             emb,
-            allow_dangerous_deserialization=bool(flags.get("allow_dangerous_deserialization", False)),
+            allow_dangerous_deserialization=flags.allow_dangerous_deserialization,
         )
         if store is None:
             continue
@@ -53,7 +53,7 @@ def _migrate_faiss_chat_summaries(engine: UserMemoryEngine) -> Dict[str, int]:
         users += 1
         total_docs += len(docs)
 
-        rows: List[Dict[str, Any]] = []
+        rows: list[dict[str, Any]] = []
         for d in docs:
             text = str(getattr(d, "page_content", "") or "").strip()
             if not text:

@@ -1,7 +1,7 @@
-import torch
-from typing import Any, List, Optional, Tuple
 
-from app.infrastructure.config.config_manager import config_manager
+import torch
+
+from app.infrastructure.config.settings import settings
 from app.runtime.llm.component_loader import (
     load_sentence_transformers_cross_encoder,
     load_transformers_model,
@@ -14,6 +14,7 @@ from app.runtime.llm.model_manager import (
     get_best_device,
 )
 
+
 class ModelReranker:
     """
     基于本地模型的重排器 (Reranker) 实现。
@@ -23,12 +24,12 @@ class ModelReranker:
     def __init__(
         self,
         *,
-        config: Optional[dict] = None,
-        model_name: Optional[str] = None,
+        config: dict | None = None,
+        model_name: str | None = None,
     ):
-        cfg = config or config_manager.get_config()
+        cfg = config or settings.model_dump()
         rr_cfg = cfg.get("reranker") or {}
-        configured_model = rr_cfg.get("model_name") or (cfg.get("local_models") or {}).get("rerank_model")
+        configured_model = rr_cfg.get("model_name") or cfg.get("local_models", {}).get("rerank_model")
         backend = rr_cfg.get("backend") or "transformers"
         batch_size = rr_cfg.get("batch_size")
         max_length = rr_cfg.get("max_length")
@@ -105,7 +106,7 @@ class ModelReranker:
                 print(f"加载重排模型失败：{e}")
                 raise e
 
-    def rerank(self, query: str, documents: List[str], top_k: int = 3) -> List[Tuple[str, float, int]]:
+    def rerank(self, query: str, documents: list[str], top_k: int = 3) -> list[tuple[str, float, int]]:
         """
         基于查询对候选文档列表进行重排。
         
@@ -144,7 +145,7 @@ class ModelReranker:
         try:
             # 优先尝试 compute_score 接口
             if hasattr(self._model, "compute_score"):
-                all_scores: List[float] = []
+                all_scores: list[float] = []
                 for start in range(0, len(docs), self._batch_size):
                     pairs = [[q, d] for d in docs[start : start + self._batch_size]]
                     with torch.inference_mode():
@@ -158,7 +159,7 @@ class ModelReranker:
 
             # 其次尝试 predict 接口
             if hasattr(self._model, "predict"):
-                all_scores: List[float] = []
+                all_scores: list[float] = []
                 for start in range(0, len(docs), self._batch_size):
                     pairs = [[q, d] for d in docs[start : start + self._batch_size]]
                     batch_scores = self._model.predict(pairs)
@@ -181,7 +182,7 @@ class ModelReranker:
             print(f"重排失败：{e}")
             return [(doc, 0.0, i) for i, doc in enumerate(documents)][:top_k]
 
-    def _score_pairs_transformers(self, query: str, docs: List[str]) -> List[float]:
+    def _score_pairs_transformers(self, query: str, docs: list[str]) -> list[float]:
         """使用 Transformers 模型对文本对打分（支持滑动窗口）"""
         if self._window_size is not None and self._window_size > 0:
             stride = self._stride or self._window_size
@@ -189,9 +190,9 @@ class ModelReranker:
 
         return self._score_pairs_transformers_no_window(query, docs)
 
-    def _score_pairs_transformers_no_window(self, query: str, docs: List[str]) -> List[float]:
+    def _score_pairs_transformers_no_window(self, query: str, docs: list[str]) -> list[float]:
         """批量计算文本对分数（无滑动窗口）"""
-        scores: List[float] = []
+        scores: list[float] = []
         for start in range(0, len(docs), self._batch_size):
             q_batch = [query] * len(docs[start : start + self._batch_size])
             d_batch = docs[start : start + self._batch_size]

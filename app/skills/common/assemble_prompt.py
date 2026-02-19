@@ -1,31 +1,31 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+import time
+from typing import Any
 
 import anyio
-import time
 
-from app.infrastructure.config.config_manager import config_manager
+from app.infrastructure.config.settings import settings
 from app.infrastructure.database.schema import ensure_schema_if_possible
 from app.infrastructure.database.stores import MySQLConversationStore
-from app.runtime.prompts.prompt_builder import PromptBudget, build_system_prompt
-from app.skills.profile.profile_engine import UserProfileEngine
 from app.infrastructure.utils.logging import bind_logger, get_logger
 from app.runtime.graph.registry import register_node
 from app.runtime.graph.state import AgentState
+from app.runtime.prompts.prompt_builder import PromptBudget, build_system_prompt
+from app.skills.profile.profile_engine import UserProfileEngine
 
 _profile_engine = UserProfileEngine()
 _log = get_logger("workflow.assemble_prompt")
 
 
 @register_node("assemble_prompt")
-async def assemble_prompt_node(state: AgentState) -> Dict[str, Any]:
+async def assemble_prompt_node(state: AgentState) -> dict[str, Any]:
     t0 = time.perf_counter()
     ctx = dict(state.get("context") or {})
     user_id = state.get("user_id") or ctx.get("user_id") or "default"
     session_id = ctx.get("session_id")
 
-    recent_history_lines: List[str] = []
+    recent_history_lines: list[str] = []
     if session_id and ensure_schema_if_possible():
         try:
             store = MySQLConversationStore()
@@ -53,7 +53,7 @@ async def assemble_prompt_node(state: AgentState) -> Dict[str, Any]:
     prefs = profile.get("preferences") if isinstance(profile, dict) else {}
     if not isinstance(prefs, dict):
         prefs = {}
-    pinned_prefs: Dict[str, Any] = {}
+    pinned_prefs: dict[str, Any] = {}
     for key in ["language", "communication_style", "interaction_protocol", "tone_instruction"]:
         val = prefs.get(key)
         if val is not None:
@@ -69,16 +69,16 @@ async def assemble_prompt_node(state: AgentState) -> Dict[str, Any]:
     docs = state.get("retrieved_docs") or ctx.get("retrieved_docs") or []
     memories = state.get("retrieved_memories") or ctx.get("retrieved_memories") or []
 
-    prompt_cfg = (config_manager.get_config() or {}).get("prompt", {}) or {}
-    budget_cfg = prompt_cfg.get("budget", {}) or {}
+    prompt_cfg = settings.prompt
+    budget_cfg = prompt_cfg.budget
     budget = PromptBudget(
-        max_recent_history_lines=int(budget_cfg.get("max_recent_history_lines", 10)),
-        max_docs=int(budget_cfg.get("max_docs", 3)),
-        max_memories=int(budget_cfg.get("max_memories", 3)),
-        max_doc_chars_total=int(budget_cfg.get("max_doc_chars_total", 6000)),
-        max_memory_chars_total=int(budget_cfg.get("max_memory_chars_total", 3000)),
-        max_profile_chars_total=int(budget_cfg.get("max_profile_chars_total", 2500)),
-        max_item_chars=int(budget_cfg.get("max_item_chars", 2000)),
+        max_recent_history_lines=budget_cfg.max_recent_history_lines,
+        max_docs=budget_cfg.max_docs,
+        max_memories=budget_cfg.max_memories,
+        max_doc_chars_total=budget_cfg.max_doc_chars_total,
+        max_memory_chars_total=budget_cfg.max_memory_chars_total,
+        max_profile_chars_total=budget_cfg.max_doc_chars_total,
+        max_item_chars=budget_cfg.max_item_chars,
     )
 
     system_prompt, citations = build_system_prompt(

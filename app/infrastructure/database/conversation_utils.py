@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Sized
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 def derive_session_title(
-    messages: List[Dict[str, Any]],
-    provided_title: Optional[str] = None,
+    messages: list[dict[str, Any]],
+    provided_title: str | None = None,
     *,
     default: str = "新对话",
     max_len: int = 20,

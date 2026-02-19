@@ -1,5 +1,5 @@
-import sys
 import os
+import sys
 from unittest.mock import MagicMock
 
 # Mock heavy dependencies BEFORE imports
@@ -12,18 +12,19 @@ sys.modules["timm"] = MagicMock()
 sys.modules["einops"] = MagicMock()
 sys.modules["pdf2image"] = MagicMock()
 
-from app.infrastructure.config.config_manager import config_manager
+from app.infrastructure.config.settings import settings
 
-config_manager.config["database"] = {
-    "type": "sqlite",
-    "url": "sqlite:///./test.db",
-    "db_name": "test.db",
-}
+# 覆盖数据库配置用于测试
+settings.database.type = "sqlite"
+settings.database.url = "sqlite:///./test.db"
+settings.database.db_name = "test.db"
+
+import time
 
 from fastapi.testclient import TestClient
+
 from app.infrastructure.database.schema import ensure_schema
 from app.server.main import app
-import time
 
 # Force schema creation
 try:

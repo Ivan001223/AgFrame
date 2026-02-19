@@ -1,5 +1,5 @@
-from app.skills.research.search_tool import get_search_tool
 from app.agents.node_factory import build_llm_chain, make_agent_node
+from app.skills.research.search_tool import get_search_tool
 
 
 def get_researcher_node():

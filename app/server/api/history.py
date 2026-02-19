@@ -1,12 +1,13 @@
 import uuid
-from typing import Dict, Any, Annotated
+from typing import Annotated, Any
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from app.infrastructure.database.history_manager import history_manager
+from app.infrastructure.database.models import User
 from app.infrastructure.database.schema import ensure_schema_if_possible
 from app.infrastructure.database.stores import MySQLConversationStore
 from app.memory.long_term.memory_update_service import memory_update_service
-from app.infrastructure.database.models import User
 from app.server.api.auth import get_current_active_user
 
 router = APIRouter()
@@ -33,7 +34,7 @@ async def get_history(
 @router.post("/history/{user_id}/save")
 async def save_history(
     user_id: str,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     background_tasks: BackgroundTasks,
     current_user: Annotated[User, Depends(get_current_active_user)],
 ):

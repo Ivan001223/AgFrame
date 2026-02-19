@@ -1,20 +1,18 @@
 from __future__ import annotations
 
-import sqlalchemy.dialects.postgresql
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    JSON,
     BigInteger,
+    Boolean,
+    Float,
     ForeignKey,
     Index,
     Integer,
-    JSON,
     String,
     Text,
-    Float,
-    Boolean,
-    func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from pgvector.sqlalchemy import Vector
 
 
 class Base(DeclarativeBase):
@@ -117,7 +115,7 @@ class ChatSession(Base):
     )
     last_profiled_msg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
-    messages: Mapped[list["ChatHistory"]] = relationship(
+    messages: Mapped[list[ChatHistory]] = relationship(
         back_populates="session",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -148,7 +146,7 @@ class ChatHistory(Base):
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
     token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    session: Mapped["ChatSession"] = relationship(back_populates="messages")
+    session: Mapped[ChatSession] = relationship(back_populates="messages")
 
     __table_args__ = (
         Index(
@@ -176,7 +174,7 @@ class Document(Base):
     )  # 文件哈希，用于去重
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
-    parents: Mapped[list["DocContent"]] = relationship(
+    parents: Mapped[list[DocContent]] = relationship(
         back_populates="document",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -201,7 +199,7 @@ class DocContent(Base):
     page_num: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
-    document: Mapped["Document"] = relationship(back_populates="parents")
+    document: Mapped[Document] = relationship(back_populates="parents")
 
     __table_args__ = (Index("idx_doc_content_doc", "doc_id"),)
 

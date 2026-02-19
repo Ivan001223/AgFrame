@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -14,7 +14,7 @@ class MemoryRouteDecision(BaseModel):
     reasoning: str = Field(description="简短的决策理由")
 
 
-def route_memory(state: Dict[str, Any]) -> MemoryRouteDecision:
+def route_memory(state: dict[str, Any]) -> MemoryRouteDecision:
     """
     内存路由函数：判断用户请求是否需要检索文档或历史记忆。
     

@@ -1,8 +1,10 @@
 from typing import Annotated
-from fastapi import APIRouter, HTTPException, Depends
-from app.infrastructure.queue.redis_client import get_task
-from app.server.api.auth import get_current_active_user, get_current_admin_user
+
+from fastapi import APIRouter, Depends, HTTPException
+
 from app.infrastructure.database.models import User
+from app.infrastructure.queue.redis_client import get_task
+from app.server.api.auth import get_current_active_user
 
 router = APIRouter()
 

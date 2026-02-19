@@ -1,29 +1,31 @@
 import os
 import tempfile
 import traceback
-from pdf2image import convert_from_path
-from typing import List
-from app.runtime.llm.llm_factory import get_local_qwen_provider
+
 from langchain_core.messages import HumanMessage
+from pdf2image import convert_from_path
+
+from app.runtime.llm.llm_factory import get_local_qwen_provider
+
 
 class QwenVLOCR:
     """
     基于 Qwen-VL (Vision Language) 模型的 OCR 引擎。
     支持 PDF 和常见图片格式的文字提取。
     """
-    def _pdf_to_temp_images(self, file_path: str) -> List[str]:
+    def _pdf_to_temp_images(self, file_path: str) -> list[str]:
         """
         将 PDF 转换为临时图片文件列表。
         """
         images = convert_from_path(file_path)
-        temp_paths: List[str] = []
+        temp_paths: list[str] = []
         for img in images:
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False, mode="wb") as tmp:
                 img.save(tmp.name)
                 temp_paths.append(tmp.name)
         return temp_paths
 
-    def _cleanup_files(self, paths: List[str]):
+    def _cleanup_files(self, paths: list[str]):
         """清理临时文件"""
         for p in paths:
             if os.path.exists(p):
@@ -51,7 +53,7 @@ class QwenVLOCR:
             return ""
         
         full_text = []
-        temp_files: List[str] = []
+        temp_files: list[str] = []
 
         try:
             images_paths = []

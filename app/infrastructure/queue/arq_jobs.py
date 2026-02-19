@@ -1,20 +1,19 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict
+from typing import Any
 
 import anyio
 
-from app.skills.rag.rag_engine import get_rag_engine
 from app.infrastructure.queue.redis_client import update_task
 from app.infrastructure.utils.logging import bind_logger, get_logger
-
+from app.skills.rag.rag_engine import get_rag_engine
 
 _log = get_logger("task_queue.arq_jobs")
 
 
 async def ingest_pdf(
-    ctx: Dict[str, Any], task_id: str, file_path: str, user_id: str = None
+    ctx: dict[str, Any], task_id: str, file_path: str, user_id: str = None
 ) -> bool:
     logger = bind_logger(_log, session_id=task_id, node="ingest_pdf")
     started_at = int(time.time())

@@ -1,14 +1,14 @@
 import os
-import uuid
 import time
-from typing import List, Annotated
+import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
+
+from app.infrastructure.database.models import User
 from app.infrastructure.queue.client import enqueue_ingest_pdf
 from app.infrastructure.queue.redis_client import init_task
-from app.skills.ocr.ocr_engine import ocr_engine
 from app.server.api.auth import get_current_active_user
-from app.infrastructure.database.models import User
 
 router = APIRouter()
 
@@ -16,7 +16,7 @@ router = APIRouter()
 # 上传（RAG）
 @router.post("/upload")
 async def upload_documents(
-    files: List[UploadFile] = File(...),
+    files: list[UploadFile] = File(...),
     current_user: Annotated[User, Depends(get_current_active_user)] = None,
 ):
     user_id = current_user.username if current_user else "unknown"

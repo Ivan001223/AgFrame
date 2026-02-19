@@ -1,23 +1,26 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from sqlalchemy import bindparam, delete, select, update, func, cast, Float
 from pgvector.sqlalchemy import Vector
+from sqlalchemy import Float, bindparam, cast, delete, func, select, update
 
+from app.infrastructure.database.conversation_utils import (
+    derive_session_title,
+    should_bump_updated_at,
+)
 from app.infrastructure.database.models import (
     ChatHistory,
     ChatSession,
     DocContent,
     DocEmbedding,
     Document,
-    UserProfile,
     UserMemoryEmbedding,
     UserMemoryItem,
+    UserProfile,
 )
 from app.infrastructure.database.orm import get_session
-from app.infrastructure.database.conversation_utils import derive_session_title, should_bump_updated_at
 
 
 class MySQLConversationStore:
@@ -27,9 +30,9 @@ class MySQLConversationStore:
         self,
         user_id: str,
         session_id: str,
-        messages: List[Dict[str, Any]],
-        title: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        messages: list[dict[str, Any]],
+        title: str | None = None,
+    ) -> dict[str, Any]:
         """保存或更新会话及消息记录"""
         now = int(time.time())
         title = derive_session_title(messages, title)
@@ -74,7 +77,7 @@ class MySQLConversationStore:
             )
 
             if messages:
-                rows: List[ChatHistory] = []
+                rows: list[ChatHistory] = []
                 for m in messages:
                     role = str(m.get("role", ""))
                     content = str(m.get("content", ""))
@@ -100,20 +103,34 @@ class MySQLConversationStore:
             "messages": messages,
         }
 
-    def list_sessions(self, user_id: str) -> List[Dict[str, Any]]:
+    def list_sessions(self, user_id: str) -> list[dict[str, Any]]:
         """列出用户的所有会话，按更新时间倒序"""
         with get_session() as session:
+            # 一次性获取所有会话
             sessions = session.execute(
                 select(ChatSession).where(ChatSession.user_id == user_id).order_by(ChatSession.updated_at.desc())
             ).scalars().all()
-            out: List[Dict[str, Any]] = []
+
+            if not sessions:
+                return []
+
+            # 批量获取所有消息（避免 N+1 查询）
+            session_ids = [s.session_id for s in sessions]
+            all_messages = session.execute(
+                select(ChatHistory)
+                .where(ChatHistory.user_id == user_id, ChatHistory.session_id.in_(session_ids))
+                .order_by(ChatHistory.session_id, ChatHistory.msg_id.asc())
+            ).scalars().all()
+
+            # 按 session_id 分组消息
+            messages_by_session: dict[str, list[ChatHistory]] = {}
+            for m in all_messages:
+                messages_by_session.setdefault(m.session_id, []).append(m)
+
+            # 构建输出
+            out: list[dict[str, Any]] = []
             for s in sessions:
-                # 获取会话的所有消息
-                msgs = session.execute(
-                    select(ChatHistory)
-                    .where(ChatHistory.user_id == user_id, ChatHistory.session_id == s.session_id)
-                    .order_by(ChatHistory.msg_id.asc())
-                ).scalars().all()
+                msgs = messages_by_session.get(s.session_id, [])
                 out.append(
                     {
                         "id": s.session_id,
@@ -143,7 +160,7 @@ class MySQLConversationStore:
 
     def get_recent_messages(
         self, user_id: str, session_id: str, limit_messages: int
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """获取指定会话的最近 N 条消息"""
         if limit_messages <= 0:
             return []
@@ -160,7 +177,7 @@ class MySQLConversationStore:
                 for m in msgs
             ]
 
-    def get_session_meta(self, user_id: str, session_id: str) -> Optional[Dict[str, Any]]:
+    def get_session_meta(self, user_id: str, session_id: str) -> dict[str, Any] | None:
         """获取会话元数据（不含消息内容）"""
         with get_session() as session:
             s = session.execute(
@@ -181,11 +198,11 @@ class MySQLConversationStore:
         self,
         user_id: str,
         session_id: str,
-        last_summarized_msg_id: Optional[int] = None,
-        last_profiled_msg_id: Optional[int] = None,
+        last_summarized_msg_id: int | None = None,
+        last_profiled_msg_id: int | None = None,
     ) -> None:
         """更新会话的处理进度标记"""
-        values: Dict[str, Any] = {}
+        values: dict[str, Any] = {}
         if last_summarized_msg_id is not None:
             values["last_summarized_msg_id"] = int(last_summarized_msg_id)
         if last_profiled_msg_id is not None:
@@ -201,7 +218,7 @@ class MySQLConversationStore:
 
     def get_messages_after(
         self, user_id: str, session_id: str, after_msg_id: int, limit_messages: int
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """获取指定 msg_id 之后的消息（用于增量处理）"""
         if limit_messages <= 0:
             return []
@@ -231,7 +248,7 @@ class MySQLConversationStore:
 class MySQLProfileStore:
     """MySQL 用户画像存储实现"""
     
-    def get_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
+    def get_profile(self, user_id: str) -> dict[str, Any] | None:
         """获取用户画像"""
         with get_session() as session:
             row = session.get(UserProfile, user_id)
@@ -239,7 +256,7 @@ class MySQLProfileStore:
                 return None
             return {"profile": row.profile_json, "version": int(row.version), "updated_at": int(row.updated_at)}
 
-    def upsert_profile(self, user_id: str, profile: Dict[str, Any], version: int) -> None:
+    def upsert_profile(self, user_id: str, profile: dict[str, Any], version: int) -> None:
         """更新或插入用户画像"""
         now = int(time.time())
         with get_session() as session:
@@ -256,7 +273,7 @@ class MySQLDocStore:
     """MySQL 文档存储实现 (Parent Retrieval)"""
     
     def upsert_document(
-        self, source_path: str, created_at: Optional[int] = None, user_id: Optional[str] = None, checksum: Optional[str] = None
+        self, source_path: str, created_at: int | None = None, user_id: str | None = None, checksum: str | None = None
     ) -> int:
         """记录上传的文档元数据"""
         created_at_val = int(created_at or time.time())
@@ -272,13 +289,13 @@ class MySQLDocStore:
             session.flush()
             return int(doc.doc_id)
 
-    def insert_parent_chunks(self, doc_id: int, chunks: List[Dict[str, Any]]) -> List[int]:
+    def insert_parent_chunks(self, doc_id: int, chunks: list[dict[str, Any]]) -> list[int]:
         """插入父文档切片"""
         if not chunks:
             return []
         now = int(time.time())
         with get_session() as session:
-            rows: List[DocContent] = []
+            rows: list[DocContent] = []
             for c in chunks:
                 content = str(c.get("content", ""))
                 page_num = c.get("page_num")
@@ -287,7 +304,7 @@ class MySQLDocStore:
             session.flush()
             return [int(r.parent_chunk_id) for r in rows]
 
-    def fetch_parent_chunks(self, parent_chunk_ids: List[int]) -> List[Dict[str, Any]]:
+    def fetch_parent_chunks(self, parent_chunk_ids: list[int]) -> list[dict[str, Any]]:
         """根据 ID 列表批量获取父文档切片"""
         if not parent_chunk_ids:
             return []
@@ -296,7 +313,7 @@ class MySQLDocStore:
                 select(DocContent).where(DocContent.parent_chunk_id.in_([int(x) for x in parent_chunk_ids]))
             ).scalars().all()
             row_by_id = {int(r.parent_chunk_id): r for r in rows}
-            out: List[Dict[str, Any]] = []
+            out: list[dict[str, Any]] = []
             for i in parent_chunk_ids:
                 r = row_by_id.get(int(i))
                 if not r:
@@ -318,11 +335,11 @@ class PgDocEmbeddingStore:
             res = session.execute(delete(DocEmbedding).where(DocEmbedding.doc_id == int(doc_id)))
             return int(res.rowcount or 0)
 
-    def add_embeddings(self, rows: List[Dict[str, Any]]) -> int:
+    def add_embeddings(self, rows: list[dict[str, Any]]) -> int:
         if not rows:
             return 0
         now = int(time.time())
-        to_add: List[DocEmbedding] = []
+        to_add: list[DocEmbedding] = []
         for r in rows:
             to_add.append(
                 DocEmbedding(
@@ -341,8 +358,8 @@ class PgDocEmbeddingStore:
         return len(to_add)
 
     def dense_search(
-        self, query_vec: List[float], *, k: int, filter: Optional[Dict[str, Any]] = None
-    ) -> List[DocEmbedding]:
+        self, query_vec: list[float], *, k: int, filter: dict[str, Any] | None = None
+    ) -> list[DocEmbedding]:
         if not query_vec or k <= 0:
             return []
         q = bindparam("query_vec", value=list(query_vec), type_=Vector)
@@ -360,8 +377,8 @@ class PgDocEmbeddingStore:
             return list(session.execute(stmt).scalars().all())
 
     def sparse_search(
-        self, query: str, *, k: int, filter: Optional[Dict[str, Any]] = None
-    ) -> List[DocEmbedding]:
+        self, query: str, *, k: int, filter: dict[str, Any] | None = None
+    ) -> list[DocEmbedding]:
         q = str(query or "").strip()
         if not q or k <= 0:
             return []
@@ -386,13 +403,13 @@ class PgDocEmbeddingStore:
 
 
 class PgUserMemoryStore:
-    def upsert_items(self, rows: List[Dict[str, Any]]) -> int:
+    def upsert_items(self, rows: list[dict[str, Any]]) -> int:
         if not rows:
             return 0
         now = int(time.time())
         count = 0
         with get_session() as session:
-            grouped: Dict[tuple[str, str], List[Dict[str, Any]]] = {}
+            grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
             for r in rows:
                 user_id = str(r.get("user_id") or "")
                 kind = str(r.get("kind") or "")
@@ -400,7 +417,7 @@ class PgUserMemoryStore:
                     continue
                 grouped.setdefault((user_id, kind), []).append(r)
 
-            existing_by_key: Dict[tuple[str, str, str], UserMemoryItem] = {}
+            existing_by_key: dict[tuple[str, str, str], UserMemoryItem] = {}
             for (user_id, kind), g in grouped.items():
                 hashes = [str(x.get("item_hash") or "") for x in g if str(x.get("item_hash") or "")]
                 if not hashes:
@@ -465,7 +482,7 @@ class PgUserMemoryStore:
                 count += 1
         return count
 
-    def delete_by_user(self, user_id: str, *, kind: Optional[str] = None, subkind: Optional[str] = None) -> int:
+    def delete_by_user(self, user_id: str, *, kind: str | None = None, subkind: str | None = None) -> int:
         uid = str(user_id or "").strip()
         if not uid:
             return 0
@@ -480,13 +497,13 @@ class PgUserMemoryStore:
 
     def dense_search(
         self,
-        query_vec: List[float],
+        query_vec: list[float],
         *,
         user_id: str,
         kind: str,
         k: int,
-        subkind: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        subkind: str | None = None,
+    ) -> list[dict[str, Any]]:
         uid = str(user_id or "").strip()
         knd = str(kind or "").strip()
         if not uid or not knd or not query_vec or k <= 0:
@@ -503,7 +520,7 @@ class PgUserMemoryStore:
         stmt = stmt.order_by(distance).limit(int(k))
         with get_session() as session:
             rows = session.execute(stmt).all()
-            out: List[Dict[str, Any]] = []
+            out: list[dict[str, Any]] = []
             for it, dist in rows:
                 out.append(
                     {
@@ -532,10 +549,10 @@ class PgChatSummaryStore:
         user_id: str,
         session_id: str,
         summary_text: str,
-        embedding: List[float],
-        start_msg_id: Optional[int] = None,
-        end_msg_id: Optional[int] = None,
-        created_at: Optional[int] = None,
+        embedding: list[float],
+        start_msg_id: int | None = None,
+        end_msg_id: int | None = None,
+        created_at: int | None = None,
     ) -> int:
         now = int(created_at or time.time())
         with get_session() as session:
@@ -560,10 +577,10 @@ class PgChatSummaryStore:
     def search(
         self,
         user_id: str,
-        query_vec: List[float],
+        query_vec: list[float],
         k: int = 3,
-        filter_session_id: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        filter_session_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         uid = str(user_id or "").strip()
         if not uid or not query_vec or k <= 0:
             return []
@@ -579,7 +596,7 @@ class PgChatSummaryStore:
         stmt = stmt.order_by(distance).limit(int(k))
         with get_session() as session:
             rows = session.execute(stmt).all()
-            out: List[Dict[str, Any]] = []
+            out: list[dict[str, Any]] = []
             for it, dist in rows:
                 out.append(
                     {

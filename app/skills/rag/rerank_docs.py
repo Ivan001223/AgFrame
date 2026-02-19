@@ -1,21 +1,21 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+import time
+from typing import Any
 
 import anyio
-import time
 from langchain_core.messages import BaseMessage
 
-from app.infrastructure.config.config_manager import config_manager
-from app.skills.rag.rag_engine import get_rag_engine
+from app.infrastructure.config.settings import settings
 from app.infrastructure.utils.logging import bind_logger, get_logger
 from app.runtime.graph.registry import register_node
 from app.runtime.graph.state import AgentState
+from app.skills.rag.rag_engine import get_rag_engine
 
 _log = get_logger("workflow.rerank_docs")
 
 
-def _get_last_user_query(messages: List[BaseMessage]) -> str:
+def _get_last_user_query(messages: list[BaseMessage]) -> str:
     for m in reversed(messages):
         role = getattr(m, "type", None) or getattr(m, "role", None)
         content = getattr(m, "content", None)
@@ -28,23 +28,14 @@ def _get_last_user_query(messages: List[BaseMessage]) -> str:
 
 
 def _get_final_k() -> int:
-    cfg = config_manager.get_config() or {}
-    rag_cfg = (cfg.get("rag") or {}).get("retrieval") or {}
-    val = rag_cfg.get("final_k")
-    if val is not None:
-        try:
-            return max(1, int(val))
-        except Exception:
-            pass
-    budget_cfg = ((cfg.get("prompt") or {}).get("budget") or {})
-    try:
-        return max(1, int(budget_cfg.get("max_docs", 3)))
-    except Exception:
-        return 3
+    retrieval_k = settings.rag.retrieval.final_k
+    if retrieval_k:
+        return retrieval_k
+    return settings.prompt.budget.max_docs
 
 
 @register_node("rerank_docs")
-async def rerank_docs_node(state: AgentState) -> Dict[str, Any]:
+async def rerank_docs_node(state: AgentState) -> dict[str, Any]:
     t0 = time.perf_counter()
     ctx = dict(state.get("context") or {})
     candidates = state.get("retrieved_docs_candidates") or ctx.get("retrieved_docs_candidates") or []

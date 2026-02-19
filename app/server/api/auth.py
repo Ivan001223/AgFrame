@@ -1,20 +1,21 @@
+import time
 from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
-from sqlalchemy import select
 from pydantic import BaseModel
-import time
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from app.infrastructure.database.orm import get_sessionmaker
+from app.infrastructure.config.settings import settings
 from app.infrastructure.database.models import User
+from app.infrastructure.database.orm import get_sessionmaker
 from app.infrastructure.utils.security import (
-    verify_password,
-    get_password_hash,
     create_access_token,
     decode_access_token,
+    get_password_hash,
+    verify_password,
 )
-from app.infrastructure.config.config_manager import config_manager
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -115,8 +116,8 @@ async def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    auth_config = config_manager.get_config().get("auth", {})
-    access_token_expires_minutes = auth_config.get("access_token_expire_minutes", 30)
+    auth_config = settings.auth
+    access_token_expires_minutes = auth_config.access_token_expire_minutes
 
     access_token = create_access_token(
         data={"sub": user.username, "role": user.role},

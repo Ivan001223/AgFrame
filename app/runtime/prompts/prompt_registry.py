@@ -1,9 +1,7 @@
-import os
-import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
 from enum import Enum
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -17,10 +15,10 @@ class PromptVariant(Enum):
 class PromptTemplate:
     name: str
     template: str
-    variables: List[str]
+    variables: list[str]
     version: str = "1.0.0"
     description: str = ""
-    tags: List[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
 
     def render(self, **kwargs: str) -> str:
         rendered = self.template
@@ -29,7 +27,7 @@ class PromptTemplate:
             rendered = rendered.replace(f"{{{var}}}", str(value))
         return rendered
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "template": self.template,
@@ -40,7 +38,7 @@ class PromptTemplate:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "PromptTemplate":
+    def from_dict(cls, data: dict[str, Any]) -> "PromptTemplate":
         return cls(
             name=data["name"],
             template=data["template"],
@@ -53,8 +51,8 @@ class PromptTemplate:
 
 class PromptRegistry:
     _instance: Optional["PromptRegistry"] = None
-    _prompts: Dict[str, PromptTemplate] = {}
-    _ab_tests: Dict[str, Dict[str, Any]] = {}
+    _prompts: dict[str, PromptTemplate] = {}
+    _ab_tests: dict[str, dict[str, Any]] = {}
 
     def __new__(cls):
         if cls._instance is None:
@@ -142,7 +140,7 @@ class PromptRegistry:
         self._prompts[key] = template
         logger.info(f"Registered prompt: {key}")
 
-    def get(self, name: str, version: str = "latest") -> Optional[PromptTemplate]:
+    def get(self, name: str, version: str = "latest") -> PromptTemplate | None:
         if version == "latest":
             matching = [k for k in self._prompts.keys() if k.startswith(f"{name}:")]
             if not matching:
@@ -153,7 +151,7 @@ class PromptRegistry:
         key = f"{name}:{version}"
         return self._prompts.get(key)
 
-    def list_versions(self, name: str) -> List[str]:
+    def list_versions(self, name: str) -> list[str]:
         matching = [k for k in self._prompts.keys() if k.startswith(f"{name}:")]
         return [k.split(":")[1] for k in matching]
 
@@ -177,7 +175,7 @@ class PromptRegistry:
 
     def get_ab_variant(
         self, test_id: str, user_id: str
-    ) -> Optional[PromptVariant]:
+    ) -> PromptVariant | None:
         test = self._ab_tests.get(test_id)
         if not test or not test.get("active"):
             return None
@@ -190,7 +188,7 @@ class PromptRegistry:
 
     def get_ab_prompt(
         self, test_id: str, user_id: str
-    ) -> Optional[PromptTemplate]:
+    ) -> PromptTemplate | None:
         variant = self.get_ab_variant(test_id, user_id)
         if not variant:
             return None
@@ -199,13 +197,13 @@ class PromptRegistry:
         version = test[f"variant_{variant.value}"]
         return self.get(test["name"], version)
 
-    def export_prompts(self) -> Dict[str, Any]:
+    def export_prompts(self) -> dict[str, Any]:
         return {
             "prompts": {k: v.to_dict() for k, v in self._prompts.items()},
             "ab_tests": self._ab_tests,
         }
 
-    def import_prompts(self, data: Dict[str, Any]) -> None:
+    def import_prompts(self, data: dict[str, Any]) -> None:
         for key, val in data.get("prompts", {}).items():
             self.register(PromptTemplate.from_dict(val))
         self._ab_tests = data.get("ab_tests", {})

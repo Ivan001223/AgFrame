@@ -1,14 +1,13 @@
-import os
-import json
 import hashlib
+import json
+import os
 import time
-from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 
 import redis
 
-from app.infrastructure.config.config_manager import config_manager
+from app.infrastructure.config.settings import settings
 
 
 @dataclass
@@ -24,7 +23,7 @@ class SearchResult:
 @dataclass
 class SearchResponse:
     query: str
-    results: List[SearchResult]
+    results: list[SearchResult]
     provider: str
     cached: bool = False
     total_results: int = 0
@@ -35,7 +34,7 @@ class SearchCache:
     def __init__(self, redis_url: str = "redis://localhost:6379/0", ttl: int = 3600):
         self.redis_url = redis_url
         self.ttl = ttl
-        self._client: Optional[redis.Redis] = None
+        self._client: redis.Redis | None = None
 
     @property
     def client(self) -> redis.Redis:
@@ -47,7 +46,7 @@ class SearchCache:
         hash_key = hashlib.md5(f"{provider}:{query}".encode()).hexdigest()
         return f"agframe:search:{hash_key}"
 
-    def get(self, query: str, provider: str) -> Optional[str]:
+    def get(self, query: str, provider: str) -> str | None:
         key = self._make_key(query, provider)
         return self.client.get(key)
 
@@ -64,7 +63,7 @@ class SearchProvider:
     def __init__(self, name: str):
         self.name = name
 
-    async def search(self, query: str, max_results: int = 5) -> List[SearchResult]:
+    async def search(self, query: str, max_results: int = 5) -> list[SearchResult]:
         raise NotImplementedError
 
 
@@ -74,7 +73,7 @@ class TavilyProvider(SearchProvider):
         self.api_key = api_key
         self.max_results = max_results
 
-    async def search(self, query: str, max_results: int = None) -> List[SearchResult]:
+    async def search(self, query: str, max_results: int = None) -> list[SearchResult]:
         try:
             from langchain_community.tools.tavily_search import TavilySearchResults
             tool = TavilySearchResults(tavily_api_key=self.api_key, max_results=max_results or self.max_results)
@@ -89,7 +88,7 @@ class TavilyProvider(SearchProvider):
                 )
                 for r in results
             ]
-        except Exception as e:
+        except Exception:
             return []
 
 
@@ -98,7 +97,7 @@ class DuckDuckGoProvider(SearchProvider):
         super().__init__("duckduckgo")
         self.max_results = max_results
 
-    async def search(self, query: str, max_results: int = None) -> List[SearchResult]:
+    async def search(self, query: str, max_results: int = None) -> list[SearchResult]:
         try:
             from langchain_community.tools import DuckDuckGoSearchResults
             tool = DuckDuckGoSearchResults(max_results=max_results or self.max_results)
@@ -114,7 +113,7 @@ class DuckDuckGoProvider(SearchProvider):
                 )
                 for r in parsed
             ]
-        except Exception as e:
+        except Exception:
             return []
 
 
@@ -124,7 +123,7 @@ class SerpAPIProvider(SearchProvider):
         self.api_key = api_key
         self.max_results = max_results
 
-    async def search(self, query: str, max_results: int = None) -> List[SearchResult]:
+    async def search(self, query: str, max_results: int = None) -> list[SearchResult]:
         try:
             from serpapi import GoogleSearch
             params = {
@@ -145,20 +144,20 @@ class SerpAPIProvider(SearchProvider):
                 )
                 for r in organic
             ]
-        except Exception as e:
+        except Exception:
             return []
 
 
 class EnhancedSearchService:
     def __init__(self):
         self.cache = SearchCache()
-        self._providers: Dict[str, SearchProvider] = {}
+        self._providers: dict[str, SearchProvider] = {}
         self._init_providers()
 
     def _init_providers(self):
-        config = config_manager.get_config().get("search", {})
-        provider = config.get("provider", "duckduckgo")
-        tavily_key = config.get("tavily_api_key") or os.getenv("TAVILY_API_KEY")
+        config = settings.search
+        provider = config.provider
+        tavily_key = config.tavily_api_key or os.getenv("TAVILY_API_KEY")
         serpapi_key = os.getenv("SERPAPI_API_KEY")
 
         if tavily_key:
@@ -169,7 +168,7 @@ class EnhancedSearchService:
             self._providers["serpapi"] = SerpAPIProvider(serpapi_key)
 
     def get_provider(self, name: str = None) -> SearchProvider:
-        provider_name = name or config_manager.get_config().get("search", {}).get("provider", "duckduckgo")
+        provider_name = name or settings.search.provider
         return self._providers.get(provider_name, self._providers.get("duckduckgo"))
 
     async def search(

@@ -1,19 +1,18 @@
 from __future__ import annotations
 
-import os
-from typing import Any, Optional
+from typing import Any
 
+from tqdm.auto import tqdm  # noqa: E402
 from transformers import AutoModel, AutoProcessor, AutoTokenizer
 
 from app.runtime.llm.model_importer import resolve_pretrained_source
 from app.runtime.llm.model_manager import torch_dtype_for_device
 
 
-def _download_with_progress(pretrained_source: str, cache_dir: Optional[str] = None, desc: str = "下载模型"):
+def _download_with_progress(pretrained_source: str, cache_dir: str | None = None, desc: str = "下载模型"):
     """使用进度条下载 HuggingFace 模型"""
     try:
         from huggingface_hub import HfApi, snapshot_download
-        from tqdm.auto import tqdm
 
         tqdm.write(f"📦 正在下载 {desc}...")
 
@@ -76,6 +75,7 @@ def load_transformers_model(
     显示下载进度条。
     """
     import tempfile
+
     from tqdm.auto import tqdm
 
     cache_dir = tempfile.gettempdir()
@@ -102,7 +102,7 @@ def load_transformers_model(
     return model
 
 
-def try_load_transformers_processor(pretrained_source: str, *, trust_remote_code: bool) -> Optional[Any]:
+def try_load_transformers_processor(pretrained_source: str, *, trust_remote_code: bool) -> Any | None:
     """尝试加载 Transformers Processor，失败返回 None"""
     try:
         return AutoProcessor.from_pretrained(pretrained_source, trust_remote_code=trust_remote_code)
@@ -119,12 +119,13 @@ def load_sentence_transformers_embedder(
     pretrained_source: str,
     *,
     device: str,
-    max_length: Optional[int] = None,
+    max_length: int | None = None,
     model_name: str = "嵌入模型",
 ) -> Any:
     """加载 SentenceTransformer 嵌入模型，带下载进度条"""
-    from sentence_transformers import SentenceTransformer
     import tempfile
+
+    from sentence_transformers import SentenceTransformer
 
     cache_dir = tempfile.gettempdir()
     tqdm.write(f"📦 正在下载 {model_name}...")
@@ -144,12 +145,13 @@ def load_sentence_transformers_cross_encoder(
     pretrained_source: str,
     *,
     device: str,
-    max_length: Optional[int] = None,
+    max_length: int | None = None,
     model_name: str = "重排序模型",
 ) -> Any:
     """加载 SentenceTransformer CrossEncoder 模型，带下载进度条"""
-    from sentence_transformers import CrossEncoder
     import tempfile
+
+    from sentence_transformers import CrossEncoder
 
     cache_dir = tempfile.gettempdir()
     tqdm.write(f"📦 正在下载 {model_name}...")

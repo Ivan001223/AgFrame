@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 from langchain_core.documents import Document
 from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import BaseModel, Field
 
-from app.infrastructure.config.config_manager import config_manager
-from app.runtime.llm.structured_output import StructuredOutputMode, invoke_structured
+from app.infrastructure.config.settings import settings
 from app.infrastructure.utils.logging import bind_logger, get_logger
 from app.runtime.graph.registry import register_node
 from app.runtime.graph.state import AgentState
+from app.runtime.llm.structured_output import StructuredOutputMode, invoke_structured
 
 _log = get_logger("workflow.grader")
 
@@ -19,12 +19,12 @@ _log = get_logger("workflow.grader")
 class GraderResult(BaseModel):
     verdict: Literal["accept", "rewrite", "search"] = Field(description="下一步动作：通过/重写/搜索后重写")
     reasoning: str = Field(description="简短理由")
-    issues: List[str] = Field(default_factory=list, description="问题列表，如 hallucination/not_answered/missing_info 等")
-    rewrite_instructions: Optional[str] = Field(default=None, description="如果需要重写，给出改写指令（中文）")
-    search_query: Optional[str] = Field(default=None, description="如果需要搜索，给出搜索 query")
+    issues: list[str] = Field(default_factory=list, description="问题列表，如 hallucination/not_answered/missing_info 等")
+    rewrite_instructions: str | None = Field(default=None, description="如果需要重写，给出改写指令（中文）")
+    search_query: str | None = Field(default=None, description="如果需要搜索，给出搜索 query")
 
 
-def _get_last_user_query(messages: List[BaseMessage]) -> str:
+def _get_last_user_query(messages: list[BaseMessage]) -> str:
     for m in reversed(messages):
         role = getattr(m, "type", None) or getattr(m, "role", None)
         content = getattr(m, "content", None)
@@ -33,7 +33,7 @@ def _get_last_user_query(messages: List[BaseMessage]) -> str:
     return ""
 
 
-def _get_last_ai_answer(messages: List[BaseMessage]) -> str:
+def _get_last_ai_answer(messages: list[BaseMessage]) -> str:
     for m in reversed(messages):
         role = getattr(m, "type", None) or getattr(m, "role", None)
         content = getattr(m, "content", None)
@@ -42,8 +42,8 @@ def _get_last_ai_answer(messages: List[BaseMessage]) -> str:
     return ""
 
 
-def _format_docs(docs: List[Document], max_docs: int = 3, max_chars: int = 1200) -> str:
-    out: List[str] = []
+def _format_docs(docs: list[Document], max_docs: int = 3, max_chars: int = 1200) -> str:
+    out: list[str] = []
     for i, d in enumerate(list(docs)[:max_docs], start=1):
         meta = getattr(d, "metadata", {}) or {}
         source = meta.get("source") or meta.get("file_path") or meta.get("url") or ""
@@ -56,16 +56,14 @@ def _format_docs(docs: List[Document], max_docs: int = 3, max_chars: int = 1200)
 
 
 def _get_structured_mode() -> StructuredOutputMode:
-    cfg = config_manager.get_config() or {}
-    llm_cfg = cfg.get("llm") or {}
-    mode = str(llm_cfg.get("structured_output_mode") or "native_first").strip().lower()
+    mode = settings.llm.structured_output_mode
     if mode == StructuredOutputMode.PROMPT_ONLY.value:
         return StructuredOutputMode.PROMPT_ONLY
     return StructuredOutputMode.NATIVE_FIRST
 
 
 @register_node("grader")
-async def grader_node(state: AgentState) -> Dict[str, Any]:
+async def grader_node(state: AgentState) -> dict[str, Any]:
     t0 = time.perf_counter()
     ctx = dict(state.get("context") or {})
     trace = dict(state.get("trace") or {})

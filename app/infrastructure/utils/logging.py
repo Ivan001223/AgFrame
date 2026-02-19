@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class ContextLogger(logging.LoggerAdapter):
-    def process(self, msg: str, kwargs: Dict[str, Any]):
+    def process(self, msg: str, kwargs: dict[str, Any]):
         extra = dict(self.extra or {})
         extra.update(kwargs.get("extra") or {})
         kwargs["extra"] = extra
@@ -35,10 +35,10 @@ def get_logger(name: str) -> logging.Logger:
 def bind_logger(
     logger: logging.Logger,
     *,
-    trace_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    session_id: Optional[str] = None,
-    node: Optional[str] = None,
+    trace_id: str | None = None,
+    user_id: str | None = None,
+    session_id: str | None = None,
+    node: str | None = None,
 ) -> ContextLogger:
     return ContextLogger(
         logger,

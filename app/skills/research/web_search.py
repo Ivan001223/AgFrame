@@ -1,20 +1,19 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List
+from typing import Any
 
-import anyio
 from langchain_core.messages import BaseMessage
 
-from app.skills.research.enhanced_search import enhanced_web_search, search_service
 from app.infrastructure.utils.logging import bind_logger, get_logger
 from app.runtime.graph.registry import register_node
 from app.runtime.graph.state import AgentState
+from app.skills.research.enhanced_search import enhanced_web_search
 
 _log = get_logger("workflow.web_search")
 
 
-def _get_last_user_query(messages: List[BaseMessage]) -> str:
+def _get_last_user_query(messages: list[BaseMessage]) -> str:
     for m in reversed(messages):
         role = getattr(m, "type", None) or getattr(m, "role", None)
         content = getattr(m, "content", None)
@@ -24,7 +23,7 @@ def _get_last_user_query(messages: List[BaseMessage]) -> str:
 
 
 @register_node("web_search")
-async def web_search_node(state: AgentState) -> Dict[str, Any]:
+async def web_search_node(state: AgentState) -> dict[str, Any]:
     t0 = time.perf_counter()
     ctx = dict(state.get("context") or {})
     trace = dict(state.get("trace") or {})

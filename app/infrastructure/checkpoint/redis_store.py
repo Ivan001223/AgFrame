@@ -1,13 +1,13 @@
-from langgraph.checkpoint.redis import AsyncRedisSaver
+
 from langgraph.checkpoint.base import BaseCheckpointSaver
-import os
-from app.infrastructure.config.config_manager import config_manager
+from langgraph.checkpoint.redis import AsyncRedisSaver
+
+from app.infrastructure.config.settings import settings
 
 
 def _get_redis_url() -> str:
-    cfg = config_manager.get_config() or {}
-    queue_cfg = cfg.get("queue") or {}
-    url = queue_cfg.get("redis_url") or os.getenv("REDIS_URL") or "redis://localhost:6379/0"
+    queue_cfg = settings.queue
+    url = queue_cfg.redis_url or "redis://localhost:6379/0"
     return str(url)
 
 

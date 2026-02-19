@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Optional, Tuple, Type
+from typing import Any
 
 import torch
 from transformers import AutoModel, AutoProcessor
 
 from app.runtime.llm.model_importer import resolve_pretrained_source
+
 
 def get_best_device() -> str:
     """获取当前环境可用的最佳计算设备 (cuda > mps > cpu)"""
@@ -23,7 +24,7 @@ def torch_dtype_for_device(device: str) -> torch.dtype:
     return torch.float32 if device == "cpu" else torch.float16
 
 
-def get_config_value(config: dict, path: Tuple[str, ...]) -> Any:
+def get_config_value(config: dict, path: tuple[str, ...]) -> Any:
     """从嵌套字典中获取配置值"""
     cur: Any = config
     for key in path:
@@ -37,8 +38,8 @@ def resolve_model_ref(
     *,
     env_var: str,
     config: dict,
-    config_path: Tuple[str, ...],
-    explicit: Optional[str],
+    config_path: tuple[str, ...],
+    explicit: str | None,
     default: str,
 ) -> str:
     """
@@ -73,7 +74,7 @@ def resolve_provider(config: dict, component_key: str) -> str:
     return str(provider) if provider else "hf"
 
 
-def resolve_modelscope_cache_dir(config: dict, component_key: str) -> Optional[str]:
+def resolve_modelscope_cache_dir(config: dict, component_key: str) -> str | None:
     """解析 ModelScope 缓存目录配置"""
     component = config.get(component_key) or {}
     if component.get("cache_dir"):
@@ -89,8 +90,8 @@ class ModelSpec:
     """模型规格描述符，包含加载所需的所有元数据"""
     provider: str
     model_ref: str
-    revision: Optional[str] = None
-    cache_dir: Optional[str] = None
+    revision: str | None = None
+    cache_dir: str | None = None
     trust_remote_code: bool = True
     modelscope_fallback_to_hf: bool = True
 
@@ -100,8 +101,8 @@ def build_model_spec(
     config: dict,
     component_key: str,
     env_var: str,
-    config_path: Tuple[str, ...],
-    explicit: Optional[str],
+    config_path: tuple[str, ...],
+    explicit: str | None,
     default: str,
 ) -> ModelSpec:
     """
@@ -142,8 +143,8 @@ def load_model_and_processor(
     *,
     spec: ModelSpec,
     device: str,
-    model_cls: Type[Any] = AutoModel,
-    processor_cls: Type[Any] = AutoProcessor,
+    model_cls: type[Any] = AutoModel,
+    processor_cls: type[Any] = AutoProcessor,
     require_processor: bool = True,
 ) -> tuple[Any, Any | None]:
     """

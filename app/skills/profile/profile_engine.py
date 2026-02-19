@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import time
 import json
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any
 
 from app.infrastructure.database.stores import MySQLProfileStore
-from app.runtime.llm.llm_factory import get_llm
 from app.infrastructure.utils.json_parser import parse_json_from_llm
+from app.runtime.llm.llm_factory import get_llm
 
 
-def _default_profile() -> Dict[str, Any]:
+def _default_profile() -> dict[str, Any]:
     """返回默认的空用户画像结构"""
     return {
         "basic_info": {"name": None, "role": None, "location": None},
@@ -24,7 +24,7 @@ def _default_profile() -> Dict[str, Any]:
     }
 
 
-def normalize_profile(profile: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_profile(profile: dict[str, Any]) -> dict[str, Any]:
     """
     标准化用户画像数据，确保所有必要字段都存在且格式正确。
     
@@ -51,7 +51,7 @@ def normalize_profile(profile: Dict[str, Any]) -> Dict[str, Any]:
     profile["tech_profile"]["tools"] = list(profile["tech_profile"].get("tools") or [])
 
     # 标准化 facts 列表
-    normalized_facts: List[Dict[str, Any]] = []
+    normalized_facts: list[dict[str, Any]] = []
     for f in profile["facts"]:
         if isinstance(f, str):
             normalized_facts.append({"text": f, "confidence_score": 0.6, "last_verified_at": None})
@@ -67,7 +67,7 @@ def normalize_profile(profile: Dict[str, Any]) -> Dict[str, Any]:
     return profile
 
 
-def apply_forgetting(profile: Dict[str, Any], now: Optional[int] = None, max_age_days: int = 90) -> Dict[str, Any]:
+def apply_forgetting(profile: dict[str, Any], now: int | None = None, max_age_days: int = 90) -> dict[str, Any]:
     """
     应用遗忘机制：降低旧事实的置信度，移除置信度过低的事实。
     
@@ -81,7 +81,7 @@ def apply_forgetting(profile: Dict[str, Any], now: Optional[int] = None, max_age
     """
     now_ts = int(now or time.time())
     cutoff = now_ts - max_age_days * 24 * 3600
-    kept: List[Dict[str, Any]] = []
+    kept: list[dict[str, Any]] = []
     for f in profile.get("facts", []):
         last = f.get("last_verified_at")
         conf = float(f.get("confidence_score") or 0.6)
@@ -106,7 +106,7 @@ def apply_forgetting(profile: Dict[str, Any], now: Optional[int] = None, max_age
     return profile
 
 
-def extract_base_profile(conversation_history: str) -> Dict[str, Any]:
+def extract_base_profile(conversation_history: str) -> dict[str, Any]:
     """
     从完整的对话历史中提取初始用户画像。
     
@@ -147,7 +147,7 @@ def extract_base_profile(conversation_history: str) -> Dict[str, Any]:
     return apply_forgetting(normalize_profile(data))
 
 
-def incremental_update_profile(old_profile: Dict[str, Any], chat_log: str) -> Dict[str, Any]:
+def incremental_update_profile(old_profile: dict[str, Any], chat_log: str) -> dict[str, Any]:
     """
     根据新的对话片段增量更新用户画像。
     
@@ -184,7 +184,7 @@ def incremental_update_profile(old_profile: Dict[str, Any], chat_log: str) -> Di
     return apply_forgetting(merged)
 
 
-def analyze_interaction_protocol(conversation_samples: str) -> Dict[str, Any]:
+def analyze_interaction_protocol(conversation_samples: str) -> dict[str, Any]:
     """
     分析用户的交互偏好和风格。
     
@@ -222,7 +222,7 @@ class UserProfileEngine:
     def __init__(self):
         self.store = MySQLProfileStore()
 
-    def get_profile(self, user_id: str) -> Dict[str, Any]:
+    def get_profile(self, user_id: str) -> dict[str, Any]:
         """获取指定用户的画像"""
         row = self.store.get_profile(user_id)
         if not row:
@@ -230,6 +230,6 @@ class UserProfileEngine:
         profile = row.get("profile") or {}
         return apply_forgetting(normalize_profile(profile))
 
-    def upsert_profile(self, user_id: str, profile: Dict[str, Any], version: int) -> None:
+    def upsert_profile(self, user_id: str, profile: dict[str, Any], version: int) -> None:
         """更新或插入用户画像"""
         self.store.upsert_profile(user_id, normalize_profile(profile), version=version)

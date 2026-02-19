@@ -1,7 +1,6 @@
-from typing import List
 
 
-def split_text_by_chars(text: str, chunk_size: int, overlap: int) -> List[str]:
+def split_text_by_chars(text: str, chunk_size: int, overlap: int) -> list[str]:
     """
     按字符数切分文本，支持重叠。
     
@@ -17,7 +16,7 @@ def split_text_by_chars(text: str, chunk_size: int, overlap: int) -> List[str]:
         return [text]
     if overlap >= chunk_size:
         overlap = max(0, chunk_size // 5)
-    parts: List[str] = []
+    parts: list[str] = []
     start = 0
     n = len(text)
     while start < n:

@@ -1,8 +1,8 @@
+
 import torch
-from typing import List, Optional
 from langchain_core.embeddings import Embeddings
 
-from app.infrastructure.config.config_manager import config_manager
+from app.infrastructure.config.settings import settings
 from app.runtime.llm.component_loader import (
     load_sentence_transformers_embedder,
     load_transformers_model,
@@ -15,6 +15,7 @@ from app.runtime.llm.model_manager import (
     get_best_device,
 )
 
+
 class ModelEmbeddings(Embeddings):
     """
     基于本地模型的 Embeddings 实现。
@@ -24,12 +25,12 @@ class ModelEmbeddings(Embeddings):
     def __init__(
         self,
         *,
-        config: Optional[dict] = None,
-        model_name: Optional[str] = None,
+        config: dict | None = None,
+        model_name: str | None = None,
     ):
-        cfg = config or config_manager.get_config()
+        cfg = config or settings.model_dump()
         emb_cfg = cfg.get("embeddings") or {}
-        configured_model = emb_cfg.get("model_name") or (cfg.get("local_models") or {}).get("embedding_model")
+        configured_model = emb_cfg.get("model_name") or cfg.get("local_models", {}).get("embedding_model")
         pooling = emb_cfg.get("pooling") or "auto"
         normalize = emb_cfg.get("normalize")
         max_length = emb_cfg.get("max_length")
@@ -105,7 +106,7 @@ class ModelEmbeddings(Embeddings):
                 print(f"加载向量模型失败：{e}")
                 raise
 
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """
         批量计算文档列表的 embeddings。
         会自动添加 doc_prefix。
@@ -125,7 +126,7 @@ class ModelEmbeddings(Embeddings):
             return embeddings.detach().cpu().tolist()
         return self._embed_batch(prefixed)
 
-    def embed_query(self, text: str) -> List[float]:
+    def embed_query(self, text: str) -> list[float]:
         """
         计算单个查询的 embedding。
         会自动添加 query_prefix。
@@ -143,7 +144,7 @@ class ModelEmbeddings(Embeddings):
             return embedding.detach().cpu().tolist()
         return self._embed_batch([prefixed])[0]
 
-    def _embed_batch(self, texts: List[str]) -> List[List[float]]:
+    def _embed_batch(self, texts: list[str]) -> list[list[float]]:
         """
         使用 Transformers 后端进行批量向量化。
         支持自定义 pooling 策略 (cls, mean, last_token)。
@@ -153,7 +154,7 @@ class ModelEmbeddings(Embeddings):
             if pooling == "auto":
                 pooling = "mean"
 
-            results: List[List[float]] = []
+            results: list[list[float]] = []
             for start in range(0, len(texts), self._batch_size):
                 batch = texts[start : start + self._batch_size]
                 if self._processor is not None:

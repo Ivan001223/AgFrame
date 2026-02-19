@@ -1,15 +1,16 @@
-from datetime import datetime, timedelta, timezone
-from typing import Optional, Union, Any
+import warnings
+from datetime import UTC, datetime, timedelta
+
 import bcrypt
 import jwt
-import warnings
-from app.infrastructure.config.config_manager import config_manager
+
+from app.infrastructure.config.settings import settings
 
 _default_secret_warning_shown = False
 
 
 def get_auth_config():
-    return config_manager.get_config().get("auth", {})
+    return settings.auth
 
 
 def _check_default_secret(secret_key: str):
@@ -40,7 +41,7 @@ def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(password, bcrypt.gensalt()).decode("utf-8")
 
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     to_encode = data.copy()
     auth_config = get_auth_config()
     secret_key = auth_config.get("secret_key", "secret")
@@ -48,9 +49,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     algorithm = auth_config.get("algorithm", "HS256")
 
     if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+        expire = datetime.now(UTC) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=15)
+        expire = datetime.now(UTC) + timedelta(minutes=15)
 
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, secret_key, algorithm=algorithm)

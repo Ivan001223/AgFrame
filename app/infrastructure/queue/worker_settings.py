@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict
+from typing import Any
 
 from arq.connections import RedisSettings
 
@@ -20,9 +20,9 @@ class WorkerSettings:
     job_timeout = 60 * 60
     max_jobs = 4
 
-    async def on_startup(self, ctx: Dict[str, Any]) -> None:
+    async def on_startup(self, ctx: dict[str, Any]) -> None:
         return None
 
-    async def on_shutdown(self, ctx: Dict[str, Any]) -> None:
+    async def on_shutdown(self, ctx: dict[str, Any]) -> None:
         return None
 

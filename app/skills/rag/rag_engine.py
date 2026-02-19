@@ -1,35 +1,39 @@
 import os
-from typing import List, Dict, Any, Optional
+from typing import Any
+
 from langchain_community.document_loaders import (
-    TextLoader,
     Docx2txtLoader,
+    TextLoader,
     UnstructuredExcelLoader,
 )
-from langchain_community.document_loaders import UnstructuredFileLoader
-from unstructured.partition.pdf import partition_pdf
-from langchain_experimental.text_splitter import SemanticChunker
 from langchain_core.documents import Document
+from unstructured.partition.pdf import partition_pdf
+
+from app.infrastructure.database.models import (
+    DocContent,
+    DocEmbedding,
+)
+from app.infrastructure.database.models import (
+    Document as DocumentRow,
+)
+from app.infrastructure.database.orm import get_session
+from app.infrastructure.database.schema import ensure_schema_if_possible
+from app.infrastructure.database.stores import MySQLDocStore, PgDocEmbeddingStore
+from app.infrastructure.utils.files import sha256_file
+from app.infrastructure.utils.logging import get_logger
+from app.infrastructure.utils.text_split import split_text_by_chars
+from app.memory.vector_stores.pgvector_vectorstore import PgVectorVectorStore
 
 # 自定义本地模型
 from app.runtime.llm.embeddings import ModelEmbeddings
 from app.runtime.llm.reranker import ModelReranker
 from app.skills.ocr.ocr_engine import ocr_engine
-from app.infrastructure.database.schema import ensure_schema_if_possible
-from app.infrastructure.database.orm import get_session
-from app.infrastructure.database.models import (
-    DocContent,
-    DocEmbedding,
-    Document as DocumentRow,
-)
-from app.infrastructure.database.stores import MySQLDocStore, PgDocEmbeddingStore
-from app.infrastructure.config.config_manager import config_manager
 from app.skills.rag.hybrid_retriever_service import (
-    HybridRetrieverService,
     HybridRetrievalConfig,
+    HybridRetrieverService,
 )
-from app.memory.vector_stores.pgvector_vectorstore import PgVectorVectorStore
-from app.infrastructure.utils.files import sha256_file
-from app.infrastructure.utils.text_split import split_text_by_chars
+
+logger = get_logger("rag_engine")
 
 
 class RAGEngine:
@@ -41,14 +45,14 @@ class RAGEngine:
 
     def __init__(self):
         # 初始化 Embeddings（本地模型）
-        print("正在初始化 RAG 引擎（本地向量模型）...")
+        logger.info("正在初始化 RAG 引擎（本地向量模型）...")
         self.embeddings = ModelEmbeddings()
 
         # 初始化重排器（Reranker）
         self.reranker = ModelReranker()
 
         self._vectorstore = None
-        self._hybrid_retriever: Optional[HybridRetrieverService] = None
+        self._hybrid_retriever: HybridRetrieverService | None = None
         if ensure_schema_if_possible():
             self._vectorstore = PgVectorVectorStore(embeddings=self.embeddings)
             self._hybrid_retriever = HybridRetrieverService(
@@ -56,11 +60,11 @@ class RAGEngine:
             )
 
     def _get_hybrid_config(self) -> HybridRetrievalConfig:
-        # TODO: 从配置中心通过 config_manager 读取
+        # TODO: 从 settings 读取配置
         # 暂时返回默认配置
         return HybridRetrievalConfig()
 
-    def load_documents(self, file_path: str) -> List[Document]:
+    def load_documents(self, file_path: str) -> list[Document]:
         """
         根据文件扩展名加载文档内容。
         支持 PDF/图片 (OCR), DOCX, XLSX, MD, TXT。
@@ -71,11 +75,11 @@ class RAGEngine:
         Returns:
             List[Document]: 加载的文档对象列表
         """
-        docs: List[Document] = []
+        docs: list[Document] = []
         ext = os.path.splitext(file_path)[1].lower()
 
         if ext == ".pdf":
-            print(f"正在使用 Unstructured 处理 PDF：{file_path}...")
+            logger.info(f"正在使用 Unstructured 处理 PDF：{file_path}...")
             try:
                 # 尝试使用 unstructured 进行高级解析（支持表格）
                 elements = partition_pdf(
@@ -86,22 +90,22 @@ class RAGEngine:
                 text = "\n\n".join([str(e) for e in elements])
                 docs = [Document(page_content=text, metadata={"source": file_path})]
             except Exception as e:
-                print(f"Unstructured 解析失败，降级为 OCR: {e}")
+                logger.warning(f"Unstructured 解析失败，降级为 OCR: {e}")
                 # 降级到原有的 OCR 逻辑
                 text = ocr_engine.process_file(file_path)
                 if text:
                     docs = [Document(page_content=text, metadata={"source": file_path})]
                 else:
-                    print(f"警告：OCR 未从 {file_path} 提取到文本")
+                    logger.warning(f"OCR 未从 {file_path} 提取到文本")
                     docs = []
 
         elif ext in [".png", ".jpg", ".jpeg", ".webp", ".tiff", ".bmp"]:
-            print(f"正在使用本地 OCR 处理：{file_path}...")
+            logger.info(f"正在使用本地 OCR 处理：{file_path}...")
             text = ocr_engine.process_file(file_path)
             if text:
                 docs = [Document(page_content=text, metadata={"source": file_path})]
             else:
-                print(f"警告：OCR 未从 {file_path} 提取到文本")
+                logger.warning(f"OCR 未从 {file_path} 提取到文本")
                 docs = []
         elif ext == ".docx":
             loader = Docx2txtLoader(file_path)
@@ -147,16 +151,16 @@ class RAGEngine:
             try:
                 docs = self.load_documents(file_path)
             except Exception as e:
-                print(f"加载文件 {file_path} 错误: {e}")
+                logger.error(f"加载文件 {file_path} 错误: {e}")
                 return False
 
             if not docs:
                 return False
 
             use_parent_retrieval = ensure_schema_if_possible()
-            splits: List[Document] = []
+            splits: list[Document] = []
             if not use_parent_retrieval:
-                print("未检测到可用数据库，无法写入 pgvector")
+                logger.warning("未检测到可用数据库，无法写入 pgvector")
                 return False
 
             doc_store = MySQLDocStore()
@@ -166,7 +170,7 @@ class RAGEngine:
                 source_path=file_path, checksum=checksum, user_id=user_id
             )
 
-            parent_chunks: List[Dict[str, Any]] = []
+            parent_chunks: list[dict[str, Any]] = []
             for d in docs:
                 parent_parts = split_text_by_chars(
                     d.page_content, chunk_size=6000, overlap=400
@@ -199,21 +203,28 @@ class RAGEngine:
             # ... (rest of logic) ...
 
             PgDocEmbeddingStore().delete_by_doc_id(doc_id)
-            vectors = self.embeddings.embed_documents([d.page_content for d in splits])
-            rows: List[Dict[str, Any]] = []
-            for d, v in zip(splits, vectors):
-                meta = dict(getattr(d, "metadata", {}) or {})
-                rows.append(
-                    {
-                        "doc_id": meta.get("doc_id"),
-                        "parent_chunk_id": meta.get("parent_chunk_id"),
-                        "child_index": meta.get("child_index"),
-                        "source_path": meta.get("source"),
-                        "content": d.page_content,
-                        "embedding": v,
-                        "metadata_json": meta,
-                    }
-                )
+
+            # 批量处理向量嵌入，避免大量文档时内存溢出
+            BATCH_SIZE = 100
+            rows: list[dict[str, Any]] = []
+            for i in range(0, len(splits), BATCH_SIZE):
+                batch = splits[i:i + BATCH_SIZE]
+                batch_contents = [d.page_content for d in batch]
+                batch_vectors = self.embeddings.embed_documents(batch_contents)
+
+                for d, v in zip(batch, batch_vectors):
+                    meta = dict(getattr(d, "metadata", {}) or {})
+                    rows.append(
+                        {
+                            "doc_id": meta.get("doc_id"),
+                            "parent_chunk_id": meta.get("parent_chunk_id"),
+                            "child_index": meta.get("child_index"),
+                            "source_path": meta.get("source"),
+                            "content": d.page_content,
+                            "embedding": v,
+                            "metadata_json": meta,
+                        }
+                    )
             PgDocEmbeddingStore().add_embeddings(rows)
 
             if self._vectorstore is None:
@@ -223,19 +234,19 @@ class RAGEngine:
                         vectorstore=self._vectorstore
                     )
                 except Exception as vector_error:
-                    print(f"初始化向量存储失败：{vector_error}")
+                    logger.error(f"初始化向量存储失败：{vector_error}")
                     self._vectorstore = None
                     self._hybrid_retriever = None
 
-            print(f"成功添加了来自 {file_path} 的 {len(splits)} 个块")
+            logger.info(f"成功添加了来自 {file_path} 的 {len(splits)} 个块")
             return True
         except Exception as e:
-            print(f"添加到向量存储失败：{e}")
+            logger.error(f"添加到向量存储失败：{e}")
             return False
 
     def retrieve_candidates(
         self, query: str, *, fetch_k: int = 20, user_id: str = None
-    ) -> List[Document]:
+    ) -> list[Document]:
         if self._vectorstore is None:
             return []
         cfg = self._get_hybrid_config()
@@ -258,7 +269,7 @@ class RAGEngine:
 
     def retrieve_context(
         self, query: str, k: int = 3, fetch_k: int = 20, user_id: str = None
-    ) -> List[Document]:
+    ) -> list[Document]:
         """
         检索查询的前 k 个相关文档。
         ...
@@ -272,21 +283,21 @@ class RAGEngine:
             )
             if not candidates:
                 return []
-            print(f"正在对 {len(candidates)} 条候选文档进行重排...")
+            logger.info(f"正在对 {len(candidates)} 条候选文档进行重排...")
             reranked = self.rerank_candidates(query, candidates, k=k)
             return self.restore_parents(reranked, k=k)
         except Exception as e:
-            print(f"检索上下文错误: {e}")
+            logger.error(f"检索上下文错误: {e}")
             return []
 
     def rerank_candidates(
-        self, query: str, candidates: List[Document], *, k: int
-    ) -> List[Document]:
+        self, query: str, candidates: list[Document], *, k: int
+    ) -> list[Document]:
         if not candidates or k <= 0:
             return []
         candidate_texts = [doc.page_content for doc in candidates]
         reranked_results = self.reranker.rerank(query, candidate_texts, top_k=k)
-        out: List[Document] = []
+        out: list[Document] = []
         for _, score, idx in reranked_results:
             doc = candidates[idx]
             meta = dict(getattr(doc, "metadata", {}) or {})
@@ -295,16 +306,16 @@ class RAGEngine:
             out.append(doc)
         return out
 
-    def restore_parents(self, docs: List[Document], *, k: int) -> List[Document]:
+    def restore_parents(self, docs: list[Document], *, k: int) -> list[Document]:
         if not docs:
             return []
         use_parent_retrieval = ensure_schema_if_possible()
         if not use_parent_retrieval:
             return docs[:k]
 
-        parent_scores: Dict[int, float] = {}
-        parent_order: List[int] = []
-        fallback_docs: List[Document] = []
+        parent_scores: dict[int, float] = {}
+        parent_order: list[int] = []
+        fallback_docs: list[Document] = []
 
         for doc in docs:
             meta = dict(getattr(doc, "metadata", {}) or {})
@@ -324,7 +335,7 @@ class RAGEngine:
             else:
                 parent_scores[parent_id_int] = max(parent_scores[parent_id_int], score)
 
-        out: List[Document] = list(fallback_docs)
+        out: list[Document] = list(fallback_docs)
         if parent_order:
             parent_order = parent_order[:k]
             doc_store = MySQLDocStore()
@@ -345,7 +356,7 @@ class RAGEngine:
                         )
                     )
             except Exception as e:
-                print(f"获取父文档失败，降级返回原切片: {e}")
+                logger.error(f"获取父文档失败，降级返回原切片: {e}")
 
         out.sort(key=lambda x: x.metadata.get("rerank_score", 0), reverse=True)
         return out[:k]
@@ -370,10 +381,10 @@ class RAGEngine:
                 vectorstore=self._vectorstore
             )
         except Exception as e:
-            print(f"清空向量库失败：{e}")
+            logger.error(f"清空向量库失败：{e}")
 
 
-_rag_engine: Optional[RAGEngine] = None
+_rag_engine: RAGEngine | None = None
 
 
 def get_rag_engine() -> RAGEngine:

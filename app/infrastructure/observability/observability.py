@@ -1,17 +1,16 @@
-import os
 import logging
-from typing import Optional
+import os
 
 try:
-    from langfuse.callback import CallbackHandler
     from langfuse import Langfuse
+    from langfuse.callback import CallbackHandler
 except ImportError:
     CallbackHandler = None
     Langfuse = None
 
 logger = logging.getLogger(__name__)
 
-def get_langfuse_callback() -> Optional[object]:
+def get_langfuse_callback() -> object | None:
     """
     Returns a LangfuseCallbackHandler if credentials are set.
     Returns None otherwise to avoid crashing.

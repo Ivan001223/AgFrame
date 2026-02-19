@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 import os
-from typing import Iterator, Optional
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.infrastructure.config.config_manager import config_manager
+from app.infrastructure.config.settings import settings
 
-
-_engine: Optional[Engine] = None
-_SessionLocal: Optional[sessionmaker] = None
+_engine: Engine | None = None
+_SessionLocal: sessionmaker | None = None
 
 
 def get_engine() -> Engine:
@@ -21,17 +20,17 @@ def get_engine() -> Engine:
     if _engine is not None:
         return _engine
 
-    db_config = config_manager.get_config().get("database", {})
-    explicit_url = str(db_config.get("url") or os.getenv("DATABASE_URL") or "").strip()
+    db_config = settings.database
+    explicit_url = str(db_config.url or os.getenv("DATABASE_URL") or "").strip()
     if explicit_url:
         url = explicit_url
     else:
-        db_type = str(db_config.get("type") or "postgres").lower()
-        host = db_config.get("host", "localhost")
-        port = int(db_config.get("port", 5432 if db_type in {"postgres", "postgresql"} else 3306))
-        user = db_config.get("user", "postgres" if db_type in {"postgres", "postgresql"} else "root")
-        password = db_config.get("password", "password")
-        db_name = db_config.get("db_name", "agent_app")
+        db_type = db_config.type
+        host = db_config.host
+        port = db_config.port
+        user = db_config.user
+        password = db_config.password
+        db_name = db_config.db_name
 
         if db_type in {"postgres", "postgresql"}:
             url = f"postgresql+psycopg://{user}:{password}@{host}:{port}/{db_name}"

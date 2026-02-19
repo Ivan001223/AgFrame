@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
+
 
 @dataclass(frozen=True)
 class ImportedModel:
@@ -12,7 +13,7 @@ class ImportedModel:
     model_ref: str          # 原始引用字符串
 
 
-def _snapshot_modelscope(model_id: str, *, cache_dir: Optional[str] = None, revision: Optional[str] = None) -> str:
+def _snapshot_modelscope(model_id: str, *, cache_dir: str | None = None, revision: str | None = None) -> str:
     """使用 ModelScope 下载模型快照"""
     try:
         from modelscope.hub.snapshot_download import snapshot_download
@@ -27,7 +28,7 @@ def _snapshot_modelscope(model_id: str, *, cache_dir: Optional[str] = None, revi
     return snapshot_download(**kwargs)
 
 
-def _snapshot_huggingface(repo_id: str, *, cache_dir: Optional[str] = None, revision: Optional[str] = None) -> str:
+def _snapshot_huggingface(repo_id: str, *, cache_dir: str | None = None, revision: str | None = None) -> str:
     """使用 HuggingFace Hub 下载模型快照"""
     try:
         from huggingface_hub import snapshot_download
@@ -47,8 +48,8 @@ def resolve_pretrained_source(
     *,
     provider: str,
     model_ref: str,
-    cache_dir: Optional[str] = None,
-    revision: Optional[str] = None,
+    cache_dir: str | None = None,
+    revision: str | None = None,
     modelscope_fallback_to_hf: bool = True,
 ) -> ImportedModel:
     """

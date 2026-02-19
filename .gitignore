@@ -27,6 +27,7 @@ __pypackages__/
 build/
 dist/
 wheels/
+CLAUDE.md
 *.egg
 
 .pytest_cache/

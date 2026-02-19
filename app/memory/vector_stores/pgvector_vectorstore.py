@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import List
-
 from langchain_core.documents import Document
 
 from app.infrastructure.database.stores import PgDocEmbeddingStore
@@ -15,10 +13,10 @@ class PgVectorVectorStore:
 
     def similarity_search(
         self, query: str, k: int = 20, filter: dict = None
-    ) -> List[Document]:
+    ) -> list[Document]:
         query_vec = self._embeddings.embed_query(str(query or ""))
         rows = self._store.dense_search(query_vec, k=int(k), filter=filter)
-        out: List[Document] = []
+        out: list[Document] = []
         for r in rows:
             meta = dict(r.metadata_json or {})
             if r.doc_id is not None:
@@ -34,9 +32,9 @@ class PgVectorVectorStore:
 
     def sparse_search(
         self, query: str, k: int = 20, filter: dict = None
-    ) -> List[Document]:
+    ) -> list[Document]:
         rows = self._store.sparse_search(str(query or ""), k=int(k), filter=filter)
-        out: List[Document] = []
+        out: list[Document] = []
         for r in rows:
             meta = dict(r.metadata_json or {})
             if r.doc_id is not None:

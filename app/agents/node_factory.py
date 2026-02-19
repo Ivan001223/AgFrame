@@ -1,9 +1,10 @@
-from typing import Any, Callable, Optional, Sequence
+from collections.abc import Callable, Sequence
+from typing import Any
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-from app.runtime.llm.llm_factory import get_llm
 from app.runtime.graph.state import AgentState
+from app.runtime.llm.llm_factory import get_llm
 
 
 def build_system_prompt_template(system_prompt: str, messages_key: str = "messages") -> ChatPromptTemplate:
@@ -20,7 +21,7 @@ def build_llm_chain(
     system_prompt: str,
     *,
     temperature: float = 0,
-    tools: Optional[Sequence[Any]] = None,
+    tools: Sequence[Any] | None = None,
     json_mode: bool = False,
 ):
     """

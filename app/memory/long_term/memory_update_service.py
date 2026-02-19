@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List
+from typing import Any
 
 from app.infrastructure.database.schema import ensure_schema_if_possible
 from app.infrastructure.database.stores import MySQLConversationStore
-from app.memory.long_term.chat_memory_engine import split_messages_for_memory, summarize_chat_messages
-from app.skills.profile.profile_engine import UserProfileEngine, incremental_update_profile, extract_base_profile
+from app.memory.long_term.chat_memory_engine import (
+    split_messages_for_memory,
+    summarize_chat_messages,
+)
 from app.memory.long_term.user_memory_engine import UserMemoryEngine
+from app.skills.profile.profile_engine import (
+    UserProfileEngine,
+    extract_base_profile,
+    incremental_update_profile,
+)
 
 
 class MemoryUpdateService:
@@ -15,7 +22,7 @@ class MemoryUpdateService:
     记忆更新服务。
     负责在对话结束后，异步更新长期记忆（包括对话摘要和用户画像）。
     """
-    def update_after_save(self, user_id: str, session_id: str, messages: List[Dict[str, Any]]) -> None:
+    def update_after_save(self, user_id: str, session_id: str, messages: list[dict[str, Any]]) -> None:
         """
         在消息保存后触发的更新逻辑。
         

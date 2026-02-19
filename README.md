@@ -293,14 +293,14 @@ docker-compose down -v
 ### 配置管理
 
 ```python
-from app.infrastructure.config.config_manager import config_manager
+from app.infrastructure.config.settings import settings
 
-# 获取配置
-config = config_manager.get_config()
-llm_config = config.get("llm")
+# 访问配置（类型安全）
+llm_model = settings.llm.model
+db_host = settings.database.host
 
-# 更新配置
-config_manager.update_config({"llm": {"model": "gpt-4-turbo"}})
+# 或获取字典格式
+config = settings.model_dump()
 ```
 
 ### 核心 API

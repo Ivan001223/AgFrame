@@ -9,6 +9,8 @@ from langchain_community.document_loaders import (
 from langchain_core.documents import Document
 from unstructured.partition.pdf import partition_pdf
 
+from app.infrastructure.config.settings import settings
+
 from app.infrastructure.database.models import (
     DocContent,
     DocEmbedding,
@@ -24,9 +26,8 @@ from app.infrastructure.utils.logging import get_logger
 from app.infrastructure.utils.text_split import split_text_by_chars
 from app.memory.vector_stores.pgvector_vectorstore import PgVectorVectorStore
 
-# 自定义本地模型
-from app.runtime.llm.embeddings import ModelEmbeddings
-from app.runtime.llm.reranker import ModelReranker
+from app.runtime.llm.embeddings import get_embeddings
+from app.runtime.llm.reranker import get_reranker
 from app.skills.ocr.ocr_engine import ocr_engine
 from app.skills.rag.hybrid_retriever_service import (
     HybridRetrievalConfig,
@@ -44,12 +45,9 @@ class RAGEngine:
     """
 
     def __init__(self):
-        # 初始化 Embeddings（本地模型）
-        logger.info("正在初始化 RAG 引擎（本地向量模型）...")
-        self.embeddings = ModelEmbeddings()
-
-        # 初始化重排器（Reranker）
-        self.reranker = ModelReranker()
+        logger.info("Initializing RAG engine...")
+        self.embeddings = get_embeddings()
+        self.reranker = get_reranker()
 
         self._vectorstore = None
         self._hybrid_retriever: HybridRetrieverService | None = None
@@ -60,9 +58,15 @@ class RAGEngine:
             )
 
     def _get_hybrid_config(self) -> HybridRetrievalConfig:
-        # TODO: 从 settings 读取配置
-        # 暂时返回默认配置
-        return HybridRetrievalConfig()
+        retrieval_cfg = settings.rag.retrieval
+        return HybridRetrievalConfig(
+            mode=retrieval_cfg.mode,
+            dense_k=retrieval_cfg.dense_k,
+            sparse_k=retrieval_cfg.sparse_k,
+            candidate_k=retrieval_cfg.candidate_k,
+            rrf_k=retrieval_cfg.rrf_k,
+            weights=tuple(retrieval_cfg.weights),
+        )
 
     def load_documents(self, file_path: str) -> list[Document]:
         """
@@ -124,7 +128,7 @@ class RAGEngine:
 
         return docs
 
-    def add_knowledge_base(self, file_path: str, user_id: str = None):
+    def add_knowledge_base(self, file_path: str, user_id: str | None = None) -> dict[str, Any]:
         """
         将文件摄取到知识库中。
 
@@ -250,12 +254,6 @@ class RAGEngine:
         if self._vectorstore is None:
             return []
         cfg = self._get_hybrid_config()
-        # TODO: Pass filter to config or directly to retrieve_candidates
-        # HybridRetrievalConfig doesn't seem to support filter yet,
-        # but PgVectorVectorStore.similarity_search does.
-        # HybridRetrieverService needs update to accept filter.
-
-        # We need to pass filter to retrieve_candidates
         filter_dict = {"user_id": user_id} if user_id else None
 
         if self._hybrid_retriever is None:
@@ -326,7 +324,8 @@ class RAGEngine:
                 continue
             try:
                 parent_id_int = int(parent_id)
-            except Exception:
+            except (ValueError, TypeError) as e:
+                logger.debug(f"Failed to parse parent_id {parent_id}: {e}")
                 fallback_docs.append(doc)
                 continue
             if parent_id_int not in parent_scores:
@@ -363,7 +362,7 @@ class RAGEngine:
 
 
 
-    def clear(self):
+    def clear(self) -> None:
         """
         清除向量存储（危险操作！）。
         删除 pgvector 中的向量记录并重置内存中的实例。

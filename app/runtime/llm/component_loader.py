@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from tqdm.auto import tqdm  # noqa: E402
@@ -7,6 +8,8 @@ from transformers import AutoModel, AutoProcessor, AutoTokenizer
 
 from app.runtime.llm.model_importer import resolve_pretrained_source
 from app.runtime.llm.model_manager import torch_dtype_for_device
+
+logger = logging.getLogger(__name__)
 
 
 def _download_with_progress(pretrained_source: str, cache_dir: str | None = None, desc: str = "下载模型"):
@@ -39,11 +42,11 @@ def _download_with_progress(pretrained_source: str, cache_dir: str | None = None
                         cache_dir=cache_dir,
                         resume_download=True,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to download {filename}: {e}")
                 pbar.update(1)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Model download failed: {e}")
 
 
 def resolve_pretrained_source_for_spec(spec: Any) -> str:
@@ -106,7 +109,8 @@ def try_load_transformers_processor(pretrained_source: str, *, trust_remote_code
     """尝试加载 Transformers Processor，失败返回 None"""
     try:
         return AutoProcessor.from_pretrained(pretrained_source, trust_remote_code=trust_remote_code)
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Failed to load processor for {pretrained_source}: {e}")
         return None
 
 
@@ -136,8 +140,8 @@ def load_sentence_transformers_embedder(
     if max_length is not None:
         try:
             model.max_seq_length = int(max_length)
-        except Exception:
-            pass
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Failed to set max_seq_length to {max_length}: {e}")
     return model
 
 

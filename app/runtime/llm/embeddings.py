@@ -1,8 +1,11 @@
 
+import logging
 import torch
 from langchain_core.embeddings import Embeddings
 
 from app.infrastructure.config.settings import settings
+
+logger = logging.getLogger(__name__)
 from app.runtime.llm.component_loader import (
     load_sentence_transformers_embedder,
     load_transformers_model,
@@ -72,21 +75,21 @@ class ModelEmbeddings(Embeddings):
             if self._st_model is not None:
                 return
             self._loaded_source = resolve_pretrained_source_for_spec(self._spec)
-            print(f"正在加载向量模型：{self.model_name}（设备：{self._device}，后端：sentence_transformers）...")
+            logger.info(f"Loading embedding model: {self.model_name} (device: {self._device}, backend: sentence_transformers)")
             try:
                 self._st_model = load_sentence_transformers_embedder(
                     self._loaded_source, device=self._device, max_length=self._max_length,
                     model_name=self.model_name
                 )
-                print("向量模型加载完成。")
+                logger.info("Embedding model loaded successfully")
             except Exception as e:
-                print(f"加载向量模型失败：{e}")
+                logger.error(f"Failed to load embedding model: {e}")
                 raise
             return
 
         if self._model is None:
             self._loaded_source = resolve_pretrained_source_for_spec(self._spec)
-            print(f"正在加载向量模型：{self.model_name}（设备：{self._device}）...")
+            logger.info(f"Loading embedding model: {self.model_name} (device: {self._device})")
             try:
                 self._model = load_transformers_model(
                     self._loaded_source,
@@ -101,9 +104,9 @@ class ModelEmbeddings(Embeddings):
                     self._tokenizer = load_transformers_tokenizer(
                         self._loaded_source, trust_remote_code=self._spec.trust_remote_code
                     )
-                print("向量模型加载完成。")
+                logger.info("Embedding model loaded successfully")
             except Exception as e:
-                print(f"加载向量模型失败：{e}")
+                logger.error(f"Failed to load embedding model: {e}")
                 raise
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
@@ -219,8 +222,25 @@ class ModelEmbeddings(Embeddings):
             return results
         except Exception as e:
             preview = texts[0][:20] if texts else ""
-            print(f"向量化文本“{preview}...”时出错：{e}")
+            logger.error(f"Failed to embed text '{preview}...': {e}")
             raise e
+
+
+_model_embeddings_instance = None
+
+
+def get_embeddings() -> ModelEmbeddings:
+    """
+    获取 ModelEmbeddings 单例实例。
+    避免重复加载模型到内存。
+
+    Returns:
+        ModelEmbeddings: Embeddings 模型单例
+    """
+    global _model_embeddings_instance
+    if _model_embeddings_instance is None:
+        _model_embeddings_instance = ModelEmbeddings()
+    return _model_embeddings_instance
 
 
 HFEmbeddings = ModelEmbeddings

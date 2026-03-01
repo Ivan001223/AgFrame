@@ -1,7 +1,10 @@
 
+import logging
 import torch
 
 from app.infrastructure.config.settings import settings
+
+logger = logging.getLogger(__name__)
 from app.runtime.llm.component_loader import (
     load_sentence_transformers_cross_encoder,
     load_transformers_model,
@@ -72,21 +75,21 @@ class ModelReranker:
             if self._cross_encoder is not None:
                 return
             self._loaded_source = resolve_pretrained_source_for_spec(self._spec)
-            print(f"正在加载重排模型：{self.model_name}（设备：{self._device}，后端：sentence_transformers）...")
+            logger.info(f"Loading reranker model: {self.model_name} (device: {self._device}, backend: sentence_transformers)")
             try:
                 self._cross_encoder = load_sentence_transformers_cross_encoder(
                     self._loaded_source, device=self._device, max_length=self._max_length,
                     model_name=self.model_name
                 )
-                print("重排模型加载完成。")
+                logger.info("Reranker model loaded successfully")
             except Exception as e:
-                print(f"加载重排模型失败：{e}")
+                logger.error(f"Failed to load reranker model: {e}")
                 raise e
             return
 
         if self._model is None:
             self._loaded_source = resolve_pretrained_source_for_spec(self._spec)
-            print(f"正在加载重排模型：{self.model_name}（设备：{self._device}）...")
+            logger.info(f"Loading reranker model: {self.model_name} (device: {self._device})")
             try:
                 self._model = load_transformers_model(
                     self._loaded_source,
@@ -101,9 +104,9 @@ class ModelReranker:
                 self._tokenizer = load_transformers_tokenizer(
                     self._loaded_source, trust_remote_code=self._spec.trust_remote_code
                 )
-                print("重排模型加载完成。")
+                logger.info("Reranker model loaded successfully")
             except Exception as e:
-                print(f"加载重排模型失败：{e}")
+                logger.error(f"Failed to load reranker model: {e}")
                 raise e
 
     def rerank(self, query: str, documents: list[str], top_k: int = 3) -> list[tuple[str, float, int]]:
@@ -139,7 +142,7 @@ class ModelReranker:
                 scores.sort(key=lambda x: x[1], reverse=True)
                 return scores[:top_k]
             except Exception as e:
-                print(f"重排失败：{e}")
+                logger.warning(f"Reranking failed: {e}")
                 return [(doc, 0.0, i) for i, doc in enumerate(documents)][:top_k]
 
         try:
@@ -179,7 +182,7 @@ class ModelReranker:
             scores.sort(key=lambda x: x[1], reverse=True)
             return scores[:top_k]
         except Exception as e:
-            print(f"重排失败：{e}")
+            logger.warning(f"Reranking failed: {e}")
             return [(doc, 0.0, i) for i, doc in enumerate(documents)][:top_k]
 
     def _score_pairs_transformers(self, query: str, docs: list[str]) -> list[float]:
@@ -241,6 +244,23 @@ class ModelReranker:
             if start + self._window_size >= len(input_ids):
                 break
         return 0.0 if best is None else float(best)
+
+
+_model_reranker_instance = None
+
+
+def get_reranker() -> ModelReranker:
+    """
+    获取 ModelReranker 单例实例。
+    避免重复加载模型到内存。
+
+    Returns:
+        ModelReranker: Reranker 模型单例
+    """
+    global _model_reranker_instance
+    if _model_reranker_instance is None:
+        _model_reranker_instance = ModelReranker()
+    return _model_reranker_instance
 
 
 HFReranker = ModelReranker

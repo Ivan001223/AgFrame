@@ -48,7 +48,7 @@ class HistoryManager:
         sessions_list.sort(key=lambda x: x.get("updated_at", 0), reverse=True)
         return sessions_list
 
-    def save_session(self, user_id: str, session_id: str, messages: list[dict[str, Any]], title: str | None = None):
+    def save_session(self, user_id: str, session_id: str, messages: list[dict[str, Any]], title: str | None = None) -> None:
         """保存或更新一次聊天会话。"""
         data = self._load_data()
         if user_id not in data:
@@ -86,7 +86,7 @@ class HistoryManager:
         self._save_data(data)
         return data[user_id][session_id]
 
-    def delete_session(self, user_id: str, session_id: str):
+    def delete_session(self, user_id: str, session_id: str) -> bool:
         """删除会话"""
         data = self._load_data()
         if user_id in data and session_id in data[user_id]:

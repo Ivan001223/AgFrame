@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 import time
 
 from sqlalchemy import text
 
 from app.infrastructure.database.models import Base
 from app.infrastructure.database.orm import get_engine
+
+logger = logging.getLogger(__name__)
 
 
 def ensure_schema() -> None:
@@ -37,7 +40,8 @@ def is_database_ready() -> bool:
         _db_ready_cache = True
         _last_check_time = time.time()
         return True
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Database readiness check failed: {e}")
         _db_ready_cache = False
         _last_check_time = time.time()
         return False
@@ -59,5 +63,6 @@ def ensure_schema_if_possible() -> bool:
     try:
         ensure_schema()
         return True
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Failed to ensure schema: {e}")
         return False

@@ -47,7 +47,7 @@ def parse_json_from_llm(content: str) -> dict[str, Any] | list[Any]:
                 json_str_fixed = json_str.replace('\\', '\\\\')
                 try:
                     return json.loads(json_str_fixed)
-                except:
+                except (json.JSONDecodeError, ValueError):
                     pass
         
         # 若未找到 JSON 对象，则检查列表
@@ -56,7 +56,7 @@ def parse_json_from_llm(content: str) -> dict[str, Any] | list[Any]:
             json_str = match_list.group(0)
             try:
                 return json.loads(json_str)
-            except:
+            except (json.JSONDecodeError, ValueError):
                 pass
 
         raise ValueError(f"Could not parse JSON from content: {content[:100]}...")

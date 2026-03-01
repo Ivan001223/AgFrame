@@ -1,0 +1,4 @@
+pytest-cov
+pytest-json-report
+bandit
+pip-audit

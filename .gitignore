@@ -66,8 +66,6 @@ logs/
 *.db-journal
 
 models/
-tests/
-docs/
 model_cache/
 hf_cache/
 .hf_cache/
@@ -83,3 +81,5 @@ data/**/*.faiss
 data/**/*.index
 data/**/*.bin
 data/**/vector_store*/
+
+reports/

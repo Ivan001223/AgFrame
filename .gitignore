@@ -83,3 +83,5 @@ data/**/*.bin
 data/**/vector_store*/
 
 reports/
+
+docs/plans/

@@ -1,3 +1,4 @@
+import logging
 import os
 import tempfile
 import traceback
@@ -6,6 +7,8 @@ from langchain_core.messages import HumanMessage
 from pdf2image import convert_from_path
 
 from app.runtime.llm.llm_factory import get_local_qwen_provider
+
+logger = logging.getLogger(__name__)
 
 
 class QwenVLOCR:
@@ -31,8 +34,8 @@ class QwenVLOCR:
             if os.path.exists(p):
                 try:
                     os.remove(p)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to remove temp file: {e}")
 
     def process_file(self, file_path: str) -> str:
         """
@@ -49,7 +52,7 @@ class QwenVLOCR:
         try:
             llm = get_local_qwen_provider()
         except Exception as e:
-            print(f"获取 LLM 提供方失败：{e}")
+            logger.error(f"Failed to get LLM provider: {e}")
             return ""
         
         full_text = []
@@ -61,7 +64,7 @@ class QwenVLOCR:
                 try:
                     temp_files = self._pdf_to_temp_images(file_path)
                 except Exception as e:
-                    print(f"PDF 转图片失败：{e}")
+                    logger.error(f"PDF to image conversion failed: {e}")
                     return ""
                 images_paths = temp_files
             elif ext in ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.webp']:
@@ -69,7 +72,7 @@ class QwenVLOCR:
             else:
                 return ""
 
-            print(f"正在进行 OCR：共 {len(images_paths)} 张图片...")
+            logger.info(f"Starting OCR: {len(images_paths)} images to process")
             
             for i, img_path in enumerate(images_paths):
                 abs_path = os.path.abspath(img_path).replace("\\", "/")
@@ -83,14 +86,14 @@ class QwenVLOCR:
                     ]
                 )
                 
-                print(f"  - 正在处理第 {i+1}/{len(images_paths)} 张图片...")
+                logger.debug(f"Processing image {i+1}/{len(images_paths)}")
                 response = llm.invoke([message], max_new_tokens=2048)
                 full_text.append(response.content)
 
             return "\n\n".join(full_text)
 
         except Exception as e:
-            print(f"OCR 处理出错：{e}")
+            logger.error(f"OCR processing failed: {e}")
             traceback.print_exc()
             return ""
         finally:

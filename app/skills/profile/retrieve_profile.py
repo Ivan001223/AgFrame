@@ -43,7 +43,8 @@ async def retrieve_profile_node(state: AgentState) -> dict[str, Any]:
             items = await anyio.to_thread.run_sync(
                 lambda: _memory_engine.retrieve_profile_items(user_id=str(user_id), query=query, k=6, fetch_k=30)
             )
-        except Exception:
+        except Exception as e:
+            _log.warning(f"Failed to retrieve profile items: {e}")
             items = []
 
     ctx["retrieved_profile_items"] = items

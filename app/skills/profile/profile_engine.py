@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from typing import Any
 
 from app.infrastructure.database.stores import MySQLProfileStore
 from app.infrastructure.utils.json_parser import parse_json_from_llm
 from app.runtime.llm.llm_factory import get_llm
+
+logger = logging.getLogger(__name__)
 
 
 def _default_profile() -> dict[str, Any]:
@@ -91,7 +94,8 @@ def apply_forgetting(profile: dict[str, Any], now: int | None = None, max_age_da
             continue
         try:
             last_int = int(last)
-        except Exception:
+        except (ValueError, TypeError) as e:
+            logger.debug(f"Failed to parse last_verified_at: {e}")
             f["last_verified_at"] = now_ts
             kept.append(f)
             continue

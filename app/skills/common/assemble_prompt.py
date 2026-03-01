@@ -36,12 +36,14 @@ async def assemble_prompt_node(state: AgentState) -> dict[str, Any]:
             )
             for m in recent_msgs:
                 recent_history_lines.append(f"{m.get('role')}: {m.get('content')}")
-        except Exception:
+        except Exception as e:
+            _log.warning(f"Failed to get recent history: {e}")
             recent_history_lines = []
 
     try:
         profile = await anyio.to_thread.run_sync(lambda: _profile_engine.get_profile(user_id))
-    except Exception:
+    except Exception as e:
+        _log.warning(f"Failed to get profile: {e}")
         profile = {"basic_info": {}, "tech_profile": {}, "preferences": {}, "facts": []}
 
     retrieved_profile_items = (

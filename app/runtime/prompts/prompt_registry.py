@@ -181,7 +181,8 @@ class PromptRegistry:
             return None
 
         import hashlib
-        hash_val = int(hashlib.md5(f"{user_id}".encode()).hexdigest(), 16)
+        digest = hashlib.sha256(f"{user_id}".encode("utf-8", errors="ignore")).digest()
+        hash_val = int.from_bytes(digest[:8], "big", signed=False)
         if hash_val % 100 < test["traffic_split"] * 100:
             return PromptVariant.A
         return PromptVariant.B

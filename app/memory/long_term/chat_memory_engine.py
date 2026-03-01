@@ -5,9 +5,9 @@ from typing import Any
 from langchain_core.documents import Document
 
 from app.infrastructure.database.stores import PgChatSummaryStore
-from app.runtime.llm.embeddings import ModelEmbeddings
+from app.runtime.llm.embeddings import get_embeddings
 from app.runtime.llm.llm_factory import get_llm
-from app.runtime.llm.reranker import ModelReranker
+from app.runtime.llm.reranker import get_reranker
 
 
 def _format_chat_for_summary(messages: list[dict[str, Any]]) -> str:
@@ -53,8 +53,8 @@ class ChatSummaryIndex:
     使用 pgvector 存储向量，支持分布式部署。
     """
     def __init__(self):
-        self.embeddings = ModelEmbeddings()
-        self.reranker = ModelReranker()
+        self.embeddings = get_embeddings()
+        self.reranker = get_reranker()
         self._store = PgChatSummaryStore()
 
     def add_summary(

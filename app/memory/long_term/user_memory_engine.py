@@ -7,8 +7,8 @@ from typing import Any
 from langchain_core.documents import Document
 
 from app.infrastructure.database.stores import PgUserMemoryStore
-from app.runtime.llm.embeddings import ModelEmbeddings
-from app.runtime.llm.reranker import ModelReranker
+from app.runtime.llm.embeddings import get_embeddings
+from app.runtime.llm.reranker import get_reranker
 
 
 def _sha256_hex(text: str) -> str:
@@ -18,8 +18,8 @@ def _sha256_hex(text: str) -> str:
 class UserMemoryEngine:
     def __init__(self):
         self.store = PgUserMemoryStore()
-        self.embeddings = ModelEmbeddings()
-        self.reranker = ModelReranker()
+        self.embeddings = get_embeddings()
+        self.reranker = get_reranker()
 
     def add_chat_summary(
         self,

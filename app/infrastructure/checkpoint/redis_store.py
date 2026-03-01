@@ -1,6 +1,7 @@
 
+from typing import Any
+
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.checkpoint.redis import AsyncRedisSaver
 
 from app.infrastructure.config.settings import settings
 
@@ -13,10 +14,12 @@ def _get_redis_url() -> str:
 
 class AsyncRedisSaverWrapper(BaseCheckpointSaver):
     def __init__(self):
-        self._saver: AsyncRedisSaver = None
+        self._saver: Any = None
 
-    async def get_saver(self) -> AsyncRedisSaver:
+    async def get_saver(self):
         if self._saver is None:
+            from langgraph.checkpoint.redis import AsyncRedisSaver
+
             self._saver = AsyncRedisSaver(redis_url=_get_redis_url())
             await self._saver.setup()
         return self._saver

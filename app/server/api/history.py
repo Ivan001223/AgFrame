@@ -7,7 +7,6 @@ from app.infrastructure.database.history_manager import history_manager
 from app.infrastructure.database.models import User
 from app.infrastructure.database.schema import ensure_schema_if_possible
 from app.infrastructure.database.stores import MySQLConversationStore
-from app.memory.long_term.memory_update_service import memory_update_service
 from app.server.api.auth import get_current_active_user
 
 router = APIRouter()
@@ -53,10 +52,16 @@ async def save_history(
     store = MySQLConversationStore()
     saved = store.save_session(user_id, session_id, messages, title)
     background_tasks.add_task(
-        memory_update_service.update_after_save, user_id, session_id, messages
+        _update_memory_after_save, user_id, session_id, messages
     )
 
     return saved
+
+
+def _update_memory_after_save(user_id: str, session_id: str, messages: list[dict[str, Any]]) -> None:
+    from app.memory.long_term.memory_update_service import memory_update_service
+
+    memory_update_service.update_after_save(user_id, session_id, messages)
 
 
 @router.delete("/history/{user_id}/{session_id}")

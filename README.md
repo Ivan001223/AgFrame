@@ -7,7 +7,7 @@ AgFrame 是一个生产级 Agent/RAG 后端框架，基于 **FastAPI** + **LangG
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      FastAPI Server                         │
-│                  (Auth / REST / LangServe)                 │
+│                  (Auth / REST / LangServe)                  │
 └─────────────────────────────────────────────────────────────┘
                               │
 ┌─────────────────────────────────────────────────────────────┐
@@ -18,17 +18,17 @@ AgFrame 是一个生产级 Agent/RAG 后端框架，基于 **FastAPI** + **LangG
 └─────────────────────────────────────────────────────────────┘
                               │
 ┌─────────────────────────────────────────────────────────────┐
-│                      Skills / Services                     │
-│  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐   │
-│  │  RAG   │ │ Memory │ │ Profile│ │ Research│ │ Tools  │   │
-│  └────────┘ └────────┘ └────────┘ └────────┘ └────────┘   │
+│                      Skills / Services                      │
+│  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐     │
+│  │  RAG   │ │ Memory │ │ Profile│ │ Research│ │ Tools  │    │
+│  └────────┘ └────────┘ └────────┘ └────────┘ └────────┘     │
 └─────────────────────────────────────────────────────────────┘
                               │
 ┌─────────────────────────────────────────────────────────────┐
-│                   Infrastructure                           │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐   │
-│  │ pgvector │ │  Redis  │ │ PostgreSQL│ │ Langfuse     │   │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────────┘   │
+│                   Infrastructure                            │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐    │
+│  │ pgvector │ │  Redis   │ │ PostgreSQL│ │ Langfuse     │   │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────────┘    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -39,25 +39,19 @@ AgFrame/
 ├── app/
 │   ├── server/              # FastAPI 入口
 │   │   ├── api/             # 路由层
-│   │   └── main.py           # 应用启动
+│   │   └── main.py          # 应用启动
 │   ├── runtime/             # 运行时核心
 │   │   ├── graph/           # LangGraph 工作流
-│   │   │   ├── graph.py      # 图定义
-│   │   │   ├── state.py      # State Schema
+│   │   │   ├── graph.py     # 图定义
+│   │   │   ├── state.py     # State Schema
 │   │   │   ├── orchestrator.py # 编排器
-│   │   │   ├── registry.py   # 节点注册表
-│   │   │   ├── json_router.py # JSON 路由
-│   │   │   ├── memory_router.py
-│   │   │   └── nodes/        # 节点实现
+│   │   │   ├── registry.py  # 节点注册表
+│   │   │   └── nodes/       # 节点实现
 │   │   ├── llm/             # LLM 工厂
-│   │   │   ├── llm_factory.py
-│   │   │   ├── embeddings.py
-│   │   │   ├── reranker.py
-│   │   │   └── local_qwen.py
 │   │   └── prompts/         # Prompt 模板
 │   ├── skills/              # 原子能力层
 │   │   ├── rag/             # 混合检索
-│   │   ├── memory/          # 分层记忆
+│   │   ├── memory/          # 记忆检索技能
 │   │   ├── profile/         # 用户画像
 │   │   ├── research/        # 网络搜索
 │   │   ├── ocr/             # 图片 OCR
@@ -66,7 +60,6 @@ AgFrame/
 │   ├── infrastructure/      # 基础设施
 │   │   ├── config/          # 配置管理
 │   │   ├── database/        # SQLAlchemy ORM
-│   │   ├── vector_stores/   # pgvector 集成
 │   │   ├── checkpoint/      # Redis Checkpoint
 │   │   ├── queue/           # ARQ 异步任务
 │   │   ├── sandbox/         # 代码沙箱
@@ -74,9 +67,9 @@ AgFrame/
 │   │   └── utils/           # 工具函数
 │   ├── agents/              # Agent 节点工厂
 │   ├── memory/              # 记忆模块
-│   │   ├── long_term/       # 长期记忆
-│   │   └── vector_stores/   # 向量存储
-│   └── examples/           # 调试脚本
+│   │   ├── long_term/       # 长期记忆引擎
+│   │   └── vector_stores/   # 向量存储 (pgvector)
+│   └── examples/            # 调试脚本与示例
 ├── configs/                 # 配置文件
 │   ├── config.example.json
 │   └── config.json          # 本地配置（需创建）
@@ -122,6 +115,7 @@ AgFrame/
 - **Redis**: 缓存 / Checkpoint / 任务队列 (ARQ)
 - **PostgreSQL**: 持久化存储
 - **Docker**: 一键启动全部依赖
+- **Sandbox**: 代码安全执行环境
 
 ## 快速开始
 
@@ -140,7 +134,7 @@ cp configs/config.example.json configs/config.json
 # 编辑 configs/config.json 配置各项参数
 ```
 
-**配置结构**：
+**配置结构示例**：
 
 ```json
 {
@@ -172,6 +166,10 @@ cp configs/config.example.json configs/config.json
   "queue": {
     "redis_url": "redis://localhost:6379/0"
   },
+  "storage_local": {
+    "documents_dir": "data/documents",
+    "uploads_dir": "data/uploads"
+  },
   "rag": {
     "retrieval": {
       "mode": "hybrid",
@@ -181,7 +179,7 @@ cp configs/config.example.json configs/config.json
     }
   },
   "auth": {
-    "secret_key": "your-secret-key",
+    "secret_key": "your-secret-key-must-be-at-least-32-chars",
     "algorithm": "HS256"
   },
   "server": {
@@ -204,11 +202,8 @@ export REDIS_URL="redis://localhost:6379/0"
 ### 3. 启动依赖
 
 ```bash
-# 复制环境变量模板
-cp .env.example .env
-
-# 编辑 .env 配置数据库连接等（可选，使用默认值可直接启动）
-# vim .env
+# 复制环境变量模板 (如果存在，否则手动创建 .env)
+# cp .env.example .env
 
 # 启动所有基础设施
 docker-compose up -d
@@ -227,29 +222,6 @@ docker-compose ps
 | ClickHouse | 8123 | Langfuse 指标存储 |
 | MinIO | 9000/9001 | S3 对象存储 |
 | Langfuse | 3000 | 可观测性追踪 |
-
-**验证命令：**
-
-```bash
-# PostgreSQL
-psql -h localhost -p 5432 -U agframe -d agframe -c "SELECT 1"
-
-# Redis
-redis-cli -h localhost -p 6379 -a redissecret ping
-
-# RabbitMQ Management
-curl -u agframe:rabbitmq_secret http://localhost:15672/api/overview
-
-# ClickHouse
-curl http://localhost:8123/ping
-
-# MinIO
-mc alias set local http://localhost:9000 minioadmin minioadmin_secret
-mc ls local
-
-# Langfuse
-curl http://localhost:3000/api/public
-```
 
 ### 4. 初始化 MinIO Bucket
 
@@ -317,9 +289,6 @@ config = settings.model_dump()
 ### 运行评测
 
 ```bash
-# RAG 评测
-python -m tests.test_deepeval_rag
-
-# 或使用评测脚本
+# 运行所有评估与测试
 ./scripts/run_evals.sh
 ```

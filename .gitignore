@@ -14,6 +14,7 @@ configs/config.json
 *.key
 *.p12
 *.pfx
+.agent/
 AGENTS.md
 
 .venv/

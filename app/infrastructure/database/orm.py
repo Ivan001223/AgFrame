@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine
+
+logger = logging.getLogger(__name__)
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -79,7 +82,8 @@ def get_session() -> Iterator[Session]:
     try:
         yield session
         session.commit()
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Database session error, rolling back: {e}")
         session.rollback()
         raise
     finally:

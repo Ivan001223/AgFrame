@@ -1,8 +1,12 @@
+import logging
 import time
+from typing import Any
 
 import mysql.connector
 
 from app.infrastructure.config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseManager:
@@ -38,17 +42,17 @@ class DatabaseManager:
                     database=db_config.db_name,
                     autocommit=True
                 )
-                print("MySQL 连接池初始化成功。")
+                logger.info("MySQL connection pool initialized successfully")
                 break
             except mysql.connector.Error as err:
-                print(f"初始化数据库连接池失败（第 {attempt+1}/{max_retries} 次尝试）：{err}")
+                logger.warning(f"Database connection pool init failed (attempt {attempt+1}/{max_retries}): {err}")
                 if attempt < max_retries - 1:
                     time.sleep(2)
                 else:
-                    print("连接 MySQL 数据库失败。")
+                    logger.error("Failed to connect to MySQL after all retries")
                     self._pool = None
 
-    def get_connection(self):
+    def get_connection(self) -> Any:
         """从连接池获取一个数据库连接。"""
         if not self._pool:
             self._init_pool()
@@ -57,7 +61,7 @@ class DatabaseManager:
         
         return self._pool.get_connection()
 
-    def execute_query(self, query, params=None):
+    def execute_query(self, query: str, params: tuple | None = None) -> list[dict[str, Any]]:
         """
         执行查询语句 (SELECT) 并返回字典格式的结果列表。
         
@@ -77,7 +81,7 @@ class DatabaseManager:
             result = cursor.fetchall()
             return result
         except mysql.connector.Error as err:
-            print(f"查询执行错误：{err}")
+            logger.error(f"Query execution error: {err}")
             raise
         finally:
             if cursor:
@@ -85,7 +89,7 @@ class DatabaseManager:
             if conn:
                 conn.close()
 
-    def execute_update(self, query, params=None):
+    def execute_update(self, query: str, params: tuple | None = None) -> int | None:
         """
         执行更新语句 (INSERT/UPDATE/DELETE) 并返回最后插入的行 ID。
         
@@ -105,7 +109,7 @@ class DatabaseManager:
             conn.commit()
             return cursor.lastrowid
         except mysql.connector.Error as err:
-            print(f"更新执行错误：{err}")
+            logger.error(f"Update execution error: {err}")
             raise
         finally:
             if cursor:

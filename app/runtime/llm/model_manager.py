@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any
 
 import torch
+
+logger = logging.getLogger(__name__)
 from transformers import AutoModel, AutoProcessor
 
 from app.runtime.llm.model_importer import resolve_pretrained_source
@@ -169,7 +172,8 @@ def load_model_and_processor(
     processor = None
     try:
         processor = processor_cls.from_pretrained(source, trust_remote_code=spec.trust_remote_code)
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Failed to load processor: {e}")
         if require_processor:
             raise
         processor = None

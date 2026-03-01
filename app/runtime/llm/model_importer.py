@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -32,8 +35,8 @@ def _snapshot_huggingface(repo_id: str, *, cache_dir: str | None = None, revisio
     """使用 HuggingFace Hub 下载模型快照"""
     try:
         from huggingface_hub import snapshot_download
-    except Exception:
-        # 如果 HF 库不可用，直接返回 ID，交给 Transformers 自动处理
+    except ImportError as e:
+        logger.debug(f"HF hub not available: {e}")
         return repo_id
 
     kwargs: dict[str, Any] = {"repo_id": repo_id}
@@ -75,9 +78,9 @@ def resolve_pretrained_source(
         try:
             local_dir = _snapshot_modelscope(model_ref, cache_dir=cache_dir, revision=revision)
             return ImportedModel(pretrained_source=local_dir, provider=normalized, model_ref=model_ref)
-        except Exception:
+        except Exception as e:
             if modelscope_fallback_to_hf:
-                # 降级到 HF
+                logger.warning(f"ModelScope download failed, falling back to HF: {e}")
                 return ImportedModel(pretrained_source=model_ref, provider="hf", model_ref=model_ref)
             raise
 

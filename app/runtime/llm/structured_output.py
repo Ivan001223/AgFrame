@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from enum import Enum
 from typing import Any, TypeVar
 
 import anyio
+
+logger = logging.getLogger(__name__)
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from pydantic import BaseModel
 
@@ -53,7 +56,8 @@ async def invoke_structured(
                 result = await anyio.to_thread.run_sync(lambda: chain.invoke({"messages": prepared_messages}))
                 if isinstance(result, schema):
                     return result
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Structured output with structured LLM failed: {e}")
                 pass
 
         chain = prompt | llm
@@ -77,7 +81,8 @@ async def invoke_structured(
             return await _invoke_with_llm(json_mode=False, use_with_structured=False)
         try:
             return await _invoke_with_llm(json_mode=True, use_with_structured=True)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"JSON mode failed, falling back to prompt-only: {e}")
             return await _invoke_with_llm(json_mode=False, use_with_structured=False)
     except Exception as e:
         return _fallback_model(e)

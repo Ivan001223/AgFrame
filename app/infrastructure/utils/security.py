@@ -4,12 +4,12 @@ from datetime import UTC, datetime, timedelta
 import bcrypt
 import jwt
 
-from app.infrastructure.config.settings import settings
+from app.infrastructure.config.settings import AuthConfig, settings
 
 _default_secret_warning_shown = False
 
 
-def get_auth_config():
+def get_auth_config() -> AuthConfig:
     return settings.auth
 
 
@@ -44,9 +44,9 @@ def get_password_hash(password: str) -> str:
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     to_encode = data.copy()
     auth_config = get_auth_config()
-    secret_key = auth_config.get("secret_key", "secret")
+    secret_key = getattr(auth_config, "secret_key", "secret")
     _check_default_secret(secret_key)
-    algorithm = auth_config.get("algorithm", "HS256")
+    algorithm = getattr(auth_config, "algorithm", "HS256")
 
     if expires_delta:
         expire = datetime.now(UTC) + expires_delta
@@ -58,10 +58,10 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     return encoded_jwt
 
 
-def decode_access_token(token: str) -> dict:
+def decode_access_token(token: str) -> dict | None:
     auth_config = get_auth_config()
-    secret_key = auth_config.get("secret_key", "secret")
-    algorithm = auth_config.get("algorithm", "HS256")
+    secret_key = getattr(auth_config, "secret_key", "secret")
+    algorithm = getattr(auth_config, "algorithm", "HS256")
 
     try:
         payload = jwt.decode(token, secret_key, algorithms=[algorithm])

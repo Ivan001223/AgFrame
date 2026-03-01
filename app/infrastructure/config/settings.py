@@ -5,11 +5,14 @@ Pydantic Settings 配置模块。
 支持自动环境变量映射和内置验证。
 """
 import json
+import logging
 import os
 from typing import Any
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 # 初始化环境变量
 from app.infrastructure.config.env import init_env
@@ -296,7 +299,7 @@ class Settings(BaseSettings):
                     file_config = json.load(f)
                 self._apply_file_config(file_config)
             except Exception as e:
-                print(f"加载配置文件失败: {e}")
+                logger.error(f"Failed to load config file: {e}")
 
     def _apply_file_config(self, file_config: dict[str, Any]):
         """将文件配置应用到当前 Settings 对象（环境变量优先级更高）"""
@@ -354,7 +357,7 @@ class Settings(BaseSettings):
                 return alias
         return field_name.upper()
 
-    def validate_security(self):
+    def validate_security(self) -> None:
         """验证安全配置"""
         import warnings
 

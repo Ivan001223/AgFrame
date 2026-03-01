@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.documents import Document
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -54,7 +57,8 @@ def _get_meta_int(meta: dict[str, Any], key: str) -> int | None:
         return None
     try:
         return int(val)
-    except Exception:
+    except (ValueError, TypeError) as e:
+        logger.debug(f"Failed to parse {key} as int: {e}")
         return None
 
 

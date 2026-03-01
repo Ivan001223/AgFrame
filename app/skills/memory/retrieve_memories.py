@@ -40,7 +40,8 @@ async def retrieve_memories_node(state: AgentState) -> dict[str, Any]:
             memories = await anyio.to_thread.run_sync(
                 lambda: _memory_engine.retrieve_chat_summaries(user_id=user_id, query=query, k=3, fetch_k=20)
             )
-        except Exception:
+        except Exception as e:
+            _log.warning(f"Failed to retrieve memories: {e}")
             memories = []
     ctx = dict(state.get("context") or {})
     ctx["retrieved_memories"] = memories

@@ -4,7 +4,8 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import uvicorn
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -28,14 +29,14 @@ from app.server.api.auth import get_current_active_user, get_current_admin_user
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_logging()
-    print("后端脚手架已启动")
+    logger.info("Backend scaffold started")
     ensure_schema_if_possible()
 
     redis = get_redis()
     await FastAPILimiter.init(redis)
 
     await checkpoint_store.get_saver()
-    print(f"Checkpoint store initialized: {type(checkpoint_store)}")
+    logger.info(f"Checkpoint store initialized: {type(checkpoint_store)}")
 
     yield
 
@@ -90,8 +91,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
                             self.username = u
 
                     request.state.user = SimpleUser(username)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Auth middleware error: {e}")
         response = await call_next(request)
         return response
 
@@ -142,6 +143,32 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={
             "error": type(exc).__name__,
+            "message": str(exc),
+            "path": request.url.path,
+        }
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """HTTP 异常处理器"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": "HTTPException",
+            "message": exc.detail,
+            "path": request.url.path,
+        }
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """请求参数验证异常处理器"""
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "ValidationError",
             "message": str(exc),
             "path": request.url.path,
         }

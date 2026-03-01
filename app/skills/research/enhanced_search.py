@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import os
 import time
 from dataclasses import dataclass, field
@@ -8,6 +9,8 @@ from datetime import datetime
 import redis
 
 from app.infrastructure.config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -43,7 +46,7 @@ class SearchCache:
         return self._client
 
     def _make_key(self, query: str, provider: str) -> str:
-        hash_key = hashlib.md5(f"{provider}:{query}".encode()).hexdigest()
+        hash_key = hashlib.sha256(f"{provider}:{query}".encode("utf-8", errors="ignore")).hexdigest()
         return f"agframe:search:{hash_key}"
 
     def get(self, query: str, provider: str) -> str | None:
@@ -88,7 +91,8 @@ class TavilyProvider(SearchProvider):
                 )
                 for r in results
             ]
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Tavily search failed: {e}")
             return []
 
 
@@ -113,7 +117,8 @@ class DuckDuckGoProvider(SearchProvider):
                 )
                 for r in parsed
             ]
-        except Exception:
+        except Exception as e:
+            logger.warning(f"DuckDuckGo search failed: {e}")
             return []
 
 
@@ -144,7 +149,8 @@ class SerpAPIProvider(SearchProvider):
                 )
                 for r in organic
             ]
-        except Exception:
+        except Exception as e:
+            logger.warning(f"SerpAPI search failed: {e}")
             return []
 
 

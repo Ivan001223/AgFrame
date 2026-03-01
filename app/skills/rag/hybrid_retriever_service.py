@@ -23,7 +23,7 @@ def _stable_doc_key(doc: Document) -> str:
         str(meta.get("source") or ""),
     ]
     content = str(getattr(doc, "page_content", "") or "")
-    digest = hashlib.sha1(content.encode("utf-8", errors="ignore")).hexdigest()
+    digest = hashlib.sha256(content.encode("utf-8", errors="ignore")).hexdigest()
     return "|".join(parts) + "|" + digest
 
 
@@ -208,8 +208,8 @@ class HybridRetrieverService:
 
         try:
             self._bm25.k = sparse_k
-        except Exception:
-            pass
+        except (ValueError, AttributeError) as e:
+            _log.debug(f"Failed to set BM25 k parameter: {e}")
 
         # BM25 is in-memory over ALL docs. We need to filter results.
         # This is suboptimal for multi-tenancy if BM25 index is shared.

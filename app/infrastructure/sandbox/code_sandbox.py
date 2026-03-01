@@ -1,10 +1,13 @@
 import asyncio
+import logging
 import os
 import tempfile
 from datetime import datetime
 from typing import Any
 
 import docker
+
+logger = logging.getLogger(__name__)
 
 
 class CodeSandbox:
@@ -77,8 +80,8 @@ class CodeSandbox:
             finally:
                 try:
                     container.remove(force=True)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to remove container: {e}")
 
         except TimeoutError:
             return {

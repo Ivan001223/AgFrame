@@ -10,7 +10,7 @@
 ## 2. 启动前自检
 
 ```bash
-python -c "from app.infrastructure.config.settings import settings; settings.validate_security(); print('security-ok')"
+uv run python -c "from app.infrastructure.config.settings import settings; settings.validate_security(); print('security-ok')"
 ```
 
 若存在高风险配置，服务会在启动阶段拒绝继续运行。
@@ -18,7 +18,7 @@ python -c "from app.infrastructure.config.settings import settings; settings.val
 ## 3. 安全扫描
 
 ```bash
-python scripts/security_scan.py --out reports/security.json
+uv run python scripts/security_scan.py --out reports/security.json
 ```
 
 判定规则：
@@ -26,4 +26,3 @@ python scripts/security_scan.py --out reports/security.json
 - 任一安全工具缺失：门禁失败
 - 高危问题或依赖漏洞存在：门禁失败
 - 全部通过：门禁通过
-

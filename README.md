@@ -79,7 +79,8 @@ AgFrame/
 ├── data/                    # 运行时数据
 ├── tests/                   # 单元测试
 ├── docker-compose.yml       # 基础设施编排
-└── requirements.txt         # Python 依赖
+├── pyproject.toml           # Python 项目配置与依赖清单
+└── uv.lock                  # uv 锁文件
 ```
 
 ## 核心特性
@@ -139,10 +140,14 @@ AgFrame/
 ### 1. 环境准备
 
 ```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+uv sync
 ```
+
+说明：
+
+- 默认会创建 `.venv/` 并安装开发依赖
+- 如需显式指定 Python 3.11，可先执行 `uv python install 3.11`
+- 常用命令建议统一使用 `uv run ...`
 
 ### 2. 配置
 
@@ -279,7 +284,7 @@ docker-compose exec minio mc anonymous set public local/agframe
 ### 5. 启动服务
 
 ```bash
-python -m app.server.main
+uv run python -m app.server.main
 ```
 
 服务运行在 `http://localhost:8000`

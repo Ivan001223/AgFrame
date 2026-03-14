@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -66,40 +68,59 @@ def _bandit() -> ToolResult:
 def _pip_audit() -> ToolResult:
     if shutil.which("pip-audit") is None:
         return ToolResult("pip-audit", "missing", None, {"reason": "pip-audit not installed"}, None)
-    attempts = [
-        ("requirements", ["pip-audit", "-r", "requirements.txt", "--progress-spinner", "off", "-f", "json"], 30),
-        ("local", ["pip-audit", "--local", "--progress-spinner", "off", "-f", "json"], 60),
-    ]
+    attempts: list[tuple[str, list[str], int]] = [("local", ["pip-audit", "--local", "--progress-spinner", "off", "-f", "json"], 60)]
+    export_path: str | None = None
+
+    if shutil.which("uv") is not None and os.path.exists("pyproject.toml"):
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as tmp:
+            export_path = tmp.name
+        export_proc = _run(
+            ["uv", "export", "--format", "requirements-txt", "--no-hashes", "-o", export_path],
+            timeout=60,
+        )
+        if export_proc.returncode == 0 and os.path.exists(export_path):
+            attempts.insert(
+                0,
+                (
+                    "uv-export",
+                    ["pip-audit", "-r", export_path, "--progress-spinner", "off", "-f", "json"],
+                    60,
+                ),
+            )
 
     last_proc: subprocess.CompletedProcess[str] | None = None
-    for mode, cmd, timeout in attempts:
-        try:
-            proc = _run(cmd, timeout=timeout)
-        except subprocess.TimeoutExpired as exc:
-            stderr = (exc.stderr or "") if isinstance(exc.stderr, str) else ""
-            last_proc = subprocess.CompletedProcess(
-                cmd,
-                returncode=124,
-                stdout="",
-                stderr=f"timeout after {timeout}s\n{stderr}".strip(),
-            )
-            continue
-        last_proc = proc
-        raw: Any | None = None
-        try:
-            raw = json.loads(proc.stdout) if proc.stdout.strip() else None
-        except json.JSONDecodeError:
-            raw = None
+    try:
+        for mode, cmd, timeout in attempts:
+            try:
+                proc = _run(cmd, timeout=timeout)
+            except subprocess.TimeoutExpired as exc:
+                stderr = (exc.stderr or "") if isinstance(exc.stderr, str) else ""
+                last_proc = subprocess.CompletedProcess(
+                    cmd,
+                    returncode=124,
+                    stdout="",
+                    stderr=f"timeout after {timeout}s\n{stderr}".strip(),
+                )
+                continue
+            last_proc = proc
+            raw: Any | None = None
+            try:
+                raw = json.loads(proc.stdout) if proc.stdout.strip() else None
+            except json.JSONDecodeError:
+                raw = None
 
-        if raw is not None:
-            vuln_total = _count_pip_audit_vulns(raw)
-            return ToolResult(
-                "pip-audit",
-                "ok" if proc.returncode == 0 and vuln_total == 0 else "issues",
-                proc.returncode,
-                {"total": vuln_total, "mode": mode},
-                raw,
-            )
+            if raw is not None:
+                vuln_total = _count_pip_audit_vulns(raw)
+                return ToolResult(
+                    "pip-audit",
+                    "ok" if proc.returncode == 0 and vuln_total == 0 else "issues",
+                    proc.returncode,
+                    {"total": vuln_total, "mode": mode},
+                    raw,
+                )
+    finally:
+        if export_path and os.path.exists(export_path):
+            os.unlink(export_path)
 
     return ToolResult(
         "pip-audit",

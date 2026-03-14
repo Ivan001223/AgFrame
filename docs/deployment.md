@@ -3,12 +3,14 @@
 ## 1. 前置条件
 
 - Python 3.11+
+- uv
 - Docker 与 Docker Compose
 - PostgreSQL/Redis 端口可用（本地默认 `5432`、`6379`）
 
 ## 2. 初始化配置
 
 ```bash
+uv sync --no-dev
 cp configs/config.example.json configs/config.json
 ```
 
@@ -29,7 +31,7 @@ docker-compose ps
 ## 4. 启动服务
 
 ```bash
-python -m app.server.main
+uv run python -m app.server.main
 ```
 
 默认地址：
@@ -42,4 +44,3 @@ python -m app.server.main
 ```bash
 docker-compose down
 ```
-

@@ -1,9 +1,77 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
 [project]
 name = "agframe"
-version = "1.0.1"
+version = "0.1.1"
 description = "Production-grade Agent/RAG backend framework"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "addict",
+    "arq",
+    "docx2txt",
+    "duckduckgo-search",
+    "easydict",
+    "einops",
+    "faiss-cpu",
+    "fastapi",
+    "fastapi-limiter",
+    "fpdf",
+    "httpx",
+    "langchain",
+    "langchain-community",
+    "langchain-experimental",
+    "langchain-huggingface",
+    "langchain-openai",
+    "langfuse",
+    "langgraph",
+    "langserve[all]",
+    "matplotlib",
+    "mysql-connector-python",
+    "openpyxl",
+    "pandas",
+    "passlib[bcrypt]",
+    "pdf2image",
+    "pgvector",
+    "psycopg[binary]",
+    "pydantic",
+    "pydantic-settings",
+    "pypdf",
+    "pyjwt",
+    "python-dotenv",
+    "python-multipart",
+    "qwen-vl-utils",
+    "rank-bm25",
+    "redis",
+    "requests",
+    "sentence-transformers",
+    "sqlalchemy>=2.0.0",
+    "streamlit",
+    "tiktoken",
+    "timm",
+    "torch",
+    "torchvision",
+    "transformers>=4.46.3",
+    "unstructured[all-docs]",
+    "uvicorn",
+]
+
+[dependency-groups]
+dev = [
+    "bandit",
+    "pip-audit",
+    "pytest",
+    "pytest-cov",
+    "pytest-json-report",
+    "ragas",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.uv]
+default-groups = ["dev"]
 
 [tool.ruff]
 target-version = "py311"

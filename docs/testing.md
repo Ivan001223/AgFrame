@@ -3,7 +3,7 @@
 ## 1. 快速单测
 
 ```bash
-python -m pytest -v --tb=short
+uv run pytest -v --tb=short
 ```
 
 说明：
@@ -14,10 +14,16 @@ python -m pytest -v --tb=short
 ## 2. 指定模块回归
 
 ```bash
-python -m pytest tests/test_settings_security.py tests/test_api_misc.py -v --tb=short
+uv run pytest tests/test_settings_security.py tests/test_api_misc.py -v --tb=short
 ```
 
 ## 3. 工作台主链路 Smoke
+
+```bash
+uv run ./scripts/smoke_workbench.sh
+```
+
+或在已激活的 `.venv` 中直接执行：
 
 ```bash
 ./scripts/smoke_workbench.sh
@@ -26,6 +32,12 @@ python -m pytest tests/test_settings_security.py tests/test_api_misc.py -v --tb=
 覆盖上传、任务、文档、会话、记忆的主接口流。
 
 ## 4. 运行中服务 Live Smoke
+
+```bash
+uv run ./scripts/live_workbench_smoke.sh --base-url http://127.0.0.1:8000
+```
+
+或：
 
 ```bash
 ./scripts/live_workbench_smoke.sh --base-url http://127.0.0.1:8000
@@ -42,7 +54,7 @@ python -m pytest tests/test_settings_security.py tests/test_api_misc.py -v --tb=
 ```bash
 export DATABASE_URL='postgresql+psycopg://<user>:<password>@<host>:<port>/<db>'
 export REDIS_URL='redis://:<password>@<host>:6379/0'
-conda run -n agframe-test python -m pytest tests/test_integration_postgres_store.py tests/test_integration_queue_redis.py -v --tb=short
+uv run pytest tests/test_integration_postgres_store.py tests/test_integration_queue_redis.py -v --tb=short
 ```
 
 说明：
@@ -54,14 +66,14 @@ conda run -n agframe-test python -m pytest tests/test_integration_postgres_store
 ## 6. 一键测试门禁
 
 ```bash
-./scripts/run_test_suite.sh
+uv run ./scripts/run_test_suite.sh
 ```
 
 如需把运行中服务的工作台 live smoke 一并纳入门禁：
 
 ```bash
 export LIVE_SMOKE_BASE_URL='http://127.0.0.1:8000'
-./scripts/run_test_suite.sh
+uv run ./scripts/run_test_suite.sh
 ```
 
 前端单独验证：

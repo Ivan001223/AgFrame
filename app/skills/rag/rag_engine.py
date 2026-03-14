@@ -7,6 +7,7 @@ from langchain_community.document_loaders import (
     UnstructuredExcelLoader,
 )
 from langchain_core.documents import Document
+from pypdf import PdfReader
 from unstructured.partition.pdf import partition_pdf
 
 from app.infrastructure.config.settings import settings
@@ -68,6 +69,20 @@ class RAGEngine:
             weights=tuple(retrieval_cfg.weights),
         )
 
+    def _success(self, **extra: Any) -> dict[str, Any]:
+        payload = {"ok": True}
+        payload.update(extra)
+        return payload
+
+    def _failure(self, code: str, message: str, **extra: Any) -> dict[str, Any]:
+        payload = {
+            "ok": False,
+            "error_code": code,
+            "error_message": message,
+        }
+        payload.update(extra)
+        return payload
+
     def load_documents(self, file_path: str) -> list[Document]:
         """
         根据文件扩展名加载文档内容。
@@ -94,14 +109,24 @@ class RAGEngine:
                 text = "\n\n".join([str(e) for e in elements])
                 docs = [Document(page_content=text, metadata={"source": file_path})]
             except Exception as e:
-                logger.warning(f"Unstructured 解析失败，降级为 OCR: {e}")
-                # 降级到原有的 OCR 逻辑
-                text = ocr_engine.process_file(file_path)
+                logger.warning(f"Unstructured 解析失败，尝试 pypdf 提取: {e}")
+                text = ""
+                try:
+                    reader = PdfReader(file_path)
+                    page_texts = [(page.extract_text() or "").strip() for page in reader.pages]
+                    text = "\n\n".join([page for page in page_texts if page])
+                except Exception as pdf_error:
+                    logger.warning(f"pypdf 提取失败，降级为 OCR: {pdf_error}")
+
                 if text:
                     docs = [Document(page_content=text, metadata={"source": file_path})]
                 else:
-                    logger.warning(f"OCR 未从 {file_path} 提取到文本")
-                    docs = []
+                    text = ocr_engine.process_file(file_path)
+                    if text:
+                        docs = [Document(page_content=text, metadata={"source": file_path})]
+                    else:
+                        logger.warning(f"OCR 未从 {file_path} 提取到文本")
+                        docs = []
 
         elif ext in [".png", ".jpg", ".jpeg", ".webp", ".tiff", ".bmp"]:
             logger.info(f"正在使用本地 OCR 处理：{file_path}...")
@@ -145,7 +170,7 @@ class RAGEngine:
             user_id: 用户 ID (用于多租户隔离)
 
         Returns:
-            bool: 是否成功添加
+            dict[str, Any]: 结构化摄取结果
         """
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"未找到文件: {file_path}")
@@ -156,16 +181,16 @@ class RAGEngine:
                 docs = self.load_documents(file_path)
             except Exception as e:
                 logger.error(f"加载文件 {file_path} 错误: {e}")
-                return False
+                return self._failure("document_load_failed", str(e), stage="load")
 
             if not docs:
-                return False
+                return self._failure("no_text_extracted", "未从文档中提取到文本", stage="load")
 
             use_parent_retrieval = ensure_schema_if_possible()
             splits: list[Document] = []
             if not use_parent_retrieval:
                 logger.warning("未检测到可用数据库，无法写入 pgvector")
-                return False
+                return self._failure("database_not_ready", "数据库不可用，无法写入向量索引", stage="database")
 
             doc_store = MySQLDocStore()
             checksum = sha256_file(file_path)
@@ -184,6 +209,7 @@ class RAGEngine:
                         {"content": p, "page_num": d.metadata.get("page")}
                     )
 
+            doc_store.delete_parent_chunks(doc_id)
             parent_ids = doc_store.insert_parent_chunks(doc_id, parent_chunks)
             for parent_id, parent in zip(parent_ids, parent_chunks):
                 child_parts = split_text_by_chars(
@@ -204,6 +230,9 @@ class RAGEngine:
                         )
                     )
 
+            if not splits:
+                return self._failure("no_chunks_generated", "文档切片为空，无法建立索引", stage="chunk")
+
             # ... (rest of logic) ...
 
             PgDocEmbeddingStore().delete_by_doc_id(doc_id)
@@ -214,7 +243,11 @@ class RAGEngine:
             for i in range(0, len(splits), BATCH_SIZE):
                 batch = splits[i:i + BATCH_SIZE]
                 batch_contents = [d.page_content for d in batch]
-                batch_vectors = self.embeddings.embed_documents(batch_contents)
+                try:
+                    batch_vectors = self.embeddings.embed_documents(batch_contents)
+                except Exception as embedding_error:
+                    logger.error(f"批量向量化失败：{embedding_error}")
+                    return self._failure("embedding_failed", str(embedding_error), stage="embedding")
 
                 for d, v in zip(batch, batch_vectors):
                     meta = dict(getattr(d, "metadata", {}) or {})
@@ -229,7 +262,11 @@ class RAGEngine:
                             "metadata_json": meta,
                         }
                     )
-            PgDocEmbeddingStore().add_embeddings(rows)
+            try:
+                PgDocEmbeddingStore().add_embeddings(rows)
+            except Exception as store_error:
+                logger.error(f"写入向量存储失败：{store_error}")
+                return self._failure("vectorstore_write_failed", str(store_error), stage="vectorstore")
 
             if self._vectorstore is None:
                 try:
@@ -243,10 +280,10 @@ class RAGEngine:
                     self._hybrid_retriever = None
 
             logger.info(f"成功添加了来自 {file_path} 的 {len(splits)} 个块")
-            return True
+            return self._success(stage="done", chunks=len(splits), doc_count=len(docs))
         except Exception as e:
             logger.error(f"添加到向量存储失败：{e}")
-            return False
+            return self._failure("ingest_failed", str(e), stage="ingest")
 
     def retrieve_candidates(
         self, query: str, *, fetch_k: int = 20, user_id: str = None

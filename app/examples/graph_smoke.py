@@ -18,9 +18,12 @@ async def main():
         "context": {"session_id": "s-smoke"},
     }
     out = await router_node(state)
-    assert out["route"]["needs_docs"] is False
-    assert out["route"]["needs_history"] is False
-    assert "trace" in out and out["trace"].get("trace_id")
+    if out["route"]["needs_docs"] is not False:
+        raise RuntimeError("router smoke expected needs_docs=False")
+    if out["route"]["needs_history"] is not False:
+        raise RuntimeError("router smoke expected needs_history=False")
+    if "trace" not in out or not out["trace"].get("trace_id"):
+        raise RuntimeError("router smoke expected trace.trace_id to exist")
 
 
 if __name__ == "__main__":

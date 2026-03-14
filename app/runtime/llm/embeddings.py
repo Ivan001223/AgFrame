@@ -1,5 +1,7 @@
 
 import logging
+
+import httpx
 import torch
 from langchain_core.embeddings import Embeddings
 
@@ -42,6 +44,9 @@ class ModelEmbeddings(Embeddings):
         query_prefix = emb_cfg.get("query_prefix")
         doc_prefix = emb_cfg.get("doc_prefix")
         device = emb_cfg.get("device") or "auto"
+        base_url = str(emb_cfg.get("base_url") or "").rstrip("/")
+        api_key = str(emb_cfg.get("api_key") or "")
+        timeout_seconds = emb_cfg.get("timeout_seconds")
         self._spec = build_model_spec(
             config=cfg,
             component_key="embeddings",
@@ -61,6 +66,11 @@ class ModelEmbeddings(Embeddings):
         self._pooling = str(pooling)
         self._normalize = True if normalize is None else bool(normalize)
         self._max_length = 512 if max_length is None else int(max_length)
+        self._provider = str(emb_cfg.get("provider") or cfg.get("model_manager", {}).get("provider") or "hf")
+        self._remote_base_url = base_url
+        self._remote_api_key = api_key
+        self._remote_timeout_seconds = 30 if timeout_seconds is None else int(timeout_seconds)
+        self._use_remote_api = self._provider == "vllm" or bool(self._remote_base_url)
 
         self._model = None
         self._processor = None
@@ -71,6 +81,8 @@ class ModelEmbeddings(Embeddings):
 
     def _load_model(self):
         """懒加载模型：仅在首次使用时加载"""
+        if self._use_remote_api:
+            return
         if self._backend == "sentence_transformers":
             if self._st_model is not None:
                 return
@@ -93,16 +105,21 @@ class ModelEmbeddings(Embeddings):
             try:
                 self._model = load_transformers_model(
                     self._loaded_source,
+                    revision=self._spec.revision,
                     trust_remote_code=self._spec.trust_remote_code,
                     device=self._device,
                     model_name=self.model_name,
                 )
                 self._processor = try_load_transformers_processor(
-                    self._loaded_source, trust_remote_code=self._spec.trust_remote_code
+                    self._loaded_source,
+                    revision=self._spec.revision,
+                    trust_remote_code=self._spec.trust_remote_code,
                 )
                 if self._processor is None:
                     self._tokenizer = load_transformers_tokenizer(
-                        self._loaded_source, trust_remote_code=self._spec.trust_remote_code
+                        self._loaded_source,
+                        revision=self._spec.revision,
+                        trust_remote_code=self._spec.trust_remote_code,
                     )
                 logger.info("Embedding model loaded successfully")
             except Exception as e:
@@ -118,6 +135,8 @@ class ModelEmbeddings(Embeddings):
         if not texts:
             return []
         prefixed = [self._doc_prefix + t for t in texts]
+        if self._use_remote_api:
+            return self._embed_remote(prefixed)
         if self._backend == "sentence_transformers":
             embeddings = self._st_model.encode(
                 prefixed,
@@ -136,6 +155,8 @@ class ModelEmbeddings(Embeddings):
         """
         self._load_model()
         prefixed = self._query_prefix + text
+        if self._use_remote_api:
+            return self._embed_remote([prefixed])[0]
         if self._backend == "sentence_transformers":
             embedding = self._st_model.encode(
                 [prefixed],
@@ -224,6 +245,33 @@ class ModelEmbeddings(Embeddings):
             preview = texts[0][:20] if texts else ""
             logger.error(f"Failed to embed text '{preview}...': {e}")
             raise e
+
+    def _embed_remote(self, texts: list[str]) -> list[list[float]]:
+        """使用 vLLM OpenAI-compatible embeddings API 进行远程向量化。"""
+        if not self._remote_base_url:
+            raise ValueError("embeddings.base_url 未配置，无法使用远程 embeddings 服务")
+
+        headers = {"Content-Type": "application/json"}
+        if self._remote_api_key:
+            headers["Authorization"] = f"Bearer {self._remote_api_key}"
+
+        response = httpx.post(
+            f"{self._remote_base_url}/v1/embeddings",
+            headers=headers,
+            json={"model": self.model_name, "input": texts},
+            timeout=self._remote_timeout_seconds,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        data = payload.get("data") or []
+        if not data:
+            raise ValueError("远程 embeddings 响应不包含 data")
+
+        ordered = sorted(data, key=lambda item: int(item.get("index", 0)))
+        vectors = [item.get("embedding") for item in ordered]
+        if any(v is None for v in vectors):
+            raise ValueError("远程 embeddings 响应缺少 embedding 字段")
+        return vectors
 
 
 _model_embeddings_instance = None

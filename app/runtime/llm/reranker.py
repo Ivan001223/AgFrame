@@ -1,5 +1,7 @@
 
 import logging
+
+import httpx
 import torch
 
 from app.infrastructure.config.settings import settings
@@ -42,6 +44,9 @@ class ModelReranker:
         stride = rr_cfg.get("stride")
         device = rr_cfg.get("device") or "auto"
         transformers_model_type = rr_cfg.get("transformers_model_type") or "auto"
+        base_url = str(rr_cfg.get("base_url") or "").rstrip("/")
+        api_key = str(rr_cfg.get("api_key") or "")
+        timeout_seconds = rr_cfg.get("timeout_seconds")
         self._spec = build_model_spec(
             config=cfg,
             component_key="reranker",
@@ -60,6 +65,11 @@ class ModelReranker:
         self._window_size = None if window_size is None else int(window_size)
         self._stride = None if stride is None else int(stride)
         self._transformers_model_type = str(transformers_model_type)
+        self._provider = str(rr_cfg.get("provider") or cfg.get("model_manager", {}).get("provider") or "hf")
+        self._remote_base_url = base_url
+        self._remote_api_key = api_key
+        self._remote_timeout_seconds = 30 if timeout_seconds is None else int(timeout_seconds)
+        self._use_remote_api = bool(self.model_name) and (self._provider == "vllm" or bool(self._remote_base_url))
         self._model = None
         self._processor = None
         self._tokenizer = None
@@ -70,6 +80,8 @@ class ModelReranker:
     def _load_model(self):
         """懒加载模型：仅在首次使用时加载"""
         if self._disabled:
+            return
+        if self._use_remote_api:
             return
         if self._backend == "sentence_transformers":
             if self._cross_encoder is not None:
@@ -93,16 +105,21 @@ class ModelReranker:
             try:
                 self._model = load_transformers_model(
                     self._loaded_source,
+                    revision=self._spec.revision,
                     trust_remote_code=self._spec.trust_remote_code,
                     device=self._device,
                     model_type=self._transformers_model_type,
                     model_name=self.model_name,
                 )
                 self._processor = try_load_transformers_processor(
-                    self._loaded_source, trust_remote_code=self._spec.trust_remote_code
+                    self._loaded_source,
+                    revision=self._spec.revision,
+                    trust_remote_code=self._spec.trust_remote_code,
                 )
                 self._tokenizer = load_transformers_tokenizer(
-                    self._loaded_source, trust_remote_code=self._spec.trust_remote_code
+                    self._loaded_source,
+                    revision=self._spec.revision,
+                    trust_remote_code=self._spec.trust_remote_code,
                 )
                 logger.info("Reranker model loaded successfully")
             except Exception as e:
@@ -125,6 +142,8 @@ class ModelReranker:
             return []
         if self._disabled:
             return [(doc, 0.0, i) for i, doc in enumerate(documents)][:top_k]
+        if self._use_remote_api:
+            return self._rerank_remote(query, documents, top_k=top_k)
             
         self._load_model()
 
@@ -244,6 +263,57 @@ class ModelReranker:
             if start + self._window_size >= len(input_ids):
                 break
         return 0.0 if best is None else float(best)
+
+    def _rerank_remote(self, query: str, documents: list[str], *, top_k: int) -> list[tuple[str, float, int]]:
+        """使用 vLLM rerank API 进行远程重排。"""
+        if not self._remote_base_url:
+            raise ValueError("reranker.base_url 未配置，无法使用远程 reranker 服务")
+
+        headers = {"Content-Type": "application/json"}
+        if self._remote_api_key:
+            headers["Authorization"] = f"Bearer {self._remote_api_key}"
+
+        payload = {
+            "model": self.model_name,
+            "query": query,
+            "documents": documents,
+            "top_n": top_k,
+        }
+
+        response = None
+        errors: list[str] = []
+        for path in ("/v1/rerank", "/rerank"):
+            try:
+                response = httpx.post(
+                    f"{self._remote_base_url}{path}",
+                    headers=headers,
+                    json=payload,
+                    timeout=self._remote_timeout_seconds,
+                )
+                response.raise_for_status()
+                break
+            except Exception as e:
+                errors.append(f"{path}: {e}")
+                response = None
+
+        if response is None:
+            logger.warning("Remote rerank failed: %s", "; ".join(errors))
+            return [(doc, 0.0, i) for i, doc in enumerate(documents)][:top_k]
+
+        body = response.json()
+        results = body.get("results") or body.get("data") or []
+        ranked: list[tuple[str, float, int]] = []
+        for item in results:
+            index = int(item.get("index", item.get("document_index", -1)))
+            if index < 0 or index >= len(documents):
+                continue
+            score = item.get("relevance_score", item.get("score", 0.0))
+            ranked.append((documents[index], float(score), index))
+
+        if not ranked:
+            return [(doc, 0.0, i) for i, doc in enumerate(documents)][:top_k]
+        ranked.sort(key=lambda x: x[1], reverse=True)
+        return ranked[:top_k]
 
 
 _model_reranker_instance = None

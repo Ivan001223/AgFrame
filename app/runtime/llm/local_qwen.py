@@ -22,6 +22,7 @@ from qwen_vl_utils import process_vision_info
 from transformers import AutoModelForImageTextToText, AutoProcessor, TextIteratorStreamer
 
 from app.infrastructure.config.settings import settings
+from app.runtime.llm.model_importer import require_pinned_revision
 
 
 class LocalQwen3VL(BaseChatModel):
@@ -42,6 +43,8 @@ class LocalQwen3VL(BaseChatModel):
             logger.info(f"Loading local Qwen3-VL: {self.model_name}")
             device = "cuda" if torch.cuda.is_available() else "cpu"
             dtype = torch.bfloat16 if device == "cuda" else torch.float32
+            revision = str(settings.model_manager.revision or "").strip() or None
+            require_pinned_revision("hf", self.model_name, revision)
 
             try:
                 from huggingface_hub import HfApi
@@ -51,7 +54,7 @@ class LocalQwen3VL(BaseChatModel):
 
                 try:
                     api = HfApi()
-                    repo_info = api.repo_info(self.model_name, repo_type="model")
+                    repo_info = api.repo_info(self.model_name, repo_type="model", revision=revision)
                     siblings = getattr(repo_info, 'siblings', [])
                     total_files = len(siblings) if siblings else 30
 
@@ -63,6 +66,7 @@ class LocalQwen3VL(BaseChatModel):
                                     filename=filename,
                                     repo_id=self.model_name,
                                     repo_type="model",
+                                    revision=revision,
                                     resume_download=True,
                                 )
                             except Exception as e:
@@ -73,6 +77,7 @@ class LocalQwen3VL(BaseChatModel):
 
                 self.model = AutoModelForImageTextToText.from_pretrained(
                     self.model_name, 
+                    revision=revision,
                     torch_dtype=dtype, 
                     device_map="auto" if device == "cuda" else None,
                     trust_remote_code=True
@@ -80,7 +85,11 @@ class LocalQwen3VL(BaseChatModel):
                 if device == "cpu":
                     self.model = self.model.to("cpu")
                     
-                self.processor = AutoProcessor.from_pretrained(self.model_name, trust_remote_code=True)
+                self.processor = AutoProcessor.from_pretrained(
+                    self.model_name,
+                    revision=revision,
+                    trust_remote_code=True,
+                )
                 logger.info(f"Local Qwen3-VL loaded successfully on {device}")
             except Exception as e:
                 logger.error(f"Failed to load local Qwen3-VL: {e}")

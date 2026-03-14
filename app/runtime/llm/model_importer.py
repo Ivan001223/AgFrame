@@ -16,35 +16,48 @@ class ImportedModel:
     model_ref: str          # 原始引用字符串
 
 
+def require_pinned_revision(provider: str, model_ref: str, revision: str | None) -> None:
+    normalized_provider = (provider or "").lower()
+    if normalized_provider not in {"huggingface", "hf", "modelscope", "ms"}:
+        return
+    if os.path.exists(model_ref):
+        return
+    if revision and str(revision).strip():
+        return
+    raise ValueError(
+        f"Remote model '{model_ref}' requires an explicit revision pin for provider '{provider}'."
+    )
+
+
 def _snapshot_modelscope(model_id: str, *, cache_dir: str | None = None, revision: str | None = None) -> str:
     """使用 ModelScope 下载模型快照"""
+    require_pinned_revision("modelscope", model_id, revision)
     try:
         from modelscope.hub.snapshot_download import snapshot_download
     except Exception as e:
         raise RuntimeError("modelscope 未安装或不可用") from e
 
-    kwargs: dict[str, Any] = {"model_id": model_id}
-    if cache_dir:
-        kwargs["cache_dir"] = cache_dir
-    if revision:
-        kwargs["revision"] = revision
-    return snapshot_download(**kwargs)
+    return snapshot_download(
+        model_id=model_id,
+        cache_dir=cache_dir,
+        revision=revision,
+    )
 
 
 def _snapshot_huggingface(repo_id: str, *, cache_dir: str | None = None, revision: str | None = None) -> str:
     """使用 HuggingFace Hub 下载模型快照"""
+    require_pinned_revision("hf", repo_id, revision)
     try:
         from huggingface_hub import snapshot_download
     except ImportError as e:
         logger.debug(f"HF hub not available: {e}")
         return repo_id
 
-    kwargs: dict[str, Any] = {"repo_id": repo_id}
-    if cache_dir:
-        kwargs["cache_dir"] = cache_dir
-    if revision:
-        kwargs["revision"] = revision
-    return snapshot_download(**kwargs)
+    return snapshot_download(
+        repo_id=repo_id,
+        cache_dir=cache_dir,
+        revision=revision,
+    )
 
 
 def resolve_pretrained_source(
@@ -90,4 +103,3 @@ def resolve_pretrained_source(
         return ImportedModel(pretrained_source=local_dir_or_id, provider=normalized, model_ref=model_ref)
 
     return ImportedModel(pretrained_source=model_ref, provider=normalized, model_ref=model_ref)
-

@@ -65,6 +65,19 @@ def test_init_logging_handles_existing_handlers():
         root.handlers = old_handlers
 
 
+def test_init_logging_allows_plain_logger_records(capsys: pytest.CaptureFixture[str]):
+    root = logging.getLogger()
+    old_handlers = list(root.handlers)
+    try:
+        root.handlers = []
+        init_logging()
+        logging.getLogger("plain").info("hello")
+        captured = capsys.readouterr()
+        assert "hello" in captured.err
+    finally:
+        root.handlers = old_handlers
+
+
 def test_sanitize_messages_for_routing_strips_multimodal():
     from langchain_core.messages import AIMessage, HumanMessage
 
@@ -125,4 +138,3 @@ def test_process_multimodal_content_rewrites_local_url(monkeypatch: pytest.Monke
     out = process_multimodal_content(raw)
     assert out[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
     assert out[2]["image_url"]["url"].startswith("https://")
-

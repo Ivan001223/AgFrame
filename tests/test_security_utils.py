@@ -50,8 +50,13 @@ def test_default_secret_emits_warning_once(monkeypatch: pytest.MonkeyPatch):
         if "使用默认的 JWT secret_key" in s:
             warnings_called.append(s)
 
-    monkeypatch.setattr(security, "get_auth_config", lambda: _AuthCfg(secret_key="secret"))
+    monkeypatch.setattr(
+        security,
+        "get_auth_config",
+        lambda: _AuthCfg(secret_key=security._DEFAULT_AUTH_SECRET),
+    )
     monkeypatch.setattr(security.warnings, "warn", _warn)
+    monkeypatch.setattr(security, "_default_secret_warning_shown", False)
     security.create_access_token({"sub": "u1"})
     security.create_access_token({"sub": "u1"})
     assert len(warnings_called) == 1

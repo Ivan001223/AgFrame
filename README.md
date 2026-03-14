@@ -3,7 +3,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11+-blue?style=flat-square&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-cyan?style=flat-square&logo=fastapi&logoColor=white)
 ![LangGraph](https://img.shields.io/badge/LangGraph-0.3+-FF6B6B?style=flat-square&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
+![License](https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square)
 ![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat-square&logo=docker&logoColor=white)
 
 **⚡ 生产级 Agent/RAG 后端框架 | 基于 FastAPI + LangGraph 构建**  

@@ -53,6 +53,9 @@ class EmbeddingsConfig(BaseSettings):
     provider: str = "modelscope"
     backend: str = "sentence_transformers"
     model_name: str = ""
+    base_url: str = Field(default="", alias="EMBEDDINGS_BASE_URL")
+    api_key: str = Field(default="", alias="EMBEDDINGS_API_KEY")
+    timeout_seconds: int = 30
     env_var: str = "MODEL_PATH_EMBEDDING"
     device: str = "auto"
     batch_size: int = 32
@@ -68,6 +71,9 @@ class RerankerConfig(BaseSettings):
     provider: str = "modelscope"
     backend: str = "sentence_transformers"
     model_name: str = ""
+    base_url: str = Field(default="", alias="RERANKER_BASE_URL")
+    api_key: str = Field(default="", alias="RERANKER_API_KEY")
+    timeout_seconds: int = 30
     env_var: str = "MODEL_PATH_RERANKER"
     device: str = "auto"
     batch_size: int = 16
@@ -100,7 +106,7 @@ class DatabaseConfig(BaseSettings):
 
 class QueueConfig(BaseSettings):
     """队列配置"""
-    redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
+    redis_url: str = Field(default="redis://:redissecret@localhost:6379/0", alias="REDIS_URL")
     rabbitmq_url: str = ""
     rabbitmq_management_url: str = ""
 
@@ -123,7 +129,7 @@ class StorageLocalConfig(BaseSettings):
 
 class AuthConfig(BaseSettings):
     """认证配置"""
-    secret_key: str = Field(default="your-secret-key-keep-it-secret", alias="AUTH_SECRET_KEY")
+    secret_key: str = Field(default="set-auth-secret-key-before-production", alias="AUTH_SECRET_KEY")
     algorithm: str = Field(default="HS256", alias="AUTH_ALGORITHM")
     access_token_expire_minutes: int = 30
 
@@ -205,10 +211,10 @@ class SelfCorrectionConfig(BaseSettings):
 
 class ServerConfig(BaseSettings):
     """服务器配置"""
-    host: str = Field(default="0.0.0.0", alias="SERVER_HOST")
+    host: str = Field(default="0.0.0.0", alias="SERVER_HOST")  # nosec B104
     port: int = Field(default=8000, alias="SERVER_PORT")
-    cors_origins: list[str] = Field(default_factory=lambda: ["*"], alias="CORS_ORIGINS")
-    cors_allow_credentials: bool = True
+    cors_origins: list[str] = Field(default_factory=list, alias="CORS_ORIGINS")
+    cors_allow_credentials: bool = False
 
 
 # ==================== 主 Settings 类 ====================
@@ -363,7 +369,7 @@ class Settings(BaseSettings):
 
         # 检查 JWT 密钥
         insecure_keys = [
-            "your-secret-key-keep-it-secret",
+            "set-auth-secret-key-before-production",
             "secret",
             "changeme",
             "password",
@@ -392,6 +398,12 @@ class Settings(BaseSettings):
             warnings.warn(
                 "警告: llm.api_key 未配置，将无法使用 OpenAI 等云端 LLM。"
                 "请在 configs/config.json 中设置 API Key，或通过环境变量 LLM_API_KEY 设置。"
+            )
+
+        if self.server.cors_allow_credentials and "*" in self.server.cors_origins:
+            raise ValueError(
+                "安全配置错误: server.cors_allow_credentials=true 时，"
+                "server.cors_origins 不可包含 '*'."
             )
 
 

@@ -5,9 +5,17 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, UploadFile
 
+from app.infrastructure.database.schema import ensure_schema_if_possible
+from app.infrastructure.database.stores import MySQLDocStore
 from app.infrastructure.database.models import User
 from app.infrastructure.queue.client import enqueue_ingest_pdf
-from app.infrastructure.queue.redis_client import init_task
+from app.infrastructure.queue.redis_client import (
+    claim_task_operation,
+    get_task,
+    init_task,
+    release_task_operation,
+)
+from app.infrastructure.utils.files import sha256_file
 from app.server.api.auth import get_current_active_user
 
 router = APIRouter()
@@ -45,7 +53,62 @@ async def upload_documents(
             with open(file_path, "wb") as f:
                 f.write(await file.read())
 
+            if ensure_schema_if_possible():
+                checksum = sha256_file(file_path)
+                existing = MySQLDocStore().find_by_checksum(
+                    user_id=user_id,
+                    checksum=checksum,
+                )
+                if existing:
+                    try:
+                        os.remove(file_path)
+                    except OSError:
+                        pass
+                    results.append(
+                        {
+                            "filename": safe_name,
+                            "status": "duplicate",
+                            "message": "Document already exists",
+                            "existing_doc_id": existing["doc_id"],
+                        }
+                    )
+                    continue
+                operation_key = f"upload_pdf:{user_id}:{checksum}"
+            else:
+                checksum = None
+                operation_key = f"upload_pdf:{user_id}:{safe_name}"
+
             task_id = str(uuid.uuid4())
+            claimed_task_id = await claim_task_operation(operation_key, task_id)
+            if claimed_task_id != task_id:
+                existing_task = await get_task(claimed_task_id)
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    pass
+                if existing_task.get("status") in {"queued", "running"}:
+                    results.append(
+                        {
+                            "filename": safe_name,
+                            "status": "already_queued",
+                            "task_id": claimed_task_id,
+                        }
+                    )
+                    continue
+                await release_task_operation(
+                    operation_key,
+                    expected_task_id=claimed_task_id,
+                )
+                claimed_task_id = await claim_task_operation(operation_key, task_id)
+                if claimed_task_id != task_id:
+                    results.append(
+                        {
+                            "filename": safe_name,
+                            "status": "already_queued",
+                            "task_id": claimed_task_id,
+                        }
+                    )
+                    continue
             await init_task(
                 task_id,
                 {
@@ -58,6 +121,9 @@ async def upload_documents(
                     "filename": safe_name,
                     "created_at": int(time.time()),
                     "user_id": user_id,  # 绑定用户 ID
+                    "retry_count": 0,
+                    "retryable": "false",
+                    "operation_key": operation_key,
                 },
             )
             # 传 user_id 给队列任务，以便写入 Document 表时关联用户

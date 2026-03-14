@@ -123,7 +123,7 @@ async def login_for_access_token(
         data={"sub": user.username, "role": user.role},
         expires_delta=None,  # uses default in utils
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"access_token": access_token, "token_type": "bearer"}  # nosec B105
 
 
 @router.post("/register", response_model=UserResponse)

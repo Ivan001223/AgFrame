@@ -1,7 +1,8 @@
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from app.infrastructure.database.history_manager import history_manager
 from app.infrastructure.database.models import User
@@ -12,11 +13,16 @@ from app.server.api.auth import get_current_active_user
 router = APIRouter()
 
 
+class RenameSessionRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+
+
 # 历史记录
 @router.get("/history/{user_id}")
 async def get_history(
     user_id: str,
     current_user: Annotated[User, Depends(get_current_active_user)],
+    q: str | None = Query(default=None),
 ):
     # Enforce data isolation
     if user_id != current_user.username:
@@ -26,8 +32,30 @@ async def get_history(
 
     if ensure_schema_if_possible():
         store = MySQLConversationStore()
-        return {"history": store.list_sessions(user_id)}
-    return {"history": history_manager.get_history(user_id)}
+        items = store.search_sessions(user_id, q or "")
+        return {"history": items}
+    return {"history": history_manager.search_history(user_id, q or "")}
+
+
+@router.get("/history/{user_id}/{session_id}")
+async def get_history_session(
+    user_id: str,
+    session_id: str,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+):
+    if user_id != current_user.username:
+        raise HTTPException(
+            status_code=403, detail="Not authorized to access this history"
+        )
+
+    if ensure_schema_if_possible():
+        store = MySQLConversationStore()
+        session = store.get_session_detail(user_id, session_id)
+    else:
+        session = history_manager.get_session(user_id, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
 
 
 @router.post("/history/{user_id}/save")
@@ -81,3 +109,25 @@ async def delete_history(
     else:
         history_manager.delete_session(user_id, session_id)
     return {"message": "Deleted"}
+
+
+@router.patch("/history/{user_id}/{session_id}")
+async def rename_history_session(
+    user_id: str,
+    session_id: str,
+    payload: RenameSessionRequest,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+):
+    if user_id != current_user.username:
+        raise HTTPException(
+            status_code=403, detail="Not authorized to update this history"
+        )
+
+    if ensure_schema_if_possible():
+        store = MySQLConversationStore()
+        updated = store.rename_session(user_id, session_id, payload.title)
+    else:
+        updated = history_manager.rename_session(user_id, session_id, payload.title)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return updated

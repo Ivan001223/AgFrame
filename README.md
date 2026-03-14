@@ -74,6 +74,7 @@ AgFrame/
 │   ├── config.example.json
 │   └── config.json          # 本地配置（需创建）
 ├── docker/                  # Docker 初始化脚本
+├── docs/                    # 部署/安全/测试最小文档
 ├── scripts/                 # 工具脚本
 ├── data/                    # 运行时数据
 ├── tests/                   # 单元测试
@@ -110,12 +111,28 @@ AgFrame/
 ### 5. 可观测性
 - **Langfuse**: 全链路追踪、Prompt 管理
 - **DeepEval**: RAG 评测 (Context Recall/Precision)
+- **任务运营**: 任务摘要、失败事件流、结构化诊断
+- **事件处置**: 支持事件已处理/归档与筛选
 
 ### 6. 基础设施
 - **Redis**: 缓存 / Checkpoint / 任务队列 (ARQ)
 - **PostgreSQL**: 持久化存储
 - **Docker**: 一键启动全部依赖
 - **Sandbox**: 代码安全执行环境
+
+## 最新进展
+
+本轮迭代已补齐一组更接近生产可用的后端能力：
+
+- **知识库管理**: 文档列表、搜索、详情、预览、删除、重建索引
+- **会话中心**: 会话查询、详情、重命名、删除
+- **记忆控制台**: 画像查看/更新、长期记忆查看/新增/删除
+- **任务运营**: 任务诊断、超时疑似标记、失败重试、事件流、事件归档/已处理
+- **健康检查**: 数据库、Redis、向量库、模型组件配置检查
+- **真实依赖验证**: PostgreSQL、Redis、远端 vLLM embedding/reranker 已完成集成验证
+- **服务级验收**: 已提供 smoke 脚本，覆盖注册、登录、上传、索引、文档、会话、记忆主链路
+- **前端工作台**: `/login`、`/chat`、`/knowledge`、`/conversations`、`/memory`、`/tasks`、`/settings`、`/admin/settings` 已实现并对齐后端
+- **前端门禁**: Node 22 环境下 `npm run lint` 与 `npx next build` 已通过
 
 ## 快速开始
 
@@ -139,7 +156,7 @@ cp configs/config.example.json configs/config.json
 ```json
 {
   "llm": {
-    "api_key": "sk-xxx",
+    "api_key": "",
     "base_url": "https://api.openai.com/v1",
     "model": "gpt-4o"
   },
@@ -152,19 +169,29 @@ cp configs/config.example.json configs/config.json
     "rerank_model": "Qwen/Qwen3-Reranker-0.6B"
   },
   "embeddings": {
-    "provider": "modelscope",
-    "model_name": "Qwen/Qwen3-Embedding-0.6B"
+    "provider": "vllm",
+    "model_name": "Qwen/Qwen3-Embedding-0.6B",
+    "base_url": "http://127.0.0.1:28800",
+    "api_key": "",
+    "timeout_seconds": 30
   },
   "reranker": {
-    "provider": "modelscope",
-    "model_name": "Qwen/Qwen3-Reranker-0.6B"
+    "provider": "vllm",
+    "model_name": "Qwen/Qwen3-Reranker-0.6B",
+    "base_url": "http://127.0.0.1:28880",
+    "api_key": "",
+    "timeout_seconds": 30
   },
   "database": {
     "type": "postgres",
-    "url": "postgresql+psycopg://user:pass@localhost:5432/db"
+    "url": "postgresql+psycopg://<DB_USER>:<DB_PASSWORD>@localhost:5432/<DB_NAME>"
   },
   "queue": {
-    "redis_url": "redis://localhost:6379/0"
+    "redis_url": "redis://:redissecret@localhost:6379/0"
+  },
+  "storage_s3": {
+    "s3_bucket": "agframe",
+    "s3_secure": false
   },
   "storage_local": {
     "documents_dir": "data/documents",
@@ -179,7 +206,7 @@ cp configs/config.example.json configs/config.json
     }
   },
   "auth": {
-    "secret_key": "your-secret-key-must-be-at-least-32-chars",
+    "secret_key": "<AUTH_SECRET_KEY_AT_LEAST_32_CHARS>",
     "algorithm": "HS256"
   },
   "server": {
@@ -195,9 +222,14 @@ cp configs/config.example.json configs/config.json
 
 ```bash
 export LLM_API_KEY="sk-xxx"
-export DATABASE_URL="postgresql+psycopg://user:pass@localhost:5432/db"
-export REDIS_URL="redis://localhost:6379/0"
+export DATABASE_URL="postgresql+psycopg://<DB_USER>:<DB_PASSWORD>@localhost:5432/<DB_NAME>"
+export REDIS_URL="redis://:redissecret@localhost:6379/0"
 ```
+
+说明：
+
+- 远端 Hugging Face / ModelScope 模型下载现在要求显式设置 `revision`
+- 前端建议使用 Node 22 LTS
 
 ### 3. 启动依赖
 
@@ -212,13 +244,24 @@ docker-compose up -d
 docker-compose ps
 ```
 
+### 3.1 启动前端
+
+```bash
+cd frontend
+export NEXT_PUBLIC_API_URL="http://127.0.0.1:8000"
+npm install
+npm run lint -- --max-warnings=0
+npx next build
+npm run dev
+```
+
 **启动的服务：**
 
 | 服务 | 端口 | 用途 |
 |------|------|------|
 | PostgreSQL + pgvector | 5432 | 主数据库 + 向量存储 |
 | Redis | 6379 | 缓存、Checkpoint、任务队列 |
-| RabbitMQ | 5672/15672 | ARQ 异步任务队列 |
+| RabbitMQ | 5672/15672 | 预留消息队列（当前 ARQ 不依赖） |
 | ClickHouse | 8123 | Langfuse 指标存储 |
 | MinIO | 9000/9001 | S3 对象存储 |
 | Langfuse | 3000 | 可观测性追踪 |
@@ -253,6 +296,13 @@ docker-compose down
 docker-compose down -v
 ```
 
+## 文档索引
+
+- [部署最小文档](./docs/deployment.md)
+- [安全最小文档](./docs/security.md)
+- [测试最小文档](./docs/testing.md)
+- [前端架构文档](./docs/frontend-architecture.md)
+
 ## 开发指南
 
 ### 新增 Skill 流程
@@ -277,14 +327,65 @@ config = settings.model_dump()
 
 ### 核心 API
 
-| 端点 | 功能 |
-|------|------|
-| `POST /auth/token` | JWT 登录 |
-| `POST /chat/invoke` | 对话触发 |
-| `POST /upload` | 文件上传 (RAG 入库) |
-| `GET /history/{user_id}` | 对话历史 |
-| `GET /settings` | 获取配置 |
-| `POST /tasks/background` | 异步任务提交 |
+| 方法 | 端点 | 功能 |
+|------|------|------|
+| `POST` | `/auth/token` | JWT 登录 |
+| `POST` | `/auth/register` | 用户注册 |
+| `GET` | `/auth/users/me` | 获取当前用户 |
+| `GET` | `/health` | 健康检查 |
+| `GET` | `/health/ready` | 就绪检查 |
+| `GET` | `/health/live` | 存活检查 |
+| `POST` | `/chat/invoke` | LangGraph 对话触发 |
+| `POST` | `/upload` | PDF 上传并入队索引 |
+| `POST` | `/upload/image` | 图片上传（OCR 占位） |
+| `GET` | `/documents` | 文档列表/搜索 |
+| `GET` | `/documents/{doc_id}` | 文档详情与预览 |
+| `DELETE` | `/documents/{doc_id}` | 删除文档 |
+| `POST` | `/documents/{doc_id}/reindex` | 文档重建索引 |
+| `GET` | `/tasks/summary` | 任务聚合摘要 |
+| `GET` | `/tasks/incidents` | 任务失败事件流 |
+| `PATCH` | `/tasks/incidents/{incident_id}` | 标记事件已处理/归档 |
+| `GET` | `/tasks/{task_id}` | 查询异步任务状态 |
+| `POST` | `/tasks/{task_id}/retry` | 重试失败任务 |
+| `GET` | `/history/{user_id}` | 查询历史会话 |
+| `GET` | `/history/{user_id}/{session_id}` | 查询单个会话详情 |
+| `POST` | `/history/{user_id}/save` | 保存历史会话 |
+| `PATCH` | `/history/{user_id}/{session_id}` | 重命名历史会话 |
+| `DELETE` | `/history/{user_id}/{session_id}` | 删除历史会话 |
+| `GET` | `/interrupt/{session_id}` | 查询中断状态 |
+| `POST` | `/interrupt/{session_id}/approve` | 审批中断动作 |
+| `GET` | `/interrupt/{session_id}/resume` | 获取恢复参数 |
+| `GET` | `/memory/profile` | 获取当前用户画像 |
+| `PUT` | `/memory/profile` | 更新当前用户画像 |
+| `GET` | `/memory/items` | 获取长期记忆列表 |
+| `POST` | `/memory/items` | 新增长期记忆 |
+| `DELETE` | `/memory/items/{item_id}` | 删除长期记忆 |
+| `GET` | `/settings` | 获取系统配置（Admin） |
+| `POST` | `/settings` | 更新系统配置（Admin） |
+| `GET` | `/settings/user` | 获取个人配置 |
+| `POST` | `/settings/user` | 更新个人配置 |
+| `GET` | `/profile/{user_id}` | 获取用户画像 |
+| `POST` | `/vectorstore/docs/clear` | 清空向量库（Admin） |
+
+### 测试与验收
+
+```bash
+# 运行本地回归
+./scripts/run_test_suite.sh
+
+# 运行双桩 smoke
+./scripts/smoke_workbench.sh
+
+# 对运行中的服务执行 live smoke
+./scripts/live_workbench_smoke.sh --base-url http://127.0.0.1:8000
+```
+
+如果需要把 live smoke 纳入测试门禁，可设置：
+
+```bash
+export LIVE_SMOKE_BASE_URL="http://127.0.0.1:8000"
+./scripts/run_test_suite.sh
+```
 
 ### 运行评测
 

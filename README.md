@@ -75,6 +75,7 @@ AgFrame/
 │   └── config.json          # 本地配置（需创建）
 ├── docker/                  # Docker 初始化脚本
 ├── docs/                    # 部署/安全/测试最小文档
+├── frontend/                # Next.js 工作台前端
 ├── scripts/                 # 工具脚本
 ├── data/                    # 运行时数据
 ├── tests/                   # 单元测试
@@ -167,59 +168,125 @@ cp configs/config.example.json configs/config.json
   },
   "model_manager": {
     "provider": "modelscope",
-    "cache_dir": ""
+    "cache_dir": "",
+    "revision": "",
+    "trust_remote_code": true,
+    "modelscope_fallback_to_hf": true
   },
   "local_models": {
+    "ocr_model": "",
     "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
     "rerank_model": "Qwen/Qwen3-Reranker-0.6B"
   },
   "embeddings": {
-    "provider": "vllm",
+    "provider": "modelscope",
+    "backend": "sentence_transformers",
     "model_name": "Qwen/Qwen3-Embedding-0.6B",
-    "base_url": "http://127.0.0.1:28800",
+    "base_url": "",
     "api_key": "",
-    "timeout_seconds": 30
+    "timeout_seconds": 30,
+    "env_var": "MODEL_PATH_EMBEDDING",
+    "device": "auto"
   },
   "reranker": {
-    "provider": "vllm",
+    "provider": "modelscope",
+    "backend": "sentence_transformers",
     "model_name": "Qwen/Qwen3-Reranker-0.6B",
-    "base_url": "http://127.0.0.1:28880",
+    "base_url": "",
     "api_key": "",
-    "timeout_seconds": 30
+    "timeout_seconds": 30,
+    "env_var": "MODEL_PATH_RERANKER",
+    "device": "auto"
+  },
+  "search": {
+    "provider": "duckduckgo",
+    "tavily_api_key": ""
   },
   "database": {
     "type": "postgres",
-    "url": "postgresql+psycopg://<DB_USER>:<DB_PASSWORD>@localhost:5432/<DB_NAME>"
+    "url": "postgresql+psycopg://<DB_USER>:<DB_PASSWORD>@localhost:5432/<DB_NAME>",
+    "host": "localhost",
+    "port": 5432,
+    "user": "postgres",
+    "password": "<DB_PASSWORD>",
+    "db_name": "agent_app"
   },
   "queue": {
     "redis_url": "redis://:redissecret@localhost:6379/0"
   },
   "storage_s3": {
+    "s3_endpoint": "",
+    "s3_access_key": "",
+    "s3_secret_key": "",
     "s3_bucket": "agframe",
     "s3_secure": false
   },
-  "storage_local": {
-    "documents_dir": "data/documents",
-    "uploads_dir": "data/uploads"
+  "auth": {
+    "secret_key": "<AUTH_SECRET_KEY_AT_LEAST_32_CHARS>",
+    "algorithm": "HS256",
+    "access_token_expire_minutes": 30
+  },
+  "general": {
+    "app_name": "My Agent App"
   },
   "rag": {
     "retrieval": {
       "mode": "hybrid",
       "dense_k": 20,
       "sparse_k": 20,
-      "final_k": 3
+      "candidate_k": 20,
+      "final_k": 3,
+      "rrf_k": 60,
+      "weights": [0.5, 0.5]
     }
   },
-  "auth": {
-    "secret_key": "<AUTH_SECRET_KEY_AT_LEAST_32_CHARS>",
-    "algorithm": "HS256"
+  "prompt": {
+    "budget": {
+      "max_recent_history_lines": 10,
+      "max_docs": 3,
+      "max_memories": 3
+    }
+  },
+  "nodes": {
+    "enabled": [
+      "router",
+      "retrieve_docs",
+      "rerank_docs",
+      "retrieve_memories",
+      "assemble",
+      "generate"
+    ]
+  },
+  "feature_flags": {
+    "enable_docs_rag": true,
+    "enable_chat_memory": true,
+    "enable_self_correction": true,
+    "enable_human_approval": false,
+    "pgvector_dimension": 1024
+  },
+  "sandbox": {
+    "enabled": false,
+    "image": "python:3.11-slim",
+    "timeout": 30
+  },
+  "self_correction": {
+    "max_attempts": 2
   },
   "server": {
     "host": "0.0.0.0",
-    "port": 8000
+    "port": 8000,
+    "cors_origins": [],
+    "cors_allow_credentials": false
+  },
+  "storage_local": {
+    "documents_dir": "data/documents",
+    "uploads_dir": "data/uploads",
+    "data_dir": "data"
   }
 }
 ```
+
+完整样例请直接参考 `configs/config.example.json`。
 
 **环境变量覆盖**：
 
@@ -233,8 +300,9 @@ export REDIS_URL="redis://:redissecret@localhost:6379/0"
 
 说明：
 
-- 远端 Hugging Face / ModelScope 模型下载现在要求显式设置 `revision`
+- 远端 Hugging Face / ModelScope 模型下载建议显式设置 `revision`
 - 前端建议使用 Node 22 LTS
+- 常见敏感项优先用环境变量覆盖，完整映射见 `configs/config.example.json` 中 `env_overrides`
 
 ### 3. 启动依赖
 
@@ -271,25 +339,21 @@ npm run dev
 | MinIO | 9000/9001 | S3 对象存储 |
 | Langfuse | 3000 | 可观测性追踪 |
 
-### 4. 初始化 MinIO Bucket
-
-```bash
-# 创建 bucket
-docker-compose exec minio mc mb local/agframe
-
-# 设置公开访问策略（可选，用于存储公开资源）
-docker-compose exec minio mc anonymous set public local/agframe
-```
-
-### 5. 启动服务
+### 4. 启动后端与 Worker
 
 ```bash
 uv run python -m app.server.main
+uv run arq app.infrastructure.queue.worker_settings
 ```
 
-服务运行在 `http://localhost:8000`
+后端服务运行在 `http://localhost:8000`
 
 - **Swagger Docs**: http://localhost:8000/docs
+
+说明：
+
+- 如果你启用了 MinIO/S3 存储，需要自行在 MinIO 中创建 `agframe` bucket
+- 仓库当前未内置 `mc` 初始化脚本，建议通过 MinIO Console 或你自己的 `mc` 客户端完成
 
 ## 停止服务
 
@@ -307,6 +371,8 @@ docker-compose down -v
 - [安全最小文档](./docs/security.md)
 - [测试最小文档](./docs/testing.md)
 - [前端架构文档](./docs/frontend-architecture.md)
+- [0.1.1 发布计划](./docs/release-0.1.1-plan.md)
+- [Roadmap](./docs/roadmap.md)
 
 ## 开发指南
 
@@ -376,25 +442,25 @@ config = settings.model_dump()
 
 ```bash
 # 运行本地回归
-./scripts/run_test_suite.sh
+uv run ./scripts/run_test_suite.sh
 
 # 运行双桩 smoke
-./scripts/smoke_workbench.sh
+uv run ./scripts/smoke_workbench.sh
 
 # 对运行中的服务执行 live smoke
-./scripts/live_workbench_smoke.sh --base-url http://127.0.0.1:8000
+uv run ./scripts/live_workbench_smoke.sh --base-url http://127.0.0.1:8000
 ```
 
 如果需要把 live smoke 纳入测试门禁，可设置：
 
 ```bash
 export LIVE_SMOKE_BASE_URL="http://127.0.0.1:8000"
-./scripts/run_test_suite.sh
+uv run ./scripts/run_test_suite.sh
 ```
 
 ### 运行评测
 
 ```bash
 # 运行所有评估与测试
-./scripts/run_evals.sh
+uv run ./scripts/run_evals.sh
 ```

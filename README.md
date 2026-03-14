@@ -1,8 +1,37 @@
-# AgFrame (Agent Framework)
+# 🚀 AgFrame (Agent Framework)
 
-AgFrame 是一个生产级 Agent/RAG 后端框架，基于 **FastAPI** + **LangGraph** 构建。专注于复杂工作流编排、混合检索、分层记忆与可观测性。
+![Python](https://img.shields.io/badge/Python-3.11+-blue?style=flat-square&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-cyan?style=flat-square&logo=fastapi&logoColor=white)
+![LangGraph](https://img.shields.io/badge/LangGraph-0.3+-FF6B6B?style=flat-square&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
+![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat-square&logo=docker&logoColor=white)
 
-## 架构总览
+**⚡ 生产级 Agent/RAG 后端框架 | 基于 FastAPI + LangGraph 构建**  
+专注于复杂工作流编排、混合检索、分层记忆与可观测性
+
+---
+
+```text
+  █████   ██████  ███████ ██████   █████  ███    ███ ███████
+ ██   ██ ██       ██      ██   ██ ██   ██ ████  ████ ██
+ ███████ ██   ███ █████   ██████  ███████ ██ ████ ██ █████
+ ██   ██ ██    ██ ██      ██   ██ ██   ██ ██  ██  ██ ██
+ ██   ██  ██████  ██      ██   ██ ██   ██ ██      ██ ███████
+```
+
+---
+
+## ✨ 核心特性速览
+
+| 🏗️ 工作流编排 | 🧠 混合 RAG | 💾 分层记忆 | 🔮 LLM 工厂 | 📊 可观测性 | 🛠️ 基础设施 |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| LangGraph | 双路检索 | 短期+长期 | 多模型支持 | Langfuse | Redis |
+| Checkpoint | RRF 融合 | pgvector | 嵌入模型 | DeepEval | PostgreSQL |
+| Human-in-Loop | 重排序 | 用户画像 | 结构化输出 | 任务诊断 | Docker |
+
+---
+
+## 📐 架构总览
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -32,113 +61,136 @@ AgFrame 是一个生产级 Agent/RAG 后端框架，基于 **FastAPI** + **LangG
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## 目录结构
+## 📂 目录结构
 
 ```
-AgFrame/
+╭────────────────────────────────────────────────────────────────────────────╮
+│                              AgFrame /                                     │
+╰────────────────────────────────────────────────────────────────────────────╯
+│
 ├── app/
-│   ├── server/              # FastAPI 入口
-│   │   ├── api/             # 路由层
-│   │   └── main.py          # 应用启动
-│   ├── runtime/             # 运行时核心
-│   │   ├── graph/           # LangGraph 工作流
-│   │   │   ├── graph.py     # 图定义
-│   │   │   ├── state.py     # State Schema
+│   ├── server/              # 🚀 FastAPI 入口
+│   │   ├── api/             #   路由层
+│   │   └── main.py          #   应用启动
+│   ├── runtime/             # ⚙️ 运行时核心
+│   │   ├── graph/           #   LangGraph 工作流
+│   │   │   ├── graph.py     #   图定义
+│   │   │   ├── state.py     #   State Schema
 │   │   │   ├── orchestrator.py # 编排器
-│   │   │   ├── registry.py  # 节点注册表
-│   │   │   └── nodes/       # 节点实现
-│   │   ├── llm/             # LLM 工厂
-│   │   └── prompts/         # Prompt 模板
-│   ├── skills/              # 原子能力层
-│   │   ├── rag/             # 混合检索
-│   │   ├── memory/          # 记忆检索技能
-│   │   ├── profile/         # 用户画像
-│   │   ├── research/        # 网络搜索
-│   │   ├── ocr/             # 图片 OCR
-│   │   ├── common/          # 公共技能
-│   │   └── tools/           # 代码执行
-│   ├── infrastructure/      # 基础设施
-│   │   ├── config/          # 配置管理
-│   │   ├── database/        # SQLAlchemy ORM
-│   │   ├── checkpoint/      # Redis Checkpoint
-│   │   ├── queue/           # ARQ 异步任务
-│   │   ├── sandbox/         # 代码沙箱
-│   │   ├── observability/   # 可观测性
-│   │   └── utils/           # 工具函数
-│   ├── agents/              # Agent 节点工厂
-│   ├── memory/              # 记忆模块
-│   │   ├── long_term/       # 长期记忆引擎
-│   │   └── vector_stores/   # 向量存储 (pgvector)
-│   └── examples/            # 调试脚本与示例
-├── configs/                 # 配置文件
-│   ├── config.example.json
-│   └── config.json          # 本地配置（需创建）
-├── docker/                  # Docker 初始化脚本
-├── docs/                    # 部署/安全/测试最小文档
-├── frontend/                # Next.js 工作台前端
-├── scripts/                 # 工具脚本
-├── data/                    # 运行时数据
-├── tests/                   # 单元测试
-├── docker-compose.yml       # 基础设施编排
-├── pyproject.toml           # Python 项目配置与依赖清单
-└── uv.lock                  # uv 锁文件
+│   │   │   ├── registry.py  #   节点注册表
+│   │   │   └── nodes/       #   节点实现
+│   │   ├── llm/             #   LLM 工厂
+│   │   └── prompts/         #   Prompt 模板
+│   ├── skills/              # 🛠️ 原子能力层
+│   │   ├── rag/             #   混合检索
+│   │   ├── memory/          #   记忆检索技能
+│   │   ├── profile/         #   用户画像
+│   │   ├── research/        #   网络搜索
+│   │   ├── ocr/             #   图片 OCR
+│   │   ├── common/          #   公共技能
+│   │   └── tools/           #   代码执行
+│   ├── infrastructure/      # 🏗️ 基础设施
+│   │   ├── config/          #   配置管理
+│   │   ├── database/        #   SQLAlchemy ORM
+│   │   ├── checkpoint/      #   Redis Checkpoint
+│   │   ├── queue/           #   ARQ 异步任务
+│   │   ├── sandbox/         #   代码沙箱
+│   │   ├── observability/   #   可观测性
+│   │   └── utils/           #   工具函数
+│   ├── agents/              # 🤖 Agent 节点工厂
+│   ├── memory/              # 🧠 记忆模块
+│   │   ├── long_term/       #   长期记忆引擎
+│   │   └── vector_stores/   #   向量存储 (pgvector)
+│   └── examples/            # 🔬 调试脚本与示例
+│
+├── configs/                 # ⚙️ 配置文件
+├── docker/                 # 🐳 Docker 初始化脚本
+├── docs/                   # 📖 部署/安全/测试文档
+├── frontend/               # 💻 Next.js 工作台前端
+├── scripts/                # 🧰 工具脚本
+├── data/                   # 📁 运行时数据
+├── tests/                  # 🧪 单元测试
+│
+├── docker-compose.yml      # 🐳 基础设施编排
+├── pyproject.toml         # 🐍 Python 项目配置
+└── uv.lock                 # 🔒 依赖锁文件
 ```
 
-## 核心特性
+## ⚡ 核心特性
 
-### 1. 工作流编排 (LangGraph)
-- **Stateful Graph**: 支持循环、分支、条件判断
-- **Checkpoint**: Redis 持久化断点恢复
-- **Human-in-the-Loop**: 支持人工中断与反馈
-- **节点注册表**: 动态节点管理
+### 🏗️ 工作流编排 (LangGraph)
 
-### 2. 混合 RAG
-- **双路检索**: BM25 (关键词) + Embedding (语义)
-- **重排序**: 支持 Cross-Encoder 重排序
-- **多格式解析**: PDF/DOCX/Excel/图片 OCR
-- **RRF 融合**: RRF 排序融合算法
+| 特性 | 说明 |
+|:---|:---|
+| **Stateful Graph** | 支持循环、分支、条件判断 |
+| **Checkpoint** | Redis 持久化断点恢复 |
+| **Human-in-the-Loop** | 支持人工中断与反馈 |
+| **节点注册表** | 动态节点管理 |
 
-### 3. 分层记忆系统
-- **短期记忆**: 对话上下文窗口管理
-- **长期记忆**: 用户画像 + 历史向量存储
-- **pgvector**: 向量检索持久化
-- **对话管理**: 历史记录持久化
+### 🧠 混合 RAG
 
-### 4. LLM 工厂
-- **多模型支持**: OpenAI API / 本地 Qwen (Ollama/VLLM)
-- **嵌入模型**: Sentence-Transformers / ModelScope
-- **重排序**: Cross-Encoder
-- **结构化输出**: 原生 Pydantic + JSON 模式
+| 特性 | 说明 |
+|:---|:---|
+| **双路检索** | BM25 (关键词) + Embedding (语义) |
+| **重排序** | 支持 Cross-Encoder 重排序 |
+| **多格式解析** | PDF/DOCX/Excel/图片 OCR |
+| **RRF 融合** | RRF 排序融合算法 |
 
-### 5. 可观测性
-- **Langfuse**: 全链路追踪、Prompt 管理
-- **DeepEval**: RAG 评测 (Context Recall/Precision)
-- **任务运营**: 任务摘要、失败事件流、结构化诊断
-- **事件处置**: 支持事件已处理/归档与筛选
+### 💾 分层记忆系统
 
-### 6. 基础设施
-- **Redis**: 缓存 / Checkpoint / 任务队列 (ARQ)
-- **PostgreSQL**: 持久化存储
-- **Docker**: 一键启动全部依赖
-- **Sandbox**: 代码安全执行环境
+| 特性 | 说明 |
+|:---|:---|
+| **短期记忆** | 对话上下文窗口管理 |
+| **长期记忆** | 用户画像 + 历史向量存储 |
+| **pgvector** | 向量检索持久化 |
+| **对话管理** | 历史记录持久化 |
 
-## 最新进展
+### 🔮 LLM 工厂
+
+| 特性 | 说明 |
+|:---|:---|
+| **多模型支持** | OpenAI API / 本地 Qwen (Ollama/VLLM) |
+| **嵌入模型** | Sentence-Transformers / ModelScope |
+| **重排序** | Cross-Encoder |
+| **结构化输出** | 原生 Pydantic + JSON 模式 |
+
+### 📊 可观测性
+
+| 特性 | 说明 |
+|:---|:---|
+| **Langfuse** | 全链路追踪、Prompt 管理 |
+| **DeepEval** | RAG 评测 (Context Recall/Precision) |
+| **任务运营** | 任务摘要、失败事件流、结构化诊断 |
+| **事件处置** | 支持事件已处理/归档与筛选 |
+
+### 🛠️ 基础设施
+
+| 特性 | 说明 |
+|:---|:---|
+| **Redis** | 缓存 / Checkpoint / 任务队列 (ARQ) |
+| **PostgreSQL** | 持久化存储 |
+| **Docker** | 一键启动全部依赖 |
+| **Sandbox** | 代码安全执行环境 |
+
+## 🆕 最新进展
 
 本轮迭代已补齐一组更接近生产可用的后端能力：
 
-- **知识库管理**: 文档列表、搜索、详情、预览、删除、重建索引
-- **会话中心**: 会话查询、详情、重命名、删除
-- **记忆控制台**: 画像查看/更新、长期记忆查看/新增/删除
-- **任务运营**: 任务诊断、超时疑似标记、失败重试、事件流、事件归档/已处理
-- **健康检查**: 数据库、Redis、向量库、模型组件配置检查
-- **真实依赖验证**: PostgreSQL、Redis、远端 vLLM embedding/reranker 已完成集成验证
-- **服务级验收**: 已提供 smoke 脚本，覆盖注册、登录、上传、索引、文档、会话、记忆主链路
-- **前端工作台**: `/login`、`/chat`、`/knowledge`、`/conversations`、`/memory`、`/tasks`、`/settings`、`/admin/settings` 已实现并对齐后端
-- **前端门禁**: Node 22 环境下 `npm run lint` 与 `npx next build` 已通过
+| 模块 | 新增功能 |
+|:---|:---|
+| 📚 **知识库管理** | 文档列表、搜索、详情、预览、删除、重建索引 |
+| 💬 **会话中心** | 会话查询、详情、重命名、删除 |
+| 🧠 **记忆控制台** | 画像查看/更新、长期记忆查看/新增/删除 |
+| 📋 **任务运营** | 任务诊断、超时疑似标记、失败重试、事件流、事件归档/已处理 |
+| ❤️ **健康检查** | 数据库、Redis、向量库、模型组件配置检查 |
+| ✅ **真实依赖验证** | PostgreSQL、Redis、远端 vLLM embedding/reranker 已完成集成验证 |
+| 🎯 **服务级验收** | 已提供 smoke 脚本，覆盖注册、登录、上传、索引、文档、会话、记忆主链路 |
+| 💻 **前端工作台** | `/login`、`/chat`、`/knowledge`、`/conversations`、`/memory`、`/tasks`、`/settings`、`/admin/settings` 已实现并对齐后端 |
+| 🛡️ **前端门禁** | Node 22 环境下 `npm run lint` 与 `npx next build` 已通过 |
 
-## 快速开始
+## 🚀 快速开始
 
-### 1. 环境准备
+### 1️⃣ 环境准备
 
 ```bash
 uv sync
@@ -150,7 +202,7 @@ uv sync
 - 如需显式指定 Python 3.11，可先执行 `uv python install 3.11`
 - 常用命令建议统一使用 `uv run ...`
 
-### 2. 配置
+### 2️⃣ 配置
 
 ```bash
 cp configs/config.example.json configs/config.json
@@ -304,7 +356,7 @@ export REDIS_URL="redis://:redissecret@localhost:6379/0"
 - 前端建议使用 Node 22 LTS
 - 常见敏感项优先用环境变量覆盖，完整映射见 `configs/config.example.json` 中 `env_overrides`
 
-### 3. 启动依赖
+### 3️⃣ 启动依赖
 
 ```bash
 # 复制环境变量模板 (如果存在，否则手动创建 .env)
@@ -317,7 +369,7 @@ docker-compose up -d
 docker-compose ps
 ```
 
-### 3.1 启动前端
+### 3️⃣.1 启动前端
 
 ```bash
 cd frontend
@@ -330,8 +382,8 @@ npm run dev
 
 **启动的服务：**
 
-| 服务 | 端口 | 用途 |
-|------|------|------|
+| 🔌 服务 | 🚪 端口 | 📝 用途 |
+|:---|:---:|:---|
 | PostgreSQL + pgvector | 5432 | 主数据库 + 向量存储 |
 | Redis | 6379 | 缓存、Checkpoint、任务队列 |
 | RabbitMQ | 5672/15672 | 预留消息队列（当前 ARQ 不依赖） |
@@ -339,7 +391,7 @@ npm run dev
 | MinIO | 9000/9001 | S3 对象存储 |
 | Langfuse | 3000 | 可观测性追踪 |
 
-### 4. 启动后端与 Worker
+### 4️⃣ 启动后端与 Worker
 
 ```bash
 uv run python -m app.server.main
@@ -355,7 +407,7 @@ uv run arq app.infrastructure.queue.worker_settings
 - 如果你启用了 MinIO/S3 存储，需要自行在 MinIO 中创建 `agframe` bucket
 - 仓库当前未内置 `mc` 初始化脚本，建议通过 MinIO Console 或你自己的 `mc` 客户端完成
 
-## 停止服务
+## ⏹️ 停止服务
 
 ```bash
 # 停止所有基础设施
@@ -365,7 +417,7 @@ docker-compose down
 docker-compose down -v
 ```
 
-## 文档索引
+## 📖 文档索引
 
 - [部署最小文档](./docs/deployment.md)
 - [安全最小文档](./docs/security.md)
@@ -374,16 +426,16 @@ docker-compose down -v
 - [0.1.1 发布计划](./docs/release-0.1.1-plan.md)
 - [Roadmap](./docs/roadmap.md)
 
-## 开发指南
+## 🔧 开发指南
 
-### 新增 Skill 流程
+### 🆕 新增 Skill 流程
 
 1. **定义能力** → `app/skills/<领域>/<能力>.py`
 2. **注册节点** → `app/runtime/graph/nodes/<节点>.py`
 3. **编排流程** → `app/runtime/graph/graph.py` 更新 Graph
 4. **验证** → `python -m app.examples.graph_demo`
 
-### 配置管理
+### ⚙️ 配置管理
 
 ```python
 from app.infrastructure.config.settings import settings
@@ -396,10 +448,10 @@ db_host = settings.database.host
 config = settings.model_dump()
 ```
 
-### 核心 API
+### 🔌 核心 API
 
-| 方法 | 端点 | 功能 |
-|------|------|------|
+| 🏷️ 方法 | 📡 端点 | 🎯 功能 |
+|:---:|:---|:---|
 | `POST` | `/auth/token` | JWT 登录 |
 | `POST` | `/auth/register` | 用户注册 |
 | `GET` | `/auth/users/me` | 获取当前用户 |
@@ -438,7 +490,7 @@ config = settings.model_dump()
 | `GET` | `/profile/{user_id}` | 获取用户画像 |
 | `POST` | `/vectorstore/docs/clear` | 清空向量库（Admin） |
 
-### 测试与验收
+### 🧪 测试与验收
 
 ```bash
 # 运行本地回归
@@ -458,7 +510,7 @@ export LIVE_SMOKE_BASE_URL="http://127.0.0.1:8000"
 uv run ./scripts/run_test_suite.sh
 ```
 
-### 运行评测
+### 📈 运行评测
 
 ```bash
 # 运行所有评估与测试

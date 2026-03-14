@@ -18,13 +18,30 @@ class ToolResult:
     raw: Any | None
 
 
-def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, text=True, capture_output=True)
+def _run(cmd: list[str], *, timeout: int | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(cmd, text=True, capture_output=True, timeout=timeout)
+
+
+def _count_pip_audit_vulns(raw: Any) -> int:
+    if isinstance(raw, list):
+        return len(raw)
+    if isinstance(raw, dict):
+        dependencies = raw.get("dependencies", [])
+        if isinstance(dependencies, list):
+            total = 0
+            for dep in dependencies:
+                if not isinstance(dep, dict):
+                    continue
+                vulns = dep.get("vulns", [])
+                if isinstance(vulns, list):
+                    total += len(vulns)
+            return total
+    return 0
 
 
 def _bandit() -> ToolResult:
     if shutil.which("bandit") is None:
-        return ToolResult("bandit", "skipped", None, {"reason": "bandit not installed"}, None)
+        return ToolResult("bandit", "missing", None, {"reason": "bandit not installed"}, None)
     proc = _run(["bandit", "-r", "app", "-f", "json", "-q"])
     raw: Any | None = None
     try:
@@ -48,20 +65,52 @@ def _bandit() -> ToolResult:
 
 def _pip_audit() -> ToolResult:
     if shutil.which("pip-audit") is None:
-        return ToolResult("pip-audit", "skipped", None, {"reason": "pip-audit not installed"}, None)
-    proc = _run(["pip-audit", "-r", "requirements.txt", "-f", "json"])
-    raw: Any | None = None
-    try:
-        raw = json.loads(proc.stdout) if proc.stdout.strip() else None
-    except json.JSONDecodeError:
-        raw = None
-    vulns = raw if isinstance(raw, list) else []
+        return ToolResult("pip-audit", "missing", None, {"reason": "pip-audit not installed"}, None)
+    attempts = [
+        ("requirements", ["pip-audit", "-r", "requirements.txt", "--progress-spinner", "off", "-f", "json"], 30),
+        ("local", ["pip-audit", "--local", "--progress-spinner", "off", "-f", "json"], 60),
+    ]
+
+    last_proc: subprocess.CompletedProcess[str] | None = None
+    for mode, cmd, timeout in attempts:
+        try:
+            proc = _run(cmd, timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            stderr = (exc.stderr or "") if isinstance(exc.stderr, str) else ""
+            last_proc = subprocess.CompletedProcess(
+                cmd,
+                returncode=124,
+                stdout="",
+                stderr=f"timeout after {timeout}s\n{stderr}".strip(),
+            )
+            continue
+        last_proc = proc
+        raw: Any | None = None
+        try:
+            raw = json.loads(proc.stdout) if proc.stdout.strip() else None
+        except json.JSONDecodeError:
+            raw = None
+
+        if raw is not None:
+            vuln_total = _count_pip_audit_vulns(raw)
+            return ToolResult(
+                "pip-audit",
+                "ok" if proc.returncode == 0 and vuln_total == 0 else "issues",
+                proc.returncode,
+                {"total": vuln_total, "mode": mode},
+                raw,
+            )
+
     return ToolResult(
         "pip-audit",
-        "ok" if proc.returncode == 0 and len(vulns) == 0 else "issues",
-        proc.returncode,
-        {"total": len(vulns)},
-        raw,
+        "error",
+        last_proc.returncode if last_proc is not None else None,
+        {
+            "reason": "pip-audit produced no parseable JSON output",
+            "mode": "requirements_then_local",
+            "stderr": (last_proc.stderr or "")[:2000] if last_proc is not None else "",
+        },
+        None,
     )
 
 
@@ -75,6 +124,9 @@ def main() -> int:
 
     bandit_high = int(bandit_res.summary.get("by_severity", {}).get("HIGH", 0))
     pip_audit_total = int(pip_audit_res.summary.get("total", 0))
+    missing_tools = [res.tool for res in (bandit_res, pip_audit_res) if res.status == "missing"]
+    tools_ready = len(missing_tools) == 0
+    gate_pass = tools_ready and bandit_high == 0 and pip_audit_total == 0
 
     payload: dict[str, Any] = {
         "timestamp": datetime.now(UTC).isoformat(),
@@ -91,7 +143,9 @@ def main() -> int:
             "raw": pip_audit_res.raw,
         },
         "gate": {
-            "pass": bandit_high == 0 and pip_audit_total == 0,
+            "pass": gate_pass,
+            "tools_ready": tools_ready,
+            "missing_tools": missing_tools,
             "bandit_high": bandit_high,
             "pip_audit_total": pip_audit_total,
         },
@@ -105,4 +159,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

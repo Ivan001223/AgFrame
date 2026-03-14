@@ -43,9 +43,9 @@ def _pct(x: float) -> str:
 def _key_path_rates(cov: CoverageSummary) -> dict[str, float | None]:
     targets = {
         "app/runtime/prompts/prompt_builder.py": None,
+        "app/runtime/llm/model_manager.py": None,
         "app/infrastructure/utils/security.py": None,
-        "app/server/api/auth.py": None,
-        "app/server/api/upload.py": None,
+        "app/infrastructure/config/env.py": None,
     }
     for k in list(targets.keys()):
         for filename, rate in cov.files.items():
@@ -234,4 +234,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -57,6 +57,7 @@ dependencies = [
     { name = "fastapi-limiter" },
     { name = "fpdf" },
     { name = "httpx" },
+    { name = "jieba" },
     { name = "langchain" },
     { name = "langchain-community" },
     { name = "langchain-experimental" },
@@ -118,6 +119,7 @@ requires-dist = [
     { name = "fastapi-limiter" },
     { name = "fpdf" },
     { name = "httpx" },
+    { name = "jieba" },
     { name = "langchain" },
     { name = "langchain-community" },
     { name = "langchain-experimental" },
@@ -2033,6 +2035,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/0b/ef/986d059424db204ed
 wheels = [
     { url = "https://files.pythonhosted.org/packages/45/04/e442e1356c97b03a6d30d2b462f7c0bdfbf207e75f6833815fd1225a75b4/instructor-1.14.5-py3-none-any.whl", hash = "sha256:2a5a31222b008c0989be1cc001e33a237f49506e80ac5833f6d36d7690bae7b1", size = 177445, upload-time = "2026-01-29T14:18:53.641Z" },
 ]
+
+[[package]]
+name = "jieba"
+version = "0.42.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c6/cb/18eeb235f833b726522d7ebed54f2278ce28ba9438e3135ab0278d9792a2/jieba-0.42.1.tar.gz", hash = "sha256:055ca12f62674fafed09427f176506079bc135638a14e23e25be909131928db2", size = 19214172, upload-time = "2020-01-20T14:27:23.5Z" }
 
 [[package]]
 name = "jinja2"

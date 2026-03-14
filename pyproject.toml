@@ -19,6 +19,7 @@ dependencies = [
     "fastapi-limiter",
     "fpdf",
     "httpx",
+    "jieba",
     "langchain",
     "langchain-community",
     "langchain-experimental",

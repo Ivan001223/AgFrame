@@ -1,5 +1,10 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/http/client';
+import {
+  clearStoredSession,
+  getStoredToken,
+  setStoredSession,
+} from '@/lib/auth/session';
 
 export type LoginRequest = {
   username: string;
@@ -12,17 +17,26 @@ export type TokenResponse = {
 };
 
 export type CurrentUser = {
-  id: string;
   username: string;
+  role: string;
   is_active: boolean;
-  is_superuser: boolean;
-  full_name?: string;
-  email?: string;
 };
 
 export const AUTH_KEYS = {
   currentUser: ['currentUser'] as const,
 };
+
+export function useCurrentUserQuery() {
+  const token = getStoredToken();
+
+  return useQuery({
+    queryKey: AUTH_KEYS.currentUser,
+    queryFn: async () => apiClient<CurrentUser>('/auth/users/me'),
+    enabled: !!token,
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+}
 
 export function useLoginMutation() {
   const queryClient = useQueryClient();
@@ -36,16 +50,23 @@ export function useLoginMutation() {
         },
         body: new URLSearchParams({
           username: data.username,
-          password: data.password || '123456', // Mock password as backend accepts any
+          password: data.password || '',
           grant_type: 'password',
         }).toString(),
       });
     },
-    onSuccess: (data: TokenResponse) => {
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('agframe_token', data.access_token);
-      }
+    onSuccess: (data: TokenResponse, variables: LoginRequest) => {
+      setStoredSession(data.access_token, variables.username);
       queryClient.invalidateQueries({ queryKey: AUTH_KEYS.currentUser });
     },
   });
+}
+
+export function useLogout() {
+  const queryClient = useQueryClient();
+
+  return () => {
+    clearStoredSession();
+    queryClient.removeQueries({ queryKey: AUTH_KEYS.currentUser });
+  };
 }

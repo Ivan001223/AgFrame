@@ -1,4 +1,5 @@
 import { ApiError, ApiErrorResponse } from './errors';
+import { clearStoredSession, getStoredToken } from '@/lib/auth/session';
 
 // Read backend URL from env, fallback to relative path (proxy) or localhost
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
@@ -36,17 +37,18 @@ export async function apiClient<T>(
 
   // Handle Token
   // In a real app, you might want to read a cookie or localStorage here
-  let token = '';
-  if (typeof window !== 'undefined') {
-    token = localStorage.getItem('agframe_token') || '';
-  }
+  const token = getStoredToken();
 
-  const headers: HeadersInit = {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-    ...(token && { Authorization: `Bearer ${token}` }),
-    ...customConfig.headers,
-  };
+  const isFormDataBody = typeof FormData !== 'undefined' && customConfig.body instanceof FormData;
+  const headers = new Headers(customConfig.headers);
+
+  headers.set('Accept', 'application/json');
+  if (!isFormDataBody && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
 
   const config: RequestInit = {
     ...customConfig,
@@ -63,8 +65,8 @@ export async function apiClient<T>(
 
     // Handle 401 Unauthorized globally if needed (e.g. dispatch event or redirect)
     if (response.status === 401 && typeof window !== 'undefined') {
-      localStorage.removeItem('agframe_token');
-      // window.location.href = '/login'; // Optional: auto redirect on 401
+      clearStoredSession();
+      window.dispatchEvent(new Event('agframe:auth-expired'));
     }
 
     if (!response.ok) {

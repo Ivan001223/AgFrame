@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable, Dict, Optional, Union
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from app.runtime.graph.state import AgentState
 
-NodeFn = Callable[[AgentState], Union[Dict[str, Any], Awaitable[Dict[str, Any]]]]
+NodeFn = Callable[[AgentState], dict[str, Any] | Awaitable[dict[str, Any]]]
 
 
 class NodeRegistry:
     def __init__(self) -> None:
-        self._nodes: Dict[str, NodeFn] = {}
+        self._nodes: dict[str, NodeFn] = {}
 
     def register(self, name: str, fn: NodeFn) -> None:
         if name in self._nodes:
@@ -22,7 +23,7 @@ class NodeRegistry:
         except KeyError as e:
             raise KeyError(f"Node not found: {name}") from e
 
-    def maybe_get(self, name: str) -> Optional[NodeFn]:
+    def maybe_get(self, name: str) -> NodeFn | None:
         return self._nodes.get(name)
 
 

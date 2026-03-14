@@ -14,6 +14,7 @@ configs/config.json
 *.key
 *.p12
 *.pfx
+.agent/
 AGENTS.md
 
 .venv/
@@ -27,6 +28,7 @@ __pypackages__/
 build/
 dist/
 wheels/
+CLAUDE.md
 *.egg
 
 .pytest_cache/
@@ -64,8 +66,6 @@ logs/
 *.db-journal
 
 models/
-tests/
-docs/
 model_cache/
 hf_cache/
 .hf_cache/
@@ -81,3 +81,28 @@ data/**/*.faiss
 data/**/*.index
 data/**/*.bin
 data/**/vector_store*/
+
+reports/
+reports/test_suite/
+reports/**/coverage.xml
+reports/**/pytest.json
+reports/**/perf.json
+reports/**/security.json
+reports/**/report.md
+reports/**/defects.md
+
+docs/plans/
+docs/generated/
+docs/tmp/
+docs/drafts/
+
+frontend/.next/
+frontend/node_modules/
+frontend/coverage/
+frontend/out/
+frontend/build/
+frontend/*.tsbuildinfo
+
+*.orig
+*.rej
+*.retry

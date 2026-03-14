@@ -1,14 +1,16 @@
-from typing import Dict, Any
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from app.runtime.graph.json_router import run_json_router
+
 
 class RouteDecision(BaseModel):
     """通用路由决策模型"""
     destination: str = Field(description="下一步路由的目标节点/Agent（例如 'agent_a', 'agent_b', 'FINISH'）")
     reasoning: str = Field(description="做出该路由决策的理由")
 
-def route_request(state: Dict[str, Any]) -> RouteDecision:
+def route_request(state: dict[str, Any]) -> RouteDecision:
     """
     通用编排器/路由节点。
     分析对话历史以决定下一步动作。

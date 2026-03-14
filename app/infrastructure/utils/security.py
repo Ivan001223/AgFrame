@@ -1,23 +1,25 @@
-from datetime import datetime, timedelta, timezone
-from typing import Optional, Union, Any
+import warnings
+from datetime import UTC, datetime, timedelta
+
 import bcrypt
 import jwt
-import warnings
-from app.infrastructure.config.config_manager import config_manager
+
+from app.infrastructure.config.settings import AuthConfig, settings
 
 _default_secret_warning_shown = False
+_DEFAULT_AUTH_SECRET = AuthConfig().secret_key
 
 
-def get_auth_config():
-    return config_manager.get_config().get("auth", {})
+def get_auth_config() -> AuthConfig:
+    return settings.auth
 
 
 def _check_default_secret(secret_key: str):
     """检查是否使用了默认密钥，如果是则发出警告"""
     global _default_secret_warning_shown
-    if not _default_secret_warning_shown and secret_key == "secret":
+    if not _default_secret_warning_shown and secret_key == _DEFAULT_AUTH_SECRET:
         warnings.warn(
-            "WARNING: 使用默认的 JWT secret_key ('secret')！"
+            "WARNING: 使用默认的 JWT secret_key。"
             "这在生产环境中非常不安全。请在环境变量或配置文件中设置 AUTH_SECRET_KEY。",
             UserWarning,
             stacklevel=3
@@ -40,27 +42,27 @@ def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(password, bcrypt.gensalt()).decode("utf-8")
 
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     to_encode = data.copy()
     auth_config = get_auth_config()
-    secret_key = auth_config.get("secret_key", "secret")
+    secret_key = getattr(auth_config, "secret_key", _DEFAULT_AUTH_SECRET)
     _check_default_secret(secret_key)
-    algorithm = auth_config.get("algorithm", "HS256")
+    algorithm = getattr(auth_config, "algorithm", "HS256")
 
     if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+        expire = datetime.now(UTC) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=15)
+        expire = datetime.now(UTC) + timedelta(minutes=15)
 
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, secret_key, algorithm=algorithm)
     return encoded_jwt
 
 
-def decode_access_token(token: str) -> dict:
+def decode_access_token(token: str) -> dict | None:
     auth_config = get_auth_config()
-    secret_key = auth_config.get("secret_key", "secret")
-    algorithm = auth_config.get("algorithm", "HS256")
+    secret_key = getattr(auth_config, "secret_key", _DEFAULT_AUTH_SECRET)
+    algorithm = getattr(auth_config, "algorithm", "HS256")
 
     try:
         payload = jwt.decode(token, secret_key, algorithms=[algorithm])

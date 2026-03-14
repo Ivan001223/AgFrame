@@ -1,5 +1,5 @@
-import sys
 import os
+import sys
 from unittest.mock import MagicMock
 
 # Mock heavy dependencies BEFORE imports
@@ -12,18 +12,19 @@ sys.modules["timm"] = MagicMock()
 sys.modules["einops"] = MagicMock()
 sys.modules["pdf2image"] = MagicMock()
 
-from app.infrastructure.config.config_manager import config_manager
+from app.infrastructure.config.settings import settings
 
-config_manager.config["database"] = {
-    "type": "sqlite",
-    "url": "sqlite:///./test.db",
-    "db_name": "test.db",
-}
+# 覆盖数据库配置用于测试
+settings.database.type = "sqlite"
+settings.database.url = "sqlite:///./test.db"
+settings.database.db_name = "test.db"
+
+import time
 
 from fastapi.testclient import TestClient
+
 from app.infrastructure.database.schema import ensure_schema
 from app.server.main import app
-import time
 
 # Force schema creation
 try:
@@ -36,6 +37,11 @@ except Exception as e:
 client = TestClient(app)
 
 
+def _ensure(condition: bool, message: str) -> None:
+    if not condition:
+        raise RuntimeError(message)
+
+
 def test_auth_flow():
     # 1. Test Unprotected access
     # /chat requires auth
@@ -45,28 +51,28 @@ def test_auth_flow():
         "/chat/invoke",
         json={"input": {"messages": [{"role": "user", "content": "hi"}]}},
     )
-    assert response.status_code == 401, f"Expected 401, got {response.status_code}"
+    _ensure(response.status_code == 401, f"Expected 401, got {response.status_code}")
     print("PASS: Unprotected access denied.")
 
     # 2. Register
     username = f"user_{int(time.time())}"
-    password = "password123"
+    demo_password = os.getenv("VERIFY_AUTH_PASSWORD", "example-auth-pass")
     print(f"Registering {username}...")
     response = client.post(
-        "/auth/register", json={"username": username, "password": password}
+        "/auth/register", json={"username": username, "password": demo_password}
     )
-    assert response.status_code == 200, f"Register failed: {response.text}"
+    _ensure(response.status_code == 200, f"Register failed: {response.text}")
     user_data = response.json()
-    assert user_data["username"] == username
-    assert user_data["role"] == "user"
+    _ensure(user_data["username"] == username, "Registered username mismatch")
+    _ensure(user_data["role"] == "user", "Expected registered role to be user")
     print("PASS: Register success.")
 
     # 3. Login
     print("Logging in...")
     response = client.post(
-        "/auth/token", data={"username": username, "password": password}
+        "/auth/token", data={"username": username, "password": demo_password}
     )
-    assert response.status_code == 200, f"Login failed: {response.text}"
+    _ensure(response.status_code == 200, f"Login failed: {response.text}")
     token_data = response.json()
     access_token = token_data["access_token"]
     headers = {"Authorization": f"Bearer {access_token}"}
@@ -80,18 +86,18 @@ def test_auth_flow():
     # History endpoint might return empty list or 200
     # Note: history.router is protected
     # It might return 200 even if empty
-    assert response.status_code in [200, 404], (
+    _ensure(response.status_code in [200, 404], (
         f"Expected 200 or 404, got {response.status_code}"
-    )
+    ))
     print("PASS: Protected endpoint accessible.")
 
     # 5. Access Upload (Now allowed for User, but isolated)
     print("Accessing /upload/ (User allowed)...")
     # We expect 422 because we didn't send file, but NOT 403
     response = client.post("/upload", headers=headers)
-    assert response.status_code == 422, (
+    _ensure(response.status_code == 422, (
         f"Expected 422 (Validation Error), got {response.status_code}"
-    )
+    ))
     print("PASS: Upload endpoint accessible for user.")
 
     # 6. Admin Check (First user should be admin?)
@@ -119,34 +125,34 @@ def test_auth_flow():
     # 7. Register Second User (Should be 'user')
     username2 = f"user2_{int(time.time())}"
     print(f"Registering second user {username2}...")
-    client.post("/auth/register", json={"username": username2, "password": password})
+    client.post("/auth/register", json={"username": username2, "password": demo_password})
     resp2 = client.post(
-        "/auth/token", data={"username": username2, "password": password}
+        "/auth/token", data={"username": username2, "password": demo_password}
     )
     token2 = resp2.json()["access_token"]
     headers2 = {"Authorization": f"Bearer {token2}"}
 
     print("Checking Second User Admin access (Should Fail)...")
     resp_settings = client.get("/settings", headers=headers2)
-    assert resp_settings.status_code == 403, (
+    _ensure(resp_settings.status_code == 403, (
         f"Expected 403 for second user, got {resp_settings.status_code}"
-    )
+    ))
     print("PASS: Second user is NOT Admin.")
 
     # 9. Settings Isolation
     print("Checking User Settings Isolation...")
     # User 1 sets setting
     resp = client.post("/settings/user", json={"theme": "dark"}, headers=headers)
-    assert resp.status_code == 200, f"Update settings failed: {resp.text}"
+    _ensure(resp.status_code == 200, f"Update settings failed: {resp.text}")
 
     resp_set1 = client.get("/settings/user", headers=headers)
-    assert resp_set1.status_code == 200, f"Get settings failed: {resp_set1.text}"
+    _ensure(resp_set1.status_code == 200, f"Get settings failed: {resp_set1.text}")
     print(f"User 1 settings: {resp_set1.json()}")
-    assert resp_set1.json().get("theme") == "dark", "User 1 setting not saved"
+    _ensure(resp_set1.json().get("theme") == "dark", "User 1 setting not saved")
 
     # User 2 should not see it
     resp_set2 = client.get("/settings/user", headers=headers2)
-    assert resp_set2.json().get("theme") != "dark", "User 2 saw User 1 settings"
+    _ensure(resp_set2.json().get("theme") != "dark", "User 2 saw User 1 settings")
     print("PASS: User settings are isolated.")
 
     # 10. File Isolation

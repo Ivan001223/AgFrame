@@ -1,7 +1,12 @@
-import torch
-from typing import Any, List, Optional, Tuple
 
-from app.infrastructure.config.config_manager import config_manager
+import logging
+
+import httpx
+import torch
+
+from app.infrastructure.config.settings import settings
+
+logger = logging.getLogger(__name__)
 from app.runtime.llm.component_loader import (
     load_sentence_transformers_cross_encoder,
     load_transformers_model,
@@ -14,6 +19,7 @@ from app.runtime.llm.model_manager import (
     get_best_device,
 )
 
+
 class ModelReranker:
     """
     基于本地模型的重排器 (Reranker) 实现。
@@ -23,12 +29,12 @@ class ModelReranker:
     def __init__(
         self,
         *,
-        config: Optional[dict] = None,
-        model_name: Optional[str] = None,
+        config: dict | None = None,
+        model_name: str | None = None,
     ):
-        cfg = config or config_manager.get_config()
+        cfg = config or settings.model_dump()
         rr_cfg = cfg.get("reranker") or {}
-        configured_model = rr_cfg.get("model_name") or (cfg.get("local_models") or {}).get("rerank_model")
+        configured_model = rr_cfg.get("model_name") or cfg.get("local_models", {}).get("rerank_model")
         backend = rr_cfg.get("backend") or "transformers"
         batch_size = rr_cfg.get("batch_size")
         max_length = rr_cfg.get("max_length")
@@ -38,6 +44,9 @@ class ModelReranker:
         stride = rr_cfg.get("stride")
         device = rr_cfg.get("device") or "auto"
         transformers_model_type = rr_cfg.get("transformers_model_type") or "auto"
+        base_url = str(rr_cfg.get("base_url") or "").rstrip("/")
+        api_key = str(rr_cfg.get("api_key") or "")
+        timeout_seconds = rr_cfg.get("timeout_seconds")
         self._spec = build_model_spec(
             config=cfg,
             component_key="reranker",
@@ -56,6 +65,11 @@ class ModelReranker:
         self._window_size = None if window_size is None else int(window_size)
         self._stride = None if stride is None else int(stride)
         self._transformers_model_type = str(transformers_model_type)
+        self._provider = str(rr_cfg.get("provider") or cfg.get("model_manager", {}).get("provider") or "hf")
+        self._remote_base_url = base_url
+        self._remote_api_key = api_key
+        self._remote_timeout_seconds = 30 if timeout_seconds is None else int(timeout_seconds)
+        self._use_remote_api = bool(self.model_name) and (self._provider == "vllm" or bool(self._remote_base_url))
         self._model = None
         self._processor = None
         self._tokenizer = None
@@ -67,45 +81,52 @@ class ModelReranker:
         """懒加载模型：仅在首次使用时加载"""
         if self._disabled:
             return
+        if self._use_remote_api:
+            return
         if self._backend == "sentence_transformers":
             if self._cross_encoder is not None:
                 return
             self._loaded_source = resolve_pretrained_source_for_spec(self._spec)
-            print(f"正在加载重排模型：{self.model_name}（设备：{self._device}，后端：sentence_transformers）...")
+            logger.info(f"Loading reranker model: {self.model_name} (device: {self._device}, backend: sentence_transformers)")
             try:
                 self._cross_encoder = load_sentence_transformers_cross_encoder(
                     self._loaded_source, device=self._device, max_length=self._max_length,
                     model_name=self.model_name
                 )
-                print("重排模型加载完成。")
+                logger.info("Reranker model loaded successfully")
             except Exception as e:
-                print(f"加载重排模型失败：{e}")
+                logger.error(f"Failed to load reranker model: {e}")
                 raise e
             return
 
         if self._model is None:
             self._loaded_source = resolve_pretrained_source_for_spec(self._spec)
-            print(f"正在加载重排模型：{self.model_name}（设备：{self._device}）...")
+            logger.info(f"Loading reranker model: {self.model_name} (device: {self._device})")
             try:
                 self._model = load_transformers_model(
                     self._loaded_source,
+                    revision=self._spec.revision,
                     trust_remote_code=self._spec.trust_remote_code,
                     device=self._device,
                     model_type=self._transformers_model_type,
                     model_name=self.model_name,
                 )
                 self._processor = try_load_transformers_processor(
-                    self._loaded_source, trust_remote_code=self._spec.trust_remote_code
+                    self._loaded_source,
+                    revision=self._spec.revision,
+                    trust_remote_code=self._spec.trust_remote_code,
                 )
                 self._tokenizer = load_transformers_tokenizer(
-                    self._loaded_source, trust_remote_code=self._spec.trust_remote_code
+                    self._loaded_source,
+                    revision=self._spec.revision,
+                    trust_remote_code=self._spec.trust_remote_code,
                 )
-                print("重排模型加载完成。")
+                logger.info("Reranker model loaded successfully")
             except Exception as e:
-                print(f"加载重排模型失败：{e}")
+                logger.error(f"Failed to load reranker model: {e}")
                 raise e
 
-    def rerank(self, query: str, documents: List[str], top_k: int = 3) -> List[Tuple[str, float, int]]:
+    def rerank(self, query: str, documents: list[str], top_k: int = 3) -> list[tuple[str, float, int]]:
         """
         基于查询对候选文档列表进行重排。
         
@@ -121,6 +142,8 @@ class ModelReranker:
             return []
         if self._disabled:
             return [(doc, 0.0, i) for i, doc in enumerate(documents)][:top_k]
+        if self._use_remote_api:
+            return self._rerank_remote(query, documents, top_k=top_k)
             
         self._load_model()
 
@@ -138,13 +161,13 @@ class ModelReranker:
                 scores.sort(key=lambda x: x[1], reverse=True)
                 return scores[:top_k]
             except Exception as e:
-                print(f"重排失败：{e}")
+                logger.warning(f"Reranking failed: {e}")
                 return [(doc, 0.0, i) for i, doc in enumerate(documents)][:top_k]
 
         try:
             # 优先尝试 compute_score 接口
             if hasattr(self._model, "compute_score"):
-                all_scores: List[float] = []
+                all_scores: list[float] = []
                 for start in range(0, len(docs), self._batch_size):
                     pairs = [[q, d] for d in docs[start : start + self._batch_size]]
                     with torch.inference_mode():
@@ -158,7 +181,7 @@ class ModelReranker:
 
             # 其次尝试 predict 接口
             if hasattr(self._model, "predict"):
-                all_scores: List[float] = []
+                all_scores: list[float] = []
                 for start in range(0, len(docs), self._batch_size):
                     pairs = [[q, d] for d in docs[start : start + self._batch_size]]
                     batch_scores = self._model.predict(pairs)
@@ -178,10 +201,10 @@ class ModelReranker:
             scores.sort(key=lambda x: x[1], reverse=True)
             return scores[:top_k]
         except Exception as e:
-            print(f"重排失败：{e}")
+            logger.warning(f"Reranking failed: {e}")
             return [(doc, 0.0, i) for i, doc in enumerate(documents)][:top_k]
 
-    def _score_pairs_transformers(self, query: str, docs: List[str]) -> List[float]:
+    def _score_pairs_transformers(self, query: str, docs: list[str]) -> list[float]:
         """使用 Transformers 模型对文本对打分（支持滑动窗口）"""
         if self._window_size is not None and self._window_size > 0:
             stride = self._stride or self._window_size
@@ -189,9 +212,9 @@ class ModelReranker:
 
         return self._score_pairs_transformers_no_window(query, docs)
 
-    def _score_pairs_transformers_no_window(self, query: str, docs: List[str]) -> List[float]:
+    def _score_pairs_transformers_no_window(self, query: str, docs: list[str]) -> list[float]:
         """批量计算文本对分数（无滑动窗口）"""
-        scores: List[float] = []
+        scores: list[float] = []
         for start in range(0, len(docs), self._batch_size):
             q_batch = [query] * len(docs[start : start + self._batch_size])
             d_batch = docs[start : start + self._batch_size]
@@ -240,6 +263,74 @@ class ModelReranker:
             if start + self._window_size >= len(input_ids):
                 break
         return 0.0 if best is None else float(best)
+
+    def _rerank_remote(self, query: str, documents: list[str], *, top_k: int) -> list[tuple[str, float, int]]:
+        """使用 vLLM rerank API 进行远程重排。"""
+        if not self._remote_base_url:
+            raise ValueError("reranker.base_url 未配置，无法使用远程 reranker 服务")
+
+        headers = {"Content-Type": "application/json"}
+        if self._remote_api_key:
+            headers["Authorization"] = f"Bearer {self._remote_api_key}"
+
+        payload = {
+            "model": self.model_name,
+            "query": query,
+            "documents": documents,
+            "top_n": top_k,
+        }
+
+        response = None
+        errors: list[str] = []
+        for path in ("/v1/rerank", "/rerank"):
+            try:
+                response = httpx.post(
+                    f"{self._remote_base_url}{path}",
+                    headers=headers,
+                    json=payload,
+                    timeout=self._remote_timeout_seconds,
+                )
+                response.raise_for_status()
+                break
+            except Exception as e:
+                errors.append(f"{path}: {e}")
+                response = None
+
+        if response is None:
+            logger.warning("Remote rerank failed: %s", "; ".join(errors))
+            return [(doc, 0.0, i) for i, doc in enumerate(documents)][:top_k]
+
+        body = response.json()
+        results = body.get("results") or body.get("data") or []
+        ranked: list[tuple[str, float, int]] = []
+        for item in results:
+            index = int(item.get("index", item.get("document_index", -1)))
+            if index < 0 or index >= len(documents):
+                continue
+            score = item.get("relevance_score", item.get("score", 0.0))
+            ranked.append((documents[index], float(score), index))
+
+        if not ranked:
+            return [(doc, 0.0, i) for i, doc in enumerate(documents)][:top_k]
+        ranked.sort(key=lambda x: x[1], reverse=True)
+        return ranked[:top_k]
+
+
+_model_reranker_instance = None
+
+
+def get_reranker() -> ModelReranker:
+    """
+    获取 ModelReranker 单例实例。
+    避免重复加载模型到内存。
+
+    Returns:
+        ModelReranker: Reranker 模型单例
+    """
+    global _model_reranker_instance
+    if _model_reranker_instance is None:
+        _model_reranker_instance = ModelReranker()
+    return _model_reranker_instance
 
 
 HFReranker = ModelReranker

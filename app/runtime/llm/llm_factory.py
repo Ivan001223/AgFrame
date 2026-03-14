@@ -1,5 +1,7 @@
 from langchain_openai import ChatOpenAI
-from app.infrastructure.config.config_manager import config_manager
+
+from app.infrastructure.config.settings import settings
+
 # from app.runtime.llm.local_qwen import LocalQwen3VL  # Moved inside function to avoid heavy imports
 
 # 全局单例，避免重复加载模型
@@ -36,22 +38,22 @@ def get_llm(temperature: float = 0, streaming: bool = True, json_mode: bool = Fa
         BaseChatModel: 配置好的 LangChain 聊天模型实例
     """
     global _local_qwen_instance
-    llm_config = config_manager.get_config().get("llm", {})
-    model_name = llm_config.get("model", "gpt-4o")
+    llm_config = settings.llm
+    model_name = llm_config.model
 
     # 判断是否需要使用本地 Qwen
     if model_name == "local-qwen3-vl":
         return get_local_qwen_provider()
 
     model_kwargs = {}
-    if json_mode and bool(llm_config.get("json_mode_response_format", True)):
+    if json_mode and llm_config.json_mode_response_format:
         model_kwargs["response_format"] = {"type": "json_object"}
 
     return ChatOpenAI(
         model=model_name,
         temperature=temperature,
-        base_url=llm_config.get("base_url"),
-        api_key=llm_config.get("api_key"),
+        base_url=llm_config.base_url,
+        api_key=llm_config.api_key,
         streaming=streaming,
         model_kwargs=model_kwargs,
     )

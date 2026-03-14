@@ -1,7 +1,12 @@
 import base64
+import logging
 import mimetypes
+from typing import Any
+
 import requests
-from typing import List, Dict, Any, Union
+
+logger = logging.getLogger(__name__)
+
 
 def is_local_url(url: str) -> bool:
     """检查 URL 是否指向本地服务器。"""
@@ -19,10 +24,10 @@ def convert_url_to_base64(url: str) -> str:
             b64_data = base64.b64encode(resp.content).decode('utf-8')
             return f"data:{mime_type};base64,{b64_data}"
     except Exception as e:
-        print(f"将图片转换为 base64 失败：{e}")
+        logger.error(f"Failed to convert image to base64: {e}")
     return None
 
-def process_multimodal_content(raw_content: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def process_multimodal_content(raw_content: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     处理多模态消息内容列表；必要时将本地图片 URL 转为 base64 data URI。
     """

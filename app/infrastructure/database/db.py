@@ -1,7 +1,13 @@
-import mysql.connector
-from mysql.connector import pooling
+import logging
 import time
-from app.infrastructure.config.config_manager import config_manager
+from typing import Any
+
+import mysql.connector
+
+from app.infrastructure.config.settings import settings
+
+logger = logging.getLogger(__name__)
+
 
 class DatabaseManager:
     """
@@ -14,14 +20,14 @@ class DatabaseManager:
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(DatabaseManager, cls).__new__(cls)
+            cls._instance = super().__new__(cls)
             cls._instance._init_pool()
         return cls._instance
 
     def _init_pool(self):
         """初始化连接池。支持重试机制。"""
-        db_config = config_manager.get_config().get("database", {})
-        
+        db_config = settings.database
+
         # 数据库连接重试逻辑
         max_retries = 3
         for attempt in range(max_retries):
@@ -29,24 +35,24 @@ class DatabaseManager:
                 self._pool = mysql.connector.pooling.MySQLConnectionPool(
                     pool_name="agent_pool",
                     pool_size=5,
-                    host=db_config.get("host", "localhost"),
-                    port=db_config.get("port", 3306),
-                    user=db_config.get("user", "root"),
-                    password=db_config.get("password", "password"),
-                    database=db_config.get("db_name", "agent_app"),
+                    host=db_config.host,
+                    port=db_config.port,
+                    user=db_config.user,
+                    password=db_config.password,
+                    database=db_config.db_name,
                     autocommit=True
                 )
-                print("MySQL 连接池初始化成功。")
+                logger.info("MySQL connection pool initialized successfully")
                 break
             except mysql.connector.Error as err:
-                print(f"初始化数据库连接池失败（第 {attempt+1}/{max_retries} 次尝试）：{err}")
+                logger.warning(f"Database connection pool init failed (attempt {attempt+1}/{max_retries}): {err}")
                 if attempt < max_retries - 1:
                     time.sleep(2)
                 else:
-                    print("连接 MySQL 数据库失败。")
+                    logger.error("Failed to connect to MySQL after all retries")
                     self._pool = None
 
-    def get_connection(self):
+    def get_connection(self) -> Any:
         """从连接池获取一个数据库连接。"""
         if not self._pool:
             self._init_pool()
@@ -55,7 +61,7 @@ class DatabaseManager:
         
         return self._pool.get_connection()
 
-    def execute_query(self, query, params=None):
+    def execute_query(self, query: str, params: tuple | None = None) -> list[dict[str, Any]]:
         """
         执行查询语句 (SELECT) 并返回字典格式的结果列表。
         
@@ -75,7 +81,7 @@ class DatabaseManager:
             result = cursor.fetchall()
             return result
         except mysql.connector.Error as err:
-            print(f"查询执行错误：{err}")
+            logger.error(f"Query execution error: {err}")
             raise
         finally:
             if cursor:
@@ -83,7 +89,7 @@ class DatabaseManager:
             if conn:
                 conn.close()
 
-    def execute_update(self, query, params=None):
+    def execute_update(self, query: str, params: tuple | None = None) -> int | None:
         """
         执行更新语句 (INSERT/UPDATE/DELETE) 并返回最后插入的行 ID。
         
@@ -103,7 +109,7 @@ class DatabaseManager:
             conn.commit()
             return cursor.lastrowid
         except mysql.connector.Error as err:
-            print(f"更新执行错误：{err}")
+            logger.error(f"Update execution error: {err}")
             raise
         finally:
             if cursor:

@@ -1,4 +1,5 @@
-from typing import Iterable, List, Union, Dict, Any
+from collections.abc import Iterable
+from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, convert_to_messages
 
@@ -6,7 +7,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, conver
 def _content_to_text(content: Any) -> str:
     """将消息内容（可能是多模态列表）转换为纯文本"""
     if isinstance(content, list):
-        texts: List[str] = []
+        texts: list[str] = []
         for item in content:
             if isinstance(item, dict) and item.get("type") == "text":
                 text = item.get("text", "")
@@ -18,7 +19,7 @@ def _content_to_text(content: Any) -> str:
     return str(content)
 
 
-def sanitize_messages_for_routing(messages: Iterable[BaseMessage]) -> List[BaseMessage]:
+def sanitize_messages_for_routing(messages: Iterable[BaseMessage]) -> list[BaseMessage]:
     """
     清洗消息列表以用于路由判断。
     移除多模态内容（图片等），仅保留文本，减少 Token 消耗并提高稳定性。
@@ -41,7 +42,7 @@ def sanitize_messages_for_routing(messages: Iterable[BaseMessage]) -> List[BaseM
     
     converted_messages = convert_to_messages(raw_messages)
     
-    sanitized: List[BaseMessage] = []
+    sanitized: list[BaseMessage] = []
     for msg in converted_messages:
         content = _content_to_text(getattr(msg, "content", ""))
         msg_type = getattr(msg, "type", None)

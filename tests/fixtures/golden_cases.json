@@ -1,0 +1,98 @@
+{
+  "cases": [
+    {
+      "id": "case_001",
+      "input": "查找关于 Python 异步编程的文档",
+      "expected_tool": "rag",
+      "expected_keywords": ["Python", "异步", "async"],
+      "description": "RAG 查询场景 - 应该触发文档检索",
+      "eval_criteria": {
+        "answer_relevancy_min": 0.7,
+        "faithfulness_min": 0.8
+      }
+    },
+    {
+      "id": "case_002",
+      "input": "今天的新闻有哪些？",
+      "expected_tool": "web_search",
+      "expected_keywords": ["新闻", "最新"],
+      "description": "实时查询场景 - 应该触发网络搜索",
+      "eval_criteria": {
+        "answer_relevancy_min": 0.6,
+        "faithfulness_min": 0.7
+      }
+    },
+    {
+      "id": "case_003",
+      "input": "帮我写一个快速排序算法",
+      "expected_tool": "python_executor",
+      "expected_keywords": ["排序", "算法", "代码"],
+      "description": "代码生成场景 - 应该触发代码执行",
+      "eval_criteria": {
+        "answer_relevancy_min": 0.8,
+        "faithfulness_min": 0.9
+      }
+    },
+    {
+      "id": "case_004",
+      "input": "分析这张图片的内容",
+      "expected_tool": "ocr",
+      "expected_keywords": ["图片", "图像"],
+      "description": "图像分析场景 - 应该触发 OCR",
+      "eval_criteria": {
+        "answer_relevancy_min": 0.7,
+        "faithfulness_min": 0.8
+      }
+    },
+    {
+      "id": "case_005",
+      "input": "我们之前讨论过什么？",
+      "expected_tool": "memory",
+      "expected_keywords": ["之前", "讨论", "记忆"],
+      "description": "记忆检索场景 - 应该触发记忆查询",
+      "eval_criteria": {
+        "answer_relevancy_min": 0.6,
+        "faithfulness_min": 0.7
+      }
+    },
+    {
+      "id": "case_006",
+      "input": "什么是 Transformer 架构？",
+      "expected_tool": "rag",
+      "expected_keywords": ["Transformer", "架构", "Attention"],
+      "description": "知识问答 - 应该触发 RAG 检索",
+      "eval_criteria": {
+        "answer_relevancy_min": 0.75,
+        "faithfulness_min": 0.85
+      }
+    },
+    {
+      "id": "case_007",
+      "input": "帮我查询最新的 AI 研究论文",
+      "expected_tool": "web_search",
+      "expected_keywords": ["AI", "研究", "论文"],
+      "description": "学术搜索 - 应该触发网络搜索",
+      "eval_criteria": {
+        "answer_relevancy_min": 0.65,
+        "faithfulness_min": 0.75
+      }
+    },
+    {
+      "id": "case_008",
+      "input": "计算 1 到 100 的平方和",
+      "expected_tool": "python_executor",
+      "expected_keywords": ["计算", "平方", "求和"],
+      "description": "数学计算 - 应该触发代码执行",
+      "eval_criteria": {
+        "answer_relevancy_min": 0.85,
+        "faithfulness_min": 0.9
+      }
+    }
+  ],
+  "metadata": {
+    "version": "1.0.0",
+    "created_at": "2025-01-01",
+    "description": "Golden Dataset for Agent Evaluation",
+    "prompt_version": "v1.0"
+  }
+}

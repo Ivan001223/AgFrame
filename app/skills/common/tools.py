@@ -1,11 +1,14 @@
-from langchain_core.tools import tool
-from langchain_community.tools import DuckDuckGoSearchRun
-from langchain_experimental.utilities import PythonREPL
-from app.skills.rag.rag_engine import get_rag_engine
-from app.skills.ocr.ocr_engine import ocr_engine
-from app.infrastructure.config.config_manager import config_manager
-import os
 import datetime
+import os
+
+from langchain_community.tools import DuckDuckGoSearchRun
+from langchain_core.tools import tool
+from langchain_experimental.utilities import PythonREPL
+
+from app.infrastructure.config.settings import settings
+from app.skills.ocr.ocr_engine import ocr_engine
+from app.skills.rag.rag_engine import get_rag_engine
+
 
 # --- 1. 网页搜索 ---
 @tool
@@ -27,8 +30,8 @@ def calculator(expression: str) -> str:
     输入应为合法的 Python 表达式字符串，例如 "123 * 456" 或 "math.sqrt(25)"。
     """
     try:
-        flags = (config_manager.get_config() or {}).get("feature_flags", {}) or {}
-        if not bool(flags.get("enable_tools_python_repl", False)):
+        flags = settings.feature_flags
+        if not flags.enable_tools_python_repl:
             return "Tool disabled: calculator"
         repl = PythonREPL()
         full_code = f"import math\nprint({expression})"
@@ -84,12 +87,13 @@ def python_executor(code: str) -> str:
         code: 要执行的 Python 代码。
     """
     try:
-        flags = (config_manager.get_config() or {}).get("feature_flags", {}) or {}
-        if not bool(flags.get("enable_tools_python_executor", False)):
+        flags = settings.feature_flags
+        if not flags.enable_tools_python_executor:
             return "Tool disabled: python_executor"
 
-        from app.infrastructure.sandbox.code_sandbox import execute_code
         import asyncio
+
+        from app.infrastructure.sandbox.code_sandbox import execute_code
 
         result = asyncio.run(execute_code(code))
 

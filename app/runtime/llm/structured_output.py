@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterable
 from enum import Enum
-from typing import Any, Dict, Iterable, List, Type, TypeVar
+from typing import Any, TypeVar
 
 import anyio
+
+logger = logging.getLogger(__name__)
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from pydantic import BaseModel
 
-from app.runtime.llm.llm_factory import get_llm
 from app.infrastructure.utils.json_parser import parse_json_from_llm
 from app.infrastructure.utils.message_utils import sanitize_messages_for_routing
+from app.runtime.llm.llm_factory import get_llm
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -23,8 +27,8 @@ async def invoke_structured(
     messages: Iterable[Any],
     *,
     system_template: str,
-    schema: Type[T],
-    fallback_data: Dict[str, Any],
+    schema: type[T],
+    fallback_data: dict[str, Any],
     temperature: float = 0,
     streaming: bool = False,
     mode: StructuredOutputMode = StructuredOutputMode.NATIVE_FIRST,
@@ -36,7 +40,7 @@ async def invoke_structured(
             MessagesPlaceholder(variable_name="messages"),
         ]
     )
-    prepared_messages: List[Any]
+    prepared_messages: list[Any]
     if sanitize_messages:
         prepared_messages = sanitize_messages_for_routing(messages)
     else:
@@ -52,7 +56,8 @@ async def invoke_structured(
                 result = await anyio.to_thread.run_sync(lambda: chain.invoke({"messages": prepared_messages}))
                 if isinstance(result, schema):
                     return result
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Structured output with structured LLM failed: {e}")
                 pass
 
         chain = prompt | llm
@@ -76,7 +81,8 @@ async def invoke_structured(
             return await _invoke_with_llm(json_mode=False, use_with_structured=False)
         try:
             return await _invoke_with_llm(json_mode=True, use_with_structured=True)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"JSON mode failed, falling back to prompt-only: {e}")
             return await _invoke_with_llm(json_mode=False, use_with_structured=False)
     except Exception as e:
         return _fallback_model(e)

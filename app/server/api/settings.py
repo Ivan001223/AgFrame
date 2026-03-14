@@ -1,11 +1,13 @@
-from typing import Dict, Any, Annotated
+import time
+from typing import Annotated, Any
+
 from fastapi import APIRouter, Depends
-from app.infrastructure.config.config_manager import config_manager
-from app.server.api.auth import get_current_active_user, get_current_admin_user
+from sqlalchemy import select
+
+from app.infrastructure.config.settings import settings
 from app.infrastructure.database.models import User, UserProfile
 from app.infrastructure.database.orm import get_session
-from sqlalchemy import select
-import time
+from app.server.api.auth import get_current_active_user, get_current_admin_user
 
 router = APIRouter()
 
@@ -13,12 +15,21 @@ router = APIRouter()
 # 系统全局配置（仅 Admin）
 @router.get("/settings", dependencies=[Depends(get_current_admin_user)])
 async def get_settings():
-    return config_manager.get_config()
+    return settings.model_dump()
 
 
 @router.post("/settings", dependencies=[Depends(get_current_admin_user)])
-async def update_settings(config: Dict[str, Any]):
-    return config_manager.update_config(config)
+async def update_settings(config: dict[str, Any]):
+    # 更新 settings 对象
+    for key, value in config.items():
+        if hasattr(settings, key):
+            config_obj = getattr(settings, key)
+            if hasattr(config_obj, "model_dump"):
+                # 嵌套配置对象
+                for sub_key, sub_value in value.items():
+                    if hasattr(config_obj, sub_key):
+                        setattr(config_obj, sub_key, sub_value)
+    return settings.model_dump()
 
 
 # 用户个性化配置（隔离）
@@ -38,7 +49,7 @@ async def get_user_settings(
 
 @router.post("/settings/user")
 async def update_user_settings(
-    settings: Dict[str, Any],
+    settings: dict[str, Any],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ):
     with get_session() as session:

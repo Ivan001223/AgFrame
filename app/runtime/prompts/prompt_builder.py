@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 from langchain_core.documents import Document
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -25,8 +29,8 @@ def _truncate(text: str, max_chars: int) -> str:
     return text[: max_chars - 1] + "…"
 
 
-def _take_with_budget(items: Sequence[str], *, max_total_chars: int) -> List[str]:
-    out: List[str] = []
+def _take_with_budget(items: Sequence[str], *, max_total_chars: int) -> list[str]:
+    out: list[str] = []
     remaining = max_total_chars
     for it in items:
         if remaining <= 0:
@@ -40,25 +44,26 @@ def _take_with_budget(items: Sequence[str], *, max_total_chars: int) -> List[str
     return out
 
 
-def _get_meta_str(meta: Dict[str, Any], key: str) -> Optional[str]:
+def _get_meta_str(meta: dict[str, Any], key: str) -> str | None:
     val = meta.get(key)
     if val is None:
         return None
     return str(val)
 
 
-def _get_meta_int(meta: Dict[str, Any], key: str) -> Optional[int]:
+def _get_meta_int(meta: dict[str, Any], key: str) -> int | None:
     val = meta.get(key)
     if val is None:
         return None
     try:
         return int(val)
-    except Exception:
+    except (ValueError, TypeError) as e:
+        logger.debug(f"Failed to parse {key} as int: {e}")
         return None
 
 
-def build_citations(*, docs: Sequence[Document], memories: Sequence[Document]) -> List[Dict[str, Any]]:
-    citations: List[Dict[str, Any]] = []
+def build_citations(*, docs: Sequence[Document], memories: Sequence[Document]) -> list[dict[str, Any]]:
+    citations: list[dict[str, Any]] = []
     for i, d in enumerate(docs, start=1):
         meta = dict(getattr(d, "metadata", {}) or {})
         citations.append(
@@ -89,16 +94,16 @@ def build_system_prompt(
     recent_history_lines: Sequence[str],
     docs: Sequence[Document],
     memories: Sequence[Document],
-    web_search: Optional[Dict[str, Any]] = None,
-    self_correction: Optional[str] = None,
-    budget: Optional[PromptBudget] = None,
-) -> Tuple[str, List[Dict[str, Any]]]:
+    web_search: dict[str, Any] | None = None,
+    self_correction: str | None = None,
+    budget: PromptBudget | None = None,
+) -> tuple[str, list[dict[str, Any]]]:
     b = budget or PromptBudget()
 
     recent_lines = list(recent_history_lines)[-b.max_recent_history_lines :]
     profile_block = _truncate(str(profile), b.max_profile_chars_total)
 
-    doc_items: List[str] = []
+    doc_items: list[str] = []
     for i, d in enumerate(list(docs)[: b.max_docs], start=1):
         meta = dict(getattr(d, "metadata", {}) or {})
         ref = (
@@ -108,7 +113,7 @@ def build_system_prompt(
         content = _truncate(str(getattr(d, "page_content", "") or ""), b.max_item_chars)
         doc_items.append(f"[Doc {i}] ({ref})\n{content}")
 
-    mem_items: List[str] = []
+    mem_items: list[str] = []
     for i, m in enumerate(list(memories)[: b.max_memories], start=1):
         meta = dict(getattr(m, "metadata", {}) or {})
         ref = (

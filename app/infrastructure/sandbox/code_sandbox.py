@@ -1,10 +1,13 @@
 import asyncio
-import docker
-import json
+import logging
 import os
 import tempfile
-from typing import Optional, Dict, Any
 from datetime import datetime
+from typing import Any
+
+import docker
+
+logger = logging.getLogger(__name__)
 
 
 class CodeSandbox:
@@ -19,7 +22,7 @@ class CodeSandbox:
         self.timeout = timeout
         self.memory_limit = memory_limit
         self.cpu_limit = cpu_limit
-        self._client: Optional[docker.DockerClient] = None
+        self._client: docker.DockerClient | None = None
 
     @property
     def client(self) -> docker.DockerClient:
@@ -51,7 +54,7 @@ class CodeSandbox:
         finally:
             os.unlink(temp_path)
 
-    async def execute(self, code: str) -> Dict[str, Any]:
+    async def execute(self, code: str) -> dict[str, Any]:
         loop = asyncio.get_event_loop()
         try:
             container_id = await loop.run_in_executor(
@@ -77,10 +80,10 @@ class CodeSandbox:
             finally:
                 try:
                     container.remove(force=True)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to remove container: {e}")
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return {
                 "success": False,
                 "output": "",
@@ -100,5 +103,5 @@ class CodeSandbox:
 code_sandbox = CodeSandbox()
 
 
-async def execute_code(code: str) -> Dict[str, Any]:
+async def execute_code(code: str) -> dict[str, Any]:
     return await code_sandbox.execute(code)

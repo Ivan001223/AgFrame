@@ -1,27 +1,27 @@
-from typing import Annotated, Optional
-from fastapi import APIRouter, HTTPException, Depends, status
-from pydantic import BaseModel
 from datetime import datetime
+from typing import Annotated
 
-from app.server.api.auth import get_current_active_user
-from app.infrastructure.database.models import User
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+
 from app.infrastructure.checkpoint.redis_store import checkpoint_store
+from app.infrastructure.database.models import User
 from app.runtime.graph.state import ActionRequired
-
+from app.server.api.auth import get_current_active_user
 
 router = APIRouter(prefix="/interrupt", tags=["human-in-the-loop"])
 
 
 class ApproveRequest(BaseModel):
     approved: bool = True
-    comment: Optional[str] = None
+    comment: str | None = None
 
 
 class InterruptStatusResponse(BaseModel):
     session_id: str
     interrupted: bool
-    action_required: Optional[ActionRequired] = None
-    checkpoint_saved_at: Optional[str] = None
+    action_required: ActionRequired | None = None
+    checkpoint_saved_at: str | None = None
 
 
 class ApproveResponse(BaseModel):

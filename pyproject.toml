@@ -1,0 +1,127 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agframe"
+version = "0.1.1"
+description = "Production-grade Agent/RAG backend framework"
+requires-python = ">=3.11"
+dependencies = [
+    "addict",
+    "arq",
+    "docx2txt",
+    "duckduckgo-search",
+    "easydict",
+    "einops",
+    "faiss-cpu",
+    "fastapi",
+    "fastapi-limiter",
+    "fpdf",
+    "httpx",
+    "jieba",
+    "langchain",
+    "langchain-community",
+    "langchain-experimental",
+    "langchain-huggingface",
+    "langchain-openai",
+    "langfuse",
+    "langgraph",
+    "langserve[all]",
+    "matplotlib",
+    "mysql-connector-python",
+    "openpyxl",
+    "pandas",
+    "passlib[bcrypt]",
+    "pdf2image",
+    "pgvector",
+    "psycopg[binary]",
+    "pydantic",
+    "pydantic-settings",
+    "pypdf",
+    "pyjwt",
+    "python-dotenv",
+    "python-multipart",
+    "qwen-vl-utils",
+    "rank-bm25",
+    "redis",
+    "requests",
+    "sentence-transformers",
+    "sqlalchemy>=2.0.0",
+    "streamlit",
+    "tiktoken",
+    "timm",
+    "torch",
+    "torchvision",
+    "transformers>=4.46.3",
+    "unstructured[all-docs]",
+    "uvicorn",
+]
+
+[dependency-groups]
+dev = [
+    "bandit",
+    "pip-audit",
+    "pytest",
+    "pytest-cov",
+    "pytest-json-report",
+    "ragas",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+indent-width = 4
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # do not perform function calls in argument defaults
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = [
+    "langchain.*",
+    "langgraph.*",
+    "langserve.*",
+    "pydantic.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

@@ -1,9 +1,13 @@
+import logging
 import os
+
 from langchain_community.tools import DuckDuckGoSearchResults, DuckDuckGoSearchRun
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_core.tools import tool
 
-from app.infrastructure.config.config_manager import config_manager
+from app.infrastructure.config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 @tool
@@ -21,15 +25,15 @@ class SearchToolFactory:
             return_results_obj: 为 True 时返回 SearchResults 对象（包含元数据）。
                                 为 False 时返回 SearchRun 对象（仅文本）。
         """
-        config = config_manager.get_config().get("search", {})
-        provider = config.get("provider", "duckduckgo")
-        tavily_key = config.get("tavily_api_key") or os.getenv("TAVILY_API_KEY")
+        config = settings.search
+        provider = config.provider
+        tavily_key = config.tavily_api_key or os.getenv("TAVILY_API_KEY")
         
         if provider == "tavily" or (tavily_key and provider != "duckduckgo"):
             if tavily_key:
                 return TavilySearchResults(tavily_api_key=tavily_key, max_results=5)
             else:
-                print("警告：已选择 Tavily 但未找到 API Key，将回退到 DuckDuckGo。")
+                logger.warning("Tavily selected but API key not found, falling back to DuckDuckGo")
         
         if return_results_obj:
             try:
@@ -42,5 +46,5 @@ class SearchToolFactory:
             except ImportError:
                 return web_search_unavailable
 
-def get_search_tool(return_results_obj=False):
+def get_search_tool(return_results_obj=False) -> DuckDuckGoSearchRun | DuckDuckGoSearchResults | str:
     return SearchToolFactory.get_search_tool(return_results_obj)

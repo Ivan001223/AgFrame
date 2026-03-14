@@ -1,13 +1,23 @@
 from __future__ import annotations
 
+import logging
 import time
-from typing import Any, Dict, List
+from typing import Any
 
 from app.infrastructure.database.schema import ensure_schema_if_possible
 from app.infrastructure.database.stores import MySQLConversationStore
-from app.memory.long_term.chat_memory_engine import split_messages_for_memory, summarize_chat_messages
-from app.skills.profile.profile_engine import UserProfileEngine, incremental_update_profile, extract_base_profile
+from app.memory.long_term.chat_memory_engine import (
+    split_messages_for_memory,
+    summarize_chat_messages,
+)
 from app.memory.long_term.user_memory_engine import UserMemoryEngine
+from app.skills.profile.profile_engine import (
+    UserProfileEngine,
+    extract_base_profile,
+    incremental_update_profile,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryUpdateService:
@@ -15,7 +25,7 @@ class MemoryUpdateService:
     记忆更新服务。
     负责在对话结束后，异步更新长期记忆（包括对话摘要和用户画像）。
     """
-    def update_after_save(self, user_id: str, session_id: str, messages: List[Dict[str, Any]]) -> None:
+    def update_after_save(self, user_id: str, session_id: str, messages: list[dict[str, Any]]) -> None:
         """
         在消息保存后触发的更新逻辑。
         
@@ -37,7 +47,8 @@ class MemoryUpdateService:
             meta = store.get_session_meta(user_id, session_id) or {}
             last_summarized = int(meta.get("last_summarized_msg_id") or 0)
             last_profiled = int(meta.get("last_profiled_msg_id") or 0)
-        except Exception:
+        except (ValueError, TypeError, KeyError) as e:
+            logger.debug(f"Failed to get session meta, using defaults: {e}")
             last_summarized = 0
             last_profiled = 0
 
@@ -74,8 +85,8 @@ class MemoryUpdateService:
                 profile_engine.upsert_profile(user_id, new_profile, version=version)
                 try:
                     _memory_engine.replace_profile_semantic_memory(user_id=user_id, profile=new_profile)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to update profile semantic memory: {e}")
             else:
                 # 首次全量提取
                 full_log = "\n".join([f"{m.get('role')}: {m.get('content')}" for m in messages])
@@ -84,8 +95,8 @@ class MemoryUpdateService:
                 profile_engine.upsert_profile(user_id, base_profile, version=version)
                 try:
                     _memory_engine.replace_profile_semantic_memory(user_id=user_id, profile=base_profile)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to update profile semantic memory: {e}")
             # 更新画像进度标记
             store.update_session_markers(user_id, session_id, last_profiled_msg_id=len(messages))
 

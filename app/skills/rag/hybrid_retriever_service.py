@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 from langchain_core.documents import Document
 
 from app.infrastructure.utils.logging import get_logger
+from app.skills.rag.bm25.retriever import BM25Retriever as BM25RetrieverCustom
 
 _log = get_logger("services.hybrid_retriever")
 
@@ -22,11 +24,11 @@ def _stable_doc_key(doc: Document) -> str:
         str(meta.get("source") or ""),
     ]
     content = str(getattr(doc, "page_content", "") or "")
-    digest = hashlib.sha1(content.encode("utf-8", errors="ignore")).hexdigest()
+    digest = hashlib.sha256(content.encode("utf-8", errors="ignore")).hexdigest()
     return "|".join(parts) + "|" + digest
 
 
-def _iter_vectorstore_docs(vectorstore: Any) -> List[Document]:
+def _iter_vectorstore_docs(vectorstore: Any) -> list[Document]:
     docstore = getattr(vectorstore, "docstore", None)
     if docstore is None:
         return []
@@ -40,7 +42,7 @@ def _iter_vectorstore_docs(vectorstore: Any) -> List[Document]:
     return []
 
 
-def _invoke_retriever(retriever: Any, query: str) -> List[Document]:
+def _invoke_retriever(retriever: Any, query: str) -> list[Document]:
     if hasattr(retriever, "invoke"):
         out = retriever.invoke(query)
         if isinstance(out, list):
@@ -63,14 +65,14 @@ def _invoke_retriever(retriever: Any, query: str) -> List[Document]:
 
 
 def _rrf_fuse(
-    ranked_lists: Sequence[Tuple[str, Sequence[Document], float]],
+    ranked_lists: Sequence[tuple[str, Sequence[Document], float]],
     *,
     rrf_k: int,
     top_n: int,
-) -> List[Document]:
-    scores: Dict[str, float] = {}
-    best_doc: Dict[str, Document] = {}
-    ranks: Dict[str, Dict[str, int]] = {}
+) -> list[Document]:
+    scores: dict[str, float] = {}
+    best_doc: dict[str, Document] = {}
+    ranks: dict[str, dict[str, int]] = {}
 
     for name, docs, weight in ranked_lists:
         for rank, doc in enumerate(docs, start=1):
@@ -79,7 +81,7 @@ def _rrf_fuse(
             scores[key] = scores.get(key, 0.0) + float(weight) * (1.0 / (rrf_k + rank))
             ranks.setdefault(key, {})[name] = rank
 
-    out: List[Document] = []
+    out: list[Document] = []
     for key, score in sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[
         :top_n
     ]:
@@ -102,7 +104,7 @@ class HybridRetrievalConfig:
     sparse_k: int = 20
     candidate_k: int = 20
     rrf_k: int = 60
-    weights: Tuple[float, float] = (0.5, 0.5)
+    weights: tuple[float, float] = (0.5, 0.5)
 
 
 class HybridRetrieverService:
@@ -121,31 +123,24 @@ class HybridRetrieverService:
             return True
 
         try:
-            from langchain_community.retrievers.bm25 import BM25Retriever
+            self._bm25 = BM25RetrieverCustom(k1=1.5, b=0.75)
+            self._bm25.add_documents(docs)
+            self._bm25_doc_count = len(docs)
+            _log.info("bm25 rebuilt docs=%d", len(docs))
+            return True
         except Exception as e:
-            _log.warning("BM25Retriever import failed: %s", e)
+            _log.warning("BM25Retriever init failed: %s", e)
             self._bm25 = None
             self._bm25_doc_count = len(docs)
             return False
-
-        t0 = time.perf_counter()
-        bm25 = BM25Retriever.from_documents(docs)
-        self._bm25 = bm25
-        self._bm25_doc_count = len(docs)
-        _log.info(
-            "bm25 rebuilt docs=%d cost_ms=%d",
-            len(docs),
-            int((time.perf_counter() - t0) * 1000),
-        )
-        return True
 
     def retrieve_candidates(
         self,
         query: str,
         *,
-        config: Optional[HybridRetrievalConfig] = None,
-        filter: Optional[Dict[str, Any]] = None,
-    ) -> List[Document]:
+        config: HybridRetrievalConfig | None = None,
+        filter: dict[str, Any] | None = None,
+    ) -> list[Document]:
         cfg = config or HybridRetrievalConfig()
         mode = (cfg.mode or "hybrid").lower()
         dense_k = max(1, int(cfg.dense_k))
@@ -205,16 +200,12 @@ class HybridRetrieverService:
                 d.metadata = meta
             return dense_docs[:candidate_k]
 
-        try:
-            self._bm25.k = sparse_k
-        except Exception:
-            pass
-
         # BM25 is in-memory over ALL docs. We need to filter results.
         # This is suboptimal for multi-tenancy if BM25 index is shared.
         # Ideally, we shouldn't use shared in-memory BM25 for multi-tenant.
         # But for now, let's filter the results.
-        all_sparse_docs = _invoke_retriever(self._bm25, query)
+        all_sparse_results = self._bm25.search(query, top_k=sparse_k * 2)
+        all_sparse_docs = [doc for doc, score in all_sparse_results]
 
         sparse_docs = []
         if filter:

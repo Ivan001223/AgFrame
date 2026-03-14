@@ -1,32 +1,40 @@
 from __future__ import annotations
 
-import os
-from typing import Any, Optional
+import logging
+from typing import Any
 
+from tqdm.auto import tqdm  # noqa: E402
 from transformers import AutoModel, AutoProcessor, AutoTokenizer
 
 from app.runtime.llm.model_importer import resolve_pretrained_source
 from app.runtime.llm.model_manager import torch_dtype_for_device
 
+logger = logging.getLogger(__name__)
 
-def _download_with_progress(pretrained_source: str, cache_dir: Optional[str] = None, desc: str = "下载模型"):
+
+def _download_with_progress(
+    pretrained_source: str,
+    cache_dir: str | None = None,
+    *,
+    revision: str | None = None,
+    desc: str = "下载模型",
+):
     """使用进度条下载 HuggingFace 模型"""
     try:
         from huggingface_hub import HfApi, snapshot_download
-        from tqdm.auto import tqdm
 
         tqdm.write(f"📦 正在下载 {desc}...")
 
         api = HfApi()
 
-        repo_info = api.repo_info(pretrained_source, repo_type="model")
+        repo_info = api.repo_info(pretrained_source, repo_type="model", revision=revision)
         siblings = getattr(repo_info, 'siblings', [])
         if not siblings:
             siblings = getattr(repo_info, 'files', [])
 
         total_files = len(siblings)
         if total_files == 0:
-            snapshot_download(pretrained_source, cache_dir=cache_dir)
+            snapshot_download(pretrained_source, cache_dir=cache_dir, revision=revision)
             return
 
         with tqdm(total=total_files, desc=f"下载 {desc}", unit="文件") as pbar:
@@ -38,13 +46,14 @@ def _download_with_progress(pretrained_source: str, cache_dir: Optional[str] = N
                         repo_id=pretrained_source,
                         repo_type="model",
                         cache_dir=cache_dir,
+                        revision=revision,
                         resume_download=True,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to download {filename}: {e}")
                 pbar.update(1)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Model download failed: {e}")
 
 
 def resolve_pretrained_source_for_spec(spec: Any) -> str:
@@ -65,6 +74,7 @@ def resolve_pretrained_source_for_spec(spec: Any) -> str:
 def load_transformers_model(
     pretrained_source: str,
     *,
+    revision: str | None,
     trust_remote_code: bool,
     device: str,
     model_type: str = "auto",
@@ -76,6 +86,7 @@ def load_transformers_model(
     显示下载进度条。
     """
     import tempfile
+
     from tqdm.auto import tqdm
 
     cache_dir = tempfile.gettempdir()
@@ -88,12 +99,14 @@ def load_transformers_model(
 
         model = AutoModelForSequenceClassification.from_pretrained(
             pretrained_source,
+            revision=revision,
             trust_remote_code=trust_remote_code,
             torch_dtype=torch_dtype_for_device(device),
         )
     else:
         model = AutoModel.from_pretrained(
             pretrained_source,
+            revision=revision,
             trust_remote_code=trust_remote_code,
             torch_dtype=torch_dtype_for_device(device),
         )
@@ -102,29 +115,49 @@ def load_transformers_model(
     return model
 
 
-def try_load_transformers_processor(pretrained_source: str, *, trust_remote_code: bool) -> Optional[Any]:
+def try_load_transformers_processor(
+    pretrained_source: str,
+    *,
+    revision: str | None,
+    trust_remote_code: bool,
+) -> Any | None:
     """尝试加载 Transformers Processor，失败返回 None"""
     try:
-        return AutoProcessor.from_pretrained(pretrained_source, trust_remote_code=trust_remote_code)
-    except Exception:
+        return AutoProcessor.from_pretrained(
+            pretrained_source,
+            revision=revision,
+            trust_remote_code=trust_remote_code,
+        )
+    except Exception as e:
+        logger.debug(f"Failed to load processor for {pretrained_source}: {e}")
         return None
 
 
-def load_transformers_tokenizer(pretrained_source: str, *, trust_remote_code: bool) -> Any:
+def load_transformers_tokenizer(
+    pretrained_source: str,
+    *,
+    revision: str | None,
+    trust_remote_code: bool,
+) -> Any:
     """加载 Transformers Tokenizer"""
-    return AutoTokenizer.from_pretrained(pretrained_source, trust_remote_code=trust_remote_code)
+    return AutoTokenizer.from_pretrained(
+        pretrained_source,
+        revision=revision,
+        trust_remote_code=trust_remote_code,
+    )
 
 
 def load_sentence_transformers_embedder(
     pretrained_source: str,
     *,
     device: str,
-    max_length: Optional[int] = None,
+    max_length: int | None = None,
     model_name: str = "嵌入模型",
 ) -> Any:
     """加载 SentenceTransformer 嵌入模型，带下载进度条"""
-    from sentence_transformers import SentenceTransformer
     import tempfile
+
+    from sentence_transformers import SentenceTransformer
 
     cache_dir = tempfile.gettempdir()
     tqdm.write(f"📦 正在下载 {model_name}...")
@@ -135,8 +168,8 @@ def load_sentence_transformers_embedder(
     if max_length is not None:
         try:
             model.max_seq_length = int(max_length)
-        except Exception:
-            pass
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Failed to set max_seq_length to {max_length}: {e}")
     return model
 
 
@@ -144,12 +177,13 @@ def load_sentence_transformers_cross_encoder(
     pretrained_source: str,
     *,
     device: str,
-    max_length: Optional[int] = None,
+    max_length: int | None = None,
     model_name: str = "重排序模型",
 ) -> Any:
     """加载 SentenceTransformer CrossEncoder 模型，带下载进度条"""
-    from sentence_transformers import CrossEncoder
     import tempfile
+
+    from sentence_transformers import CrossEncoder
 
     cache_dir = tempfile.gettempdir()
     tqdm.write(f"📦 正在下载 {model_name}...")
@@ -157,4 +191,3 @@ def load_sentence_transformers_cross_encoder(
     _download_with_progress(pretrained_source, cache_dir=cache_dir, desc=f"下载 {model_name}")
 
     return CrossEncoder(pretrained_source, device=device, max_length=max_length)
-

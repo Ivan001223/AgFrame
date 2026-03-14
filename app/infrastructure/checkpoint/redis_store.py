@@ -1,22 +1,25 @@
-from langgraph.checkpoint.redis import AsyncRedisSaver
+
+from typing import Any
+
 from langgraph.checkpoint.base import BaseCheckpointSaver
-import os
-from app.infrastructure.config.config_manager import config_manager
+
+from app.infrastructure.config.settings import settings
 
 
 def _get_redis_url() -> str:
-    cfg = config_manager.get_config() or {}
-    queue_cfg = cfg.get("queue") or {}
-    url = queue_cfg.get("redis_url") or os.getenv("REDIS_URL") or "redis://localhost:6379/0"
+    queue_cfg = settings.queue
+    url = queue_cfg.redis_url or "redis://:redissecret@localhost:6379/0"
     return str(url)
 
 
 class AsyncRedisSaverWrapper(BaseCheckpointSaver):
     def __init__(self):
-        self._saver: AsyncRedisSaver = None
+        self._saver: Any = None
 
-    async def get_saver(self) -> AsyncRedisSaver:
+    async def get_saver(self):
         if self._saver is None:
+            from langgraph.checkpoint.redis import AsyncRedisSaver
+
             self._saver = AsyncRedisSaver(redis_url=_get_redis_url())
             await self._saver.setup()
         return self._saver

@@ -1,15 +1,15 @@
+import argparse
 import sys
 from pathlib import Path
-import argparse
 
 ROOT = str(Path(__file__).resolve().parents[2])
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from app.infrastructure.database.schema import ensure_schema_if_possible
-from app.skills.profile.profile_engine import UserProfileEngine
-from app.runtime.prompts.prompt_builder import PromptBudget, build_system_prompt
 from app.memory.long_term.user_memory_engine import UserMemoryEngine
+from app.runtime.prompts.prompt_builder import PromptBudget, build_system_prompt
+from app.skills.profile.profile_engine import UserProfileEngine
 
 
 def main():

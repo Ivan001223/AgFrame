@@ -1,9 +1,12 @@
-import os
 import json
+import os
 import time
-from typing import List, Dict, Any, Optional
+from typing import Any
 
-from app.infrastructure.database.conversation_utils import derive_session_title, should_bump_updated_at
+from app.infrastructure.database.conversation_utils import (
+    derive_session_title,
+    should_bump_updated_at,
+)
 
 HISTORY_FILE = os.path.join("data", "chat_history.json")
 
@@ -22,20 +25,20 @@ class HistoryManager:
             with open(HISTORY_FILE, "w", encoding="utf-8") as f:
                 json.dump({}, f)
 
-    def _load_data(self) -> Dict[str, Any]:
+    def _load_data(self) -> dict[str, Any]:
         """加载 JSON 数据"""
         try:
-            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            with open(HISTORY_FILE, encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, FileNotFoundError):
             return {}
 
-    def _save_data(self, data: Dict[str, Any]):
+    def _save_data(self, data: dict[str, Any]):
         """保存 JSON 数据"""
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
-    def get_history(self, user_id: str) -> List[Dict[str, Any]]:
+    def get_history(self, user_id: str) -> list[dict[str, Any]]:
         """获取用户的会话列表，按时间戳倒序排列。"""
         data = self._load_data()
         user_sessions = data.get(user_id, {})
@@ -45,7 +48,27 @@ class HistoryManager:
         sessions_list.sort(key=lambda x: x.get("updated_at", 0), reverse=True)
         return sessions_list
 
-    def save_session(self, user_id: str, session_id: str, messages: List[Dict[str, Any]], title: Optional[str] = None):
+    def get_session(self, user_id: str, session_id: str) -> dict[str, Any] | None:
+        """获取单个会话详情。"""
+        data = self._load_data()
+        return data.get(user_id, {}).get(session_id)
+
+    def search_history(self, user_id: str, query: str) -> list[dict[str, Any]]:
+        """按标题和消息内容搜索会话。"""
+        q = str(query or "").strip().lower()
+        sessions = self.get_history(user_id)
+        if not q:
+            return sessions
+
+        out: list[dict[str, Any]] = []
+        for session in sessions:
+            title = str(session.get("title") or "").lower()
+            messages = session.get("messages") or []
+            if q in title or any(q in str(m.get("content") or "").lower() for m in messages):
+                out.append(session)
+        return out
+
+    def save_session(self, user_id: str, session_id: str, messages: list[dict[str, Any]], title: str | None = None) -> None:
         """保存或更新一次聊天会话。"""
         data = self._load_data()
         if user_id not in data:
@@ -83,7 +106,7 @@ class HistoryManager:
         self._save_data(data)
         return data[user_id][session_id]
 
-    def delete_session(self, user_id: str, session_id: str):
+    def delete_session(self, user_id: str, session_id: str) -> bool:
         """删除会话"""
         data = self._load_data()
         if user_id in data and session_id in data[user_id]:
@@ -91,5 +114,15 @@ class HistoryManager:
             self._save_data(data)
             return True
         return False
+
+    def rename_session(self, user_id: str, session_id: str, title: str) -> dict[str, Any] | None:
+        """更新会话标题。"""
+        data = self._load_data()
+        session = data.get(user_id, {}).get(session_id)
+        if not session:
+            return None
+        session["title"] = str(title).strip() or session.get("title") or "新对话"
+        self._save_data(data)
+        return session
 
 history_manager = HistoryManager()

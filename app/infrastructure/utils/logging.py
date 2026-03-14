@@ -2,11 +2,19 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any
+
+
+class DefaultContextFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        for field in ("trace_id", "user_id", "session_id", "node"):
+            if not hasattr(record, field):
+                setattr(record, field, "-")
+        return True
 
 
 class ContextLogger(logging.LoggerAdapter):
-    def process(self, msg: str, kwargs: Dict[str, Any]):
+    def process(self, msg: str, kwargs: dict[str, Any]):
         extra = dict(self.extra or {})
         extra.update(kwargs.get("extra") or {})
         kwargs["extra"] = extra
@@ -20,12 +28,16 @@ def init_logging() -> None:
     root = logging.getLogger()
     if root.handlers:
         root.setLevel(level)
+        for handler in root.handlers:
+            handler.addFilter(DefaultContextFilter())
         return
 
     logging.basicConfig(
         level=level,
         format="%(asctime)s %(levelname)s %(name)s trace_id=%(trace_id)s user_id=%(user_id)s session_id=%(session_id)s node=%(node)s %(message)s",
     )
+    for handler in root.handlers:
+        handler.addFilter(DefaultContextFilter())
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -35,10 +47,10 @@ def get_logger(name: str) -> logging.Logger:
 def bind_logger(
     logger: logging.Logger,
     *,
-    trace_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    session_id: Optional[str] = None,
-    node: Optional[str] = None,
+    trace_id: str | None = None,
+    user_id: str | None = None,
+    session_id: str | None = None,
+    node: str | None = None,
 ) -> ContextLogger:
     return ContextLogger(
         logger,
@@ -49,4 +61,3 @@ def bind_logger(
             "node": node or "-",
         },
     )
-

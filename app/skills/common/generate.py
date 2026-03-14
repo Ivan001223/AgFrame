@@ -1,26 +1,26 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+import time
+from typing import Any
 
 import anyio
-import time
-from langchain_core.messages import SystemMessage, BaseMessage, HumanMessage, convert_to_messages
+from langchain_core.messages import BaseMessage, SystemMessage, convert_to_messages
 
-from app.runtime.llm.llm_factory import get_llm
 from app.infrastructure.utils.logging import bind_logger, get_logger
 from app.runtime.graph.registry import register_node
 from app.runtime.graph.state import AgentState
+from app.runtime.llm.llm_factory import get_llm
 
 _log = get_logger("workflow.generate")
 
 
 @register_node("generate")
-async def generate_node(state: AgentState) -> Dict[str, Any]:
+async def generate_node(state: AgentState) -> dict[str, Any]:
     t0 = time.perf_counter()
     ctx = state.get("context") or {}
     system_prompt = ctx.get("system_prompt") or "你是一个助理。"
     llm = get_llm(temperature=0, streaming=True)
-    messages: List[BaseMessage] = list(state.get("messages") or [])
+    messages: list[BaseMessage] = list(state.get("messages") or [])
     
     # Convert BaseMessage subclasses to correct types (fix pydantic validation issue)
     raw_messages = []

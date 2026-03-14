@@ -101,10 +101,13 @@ def _migrate_profiles(engine: UserMemoryEngine) -> int:
         rows = session.execute(select(UserProfile)).scalars().all()
         for r in rows:
             try:
-                engine.replace_profile_semantic_memory(user_id=str(r.user_id), profile=r.profile_json or {})
+                engine.replace_profile_semantic_memory(
+                    user_id=str(r.user_id),
+                    profile=r.profile_json or {},
+                )
                 count += 1
-            except Exception:
-                continue
+            except Exception as exc:
+                print(f"skip profile migration for user={r.user_id}: {exc}")
     return count
 
 
@@ -130,4 +133,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

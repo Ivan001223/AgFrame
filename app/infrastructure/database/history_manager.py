@@ -48,6 +48,26 @@ class HistoryManager:
         sessions_list.sort(key=lambda x: x.get("updated_at", 0), reverse=True)
         return sessions_list
 
+    def get_session(self, user_id: str, session_id: str) -> dict[str, Any] | None:
+        """获取单个会话详情。"""
+        data = self._load_data()
+        return data.get(user_id, {}).get(session_id)
+
+    def search_history(self, user_id: str, query: str) -> list[dict[str, Any]]:
+        """按标题和消息内容搜索会话。"""
+        q = str(query or "").strip().lower()
+        sessions = self.get_history(user_id)
+        if not q:
+            return sessions
+
+        out: list[dict[str, Any]] = []
+        for session in sessions:
+            title = str(session.get("title") or "").lower()
+            messages = session.get("messages") or []
+            if q in title or any(q in str(m.get("content") or "").lower() for m in messages):
+                out.append(session)
+        return out
+
     def save_session(self, user_id: str, session_id: str, messages: list[dict[str, Any]], title: str | None = None) -> None:
         """保存或更新一次聊天会话。"""
         data = self._load_data()
@@ -94,5 +114,15 @@ class HistoryManager:
             self._save_data(data)
             return True
         return False
+
+    def rename_session(self, user_id: str, session_id: str, title: str) -> dict[str, Any] | None:
+        """更新会话标题。"""
+        data = self._load_data()
+        session = data.get(user_id, {}).get(session_id)
+        if not session:
+            return None
+        session["title"] = str(title).strip() or session.get("title") or "新对话"
+        self._save_data(data)
+        return session
 
 history_manager = HistoryManager()

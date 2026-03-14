@@ -1,4 +1,6 @@
-from typing import Annotated, Any, Literal, TypedDict
+from typing import Annotated, Any, Literal
+
+from typing_extensions import TypedDict
 
 from langchain_core.documents import Document
 from langchain_core.messages import BaseMessage
@@ -63,4 +65,3 @@ class AgentState(TypedDict, total=False):
     # 人机协同状态
     action_required: ActionRequired | None
     interrupted: bool
-

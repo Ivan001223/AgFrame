@@ -9,7 +9,7 @@ from app.infrastructure.queue.arq_jobs import ingest_pdf
 
 
 def _redis_settings() -> RedisSettings:
-    url = os.getenv("REDIS_URL") or "redis://localhost:6379/0"
+    url = os.getenv("REDIS_URL") or "redis://:redissecret@localhost:6379/0"
     return RedisSettings.from_dsn(url)
 
 
@@ -20,9 +20,10 @@ class WorkerSettings:
     job_timeout = 60 * 60
     max_jobs = 4
 
-    async def on_startup(self, ctx: dict[str, Any]) -> None:
+    @staticmethod
+    async def on_startup(ctx: dict[str, Any]) -> None:
         return None
 
-    async def on_shutdown(self, ctx: dict[str, Any]) -> None:
+    @staticmethod
+    async def on_shutdown(ctx: dict[str, Any]) -> None:
         return None
-

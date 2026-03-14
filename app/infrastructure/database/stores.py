@@ -150,6 +150,47 @@ class MySQLConversationStore:
                 )
             return out
 
+    def search_sessions(self, user_id: str, query: str) -> list[dict[str, Any]]:
+        """按标题和消息内容搜索会话。"""
+        q = str(query or "").strip().lower()
+        sessions = self.list_sessions(user_id)
+        if not q:
+            return sessions
+        return [
+            s for s in sessions
+            if q in str(s.get("title") or "").lower()
+            or any(q in str(m.get("content") or "").lower() for m in s.get("messages") or [])
+        ]
+
+    def get_session_detail(self, user_id: str, session_id: str) -> dict[str, Any] | None:
+        """获取单个会话详情。"""
+        with get_session() as session:
+            s = session.execute(
+                select(ChatSession).where(ChatSession.user_id == user_id, ChatSession.session_id == session_id)
+            ).scalar_one_or_none()
+            if not s:
+                return None
+            msgs = session.execute(
+                select(ChatHistory)
+                .where(ChatHistory.user_id == user_id, ChatHistory.session_id == session_id)
+                .order_by(ChatHistory.msg_id.asc())
+            ).scalars().all()
+            return {
+                "id": s.session_id,
+                "title": s.title,
+                "created_at": int(s.created_at),
+                "updated_at": int(s.updated_at),
+                "messages": [
+                    {
+                        "role": m.role,
+                        "content": m.content,
+                        "created_at": int(m.created_at),
+                        "token_count": m.token_count,
+                    }
+                    for m in msgs
+                ],
+            }
+
     def delete_session(self, user_id: str, session_id: str) -> bool:
         """删除指定会话"""
         with get_session() as session:
@@ -157,6 +198,26 @@ class MySQLConversationStore:
                 delete(ChatSession).where(ChatSession.user_id == user_id, ChatSession.session_id == session_id)
             )
         return True
+
+    def rename_session(self, user_id: str, session_id: str, title: str) -> dict[str, Any] | None:
+        """更新会话标题。"""
+        clean_title = str(title or "").strip()
+        if not clean_title:
+            return None
+        with get_session() as session:
+            row = session.execute(
+                select(ChatSession).where(ChatSession.user_id == user_id, ChatSession.session_id == session_id)
+            ).scalar_one_or_none()
+            if not row:
+                return None
+            row.title = clean_title
+            session.flush()
+            return {
+                "id": row.session_id,
+                "title": row.title,
+                "created_at": int(row.created_at),
+                "updated_at": int(row.updated_at),
+            }
 
     def get_recent_messages(
         self, user_id: str, session_id: str, limit_messages: int
@@ -289,6 +350,29 @@ class MySQLDocStore:
             session.flush()
             return int(doc.doc_id)
 
+    def find_by_checksum(self, *, user_id: str, checksum: str) -> dict[str, Any] | None:
+        """按用户和校验和查找已存在文档。"""
+        uid = str(user_id or "").strip()
+        digest = str(checksum or "").strip()
+        if not uid or not digest:
+            return None
+        with get_session() as session:
+            row = session.execute(
+                select(Document).where(
+                    Document.user_id == uid,
+                    Document.checksum == digest,
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return {
+                "doc_id": int(row.doc_id),
+                "user_id": row.user_id,
+                "source_path": row.source_path,
+                "checksum": row.checksum,
+                "created_at": int(row.created_at),
+            }
+
     def insert_parent_chunks(self, doc_id: int, chunks: list[dict[str, Any]]) -> list[int]:
         """插入父文档切片"""
         if not chunks:
@@ -303,6 +387,14 @@ class MySQLDocStore:
             session.add_all(rows)
             session.flush()
             return [int(r.parent_chunk_id) for r in rows]
+
+    def delete_parent_chunks(self, doc_id: int) -> int:
+        """删除文档的所有父块。"""
+        with get_session() as session:
+            res = session.execute(
+                delete(DocContent).where(DocContent.doc_id == int(doc_id))
+            )
+            return int(res.rowcount or 0)
 
     def fetch_parent_chunks(self, parent_chunk_ids: list[int]) -> list[dict[str, Any]]:
         """根据 ID 列表批量获取父文档切片"""
@@ -327,6 +419,123 @@ class MySQLDocStore:
                     }
                 )
             return out
+
+    def list_documents(self, user_id: str, *, include_all_users: bool = False) -> list[dict[str, Any]]:
+        """列出知识库文档，默认只返回当前用户的文档。"""
+        with get_session() as session:
+            parent_count_sq = (
+                select(func.count(DocContent.parent_chunk_id))
+                .where(DocContent.doc_id == Document.doc_id)
+                .scalar_subquery()
+            )
+            embedding_count_sq = (
+                select(func.count(DocEmbedding.id))
+                .where(DocEmbedding.doc_id == Document.doc_id)
+                .scalar_subquery()
+            )
+            stmt = select(
+                Document.doc_id,
+                Document.user_id,
+                Document.source_path,
+                Document.checksum,
+                Document.created_at,
+                parent_count_sq.label("parent_chunk_count"),
+                embedding_count_sq.label("embedding_count"),
+            ).order_by(Document.created_at.desc(), Document.doc_id.desc())
+            if not include_all_users:
+                stmt = stmt.where(Document.user_id == user_id)
+
+            rows = session.execute(stmt).all()
+            return [
+                {
+                    "doc_id": int(r.doc_id),
+                    "user_id": r.user_id,
+                    "source_path": r.source_path,
+                    "checksum": r.checksum,
+                    "created_at": int(r.created_at),
+                    "parent_chunk_count": int(r.parent_chunk_count or 0),
+                    "embedding_count": int(r.embedding_count or 0),
+                }
+                for r in rows
+            ]
+
+    def search_documents(
+        self,
+        user_id: str,
+        *,
+        include_all_users: bool = False,
+        filename_query: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """按文件名搜索知识库文档。"""
+        docs = self.list_documents(user_id, include_all_users=include_all_users)
+        q = str(filename_query or "").strip().lower()
+        if not q:
+            return docs
+        return [
+            doc for doc in docs
+            if q in str(doc.get("source_path") or "").lower()
+        ]
+
+    def get_document(self, doc_id: int) -> dict[str, Any] | None:
+        """获取单个文档详情。"""
+        with get_session() as session:
+            parent_count_sq = (
+                select(func.count(DocContent.parent_chunk_id))
+                .where(DocContent.doc_id == Document.doc_id)
+                .scalar_subquery()
+            )
+            embedding_count_sq = (
+                select(func.count(DocEmbedding.id))
+                .where(DocEmbedding.doc_id == Document.doc_id)
+                .scalar_subquery()
+            )
+            row = session.execute(
+                select(
+                    Document.doc_id,
+                    Document.user_id,
+                    Document.source_path,
+                    Document.checksum,
+                    Document.created_at,
+                    parent_count_sq.label("parent_chunk_count"),
+                    embedding_count_sq.label("embedding_count"),
+                ).where(Document.doc_id == int(doc_id))
+            ).one_or_none()
+            if row is None:
+                return None
+            return {
+                "doc_id": int(row.doc_id),
+                "user_id": row.user_id,
+                "source_path": row.source_path,
+                "checksum": row.checksum,
+                "created_at": int(row.created_at),
+                "parent_chunk_count": int(row.parent_chunk_count or 0),
+                "embedding_count": int(row.embedding_count or 0),
+            }
+
+    def get_document_preview(self, doc_id: int, *, limit: int = 5) -> list[dict[str, Any]]:
+        """获取文档的父块预览。"""
+        with get_session() as session:
+            rows = session.execute(
+                select(DocContent)
+                .where(DocContent.doc_id == int(doc_id))
+                .order_by(DocContent.parent_chunk_id.asc())
+                .limit(int(limit))
+            ).scalars().all()
+            return [
+                {
+                    "parent_chunk_id": int(r.parent_chunk_id),
+                    "doc_id": int(r.doc_id),
+                    "page_num": r.page_num,
+                    "content": r.content,
+                }
+                for r in rows
+            ]
+
+    def delete_document(self, doc_id: int) -> bool:
+        """删除文档元数据及关联切片。"""
+        with get_session() as session:
+            res = session.execute(delete(Document).where(Document.doc_id == int(doc_id)))
+            return bool(res.rowcount)
 
 
 class PgDocEmbeddingStore:
@@ -494,6 +703,118 @@ class PgUserMemoryStore:
                 stmt = stmt.where(UserMemoryItem.subkind == str(subkind))
             res = session.execute(stmt)
             return int(res.rowcount or 0)
+
+    def list_items(
+        self,
+        *,
+        user_id: str,
+        kind: str | None = None,
+        subkind: str | None = None,
+        session_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        uid = str(user_id or "").strip()
+        if not uid:
+            return []
+        stmt = select(UserMemoryItem).where(UserMemoryItem.user_id == uid)
+        if kind:
+            stmt = stmt.where(UserMemoryItem.kind == str(kind))
+        if subkind:
+            stmt = stmt.where(UserMemoryItem.subkind == str(subkind))
+        if session_id:
+            stmt = stmt.where(UserMemoryItem.session_id == str(session_id))
+        stmt = stmt.order_by(UserMemoryItem.updated_at.desc(), UserMemoryItem.item_id.desc()).limit(int(limit))
+        with get_session() as session:
+            rows = session.execute(stmt).scalars().all()
+            return [
+                {
+                    "item_id": int(it.item_id),
+                    "user_id": str(it.user_id),
+                    "kind": str(it.kind),
+                    "subkind": it.subkind,
+                    "session_id": it.session_id,
+                    "text": it.text,
+                    "item_hash": it.item_hash,
+                    "confidence_score": it.confidence_score,
+                    "last_verified_at": it.last_verified_at,
+                    "created_at": int(it.created_at),
+                    "updated_at": int(it.updated_at),
+                    "metadata_json": it.metadata_json,
+                }
+                for it in rows
+            ]
+
+    def get_item(self, *, user_id: str, item_id: int) -> dict[str, Any] | None:
+        uid = str(user_id or "").strip()
+        if not uid:
+            return None
+        with get_session() as session:
+            it = session.execute(
+                select(UserMemoryItem).where(
+                    UserMemoryItem.user_id == uid,
+                    UserMemoryItem.item_id == int(item_id),
+                )
+            ).scalar_one_or_none()
+            if it is None:
+                return None
+            return {
+                "item_id": int(it.item_id),
+                "user_id": str(it.user_id),
+                "kind": str(it.kind),
+                "subkind": it.subkind,
+                "session_id": it.session_id,
+                "text": it.text,
+                "item_hash": it.item_hash,
+                "confidence_score": it.confidence_score,
+                "last_verified_at": it.last_verified_at,
+                "created_at": int(it.created_at),
+                "updated_at": int(it.updated_at),
+                "metadata_json": it.metadata_json,
+            }
+
+    def get_item_by_hash(self, *, user_id: str, kind: str, item_hash: str) -> dict[str, Any] | None:
+        uid = str(user_id or "").strip()
+        knd = str(kind or "").strip()
+        digest = str(item_hash or "").strip()
+        if not uid or not knd or not digest:
+            return None
+        with get_session() as session:
+            it = session.execute(
+                select(UserMemoryItem).where(
+                    UserMemoryItem.user_id == uid,
+                    UserMemoryItem.kind == knd,
+                    UserMemoryItem.item_hash == digest,
+                )
+            ).scalar_one_or_none()
+            if it is None:
+                return None
+            return {
+                "item_id": int(it.item_id),
+                "user_id": str(it.user_id),
+                "kind": str(it.kind),
+                "subkind": it.subkind,
+                "session_id": it.session_id,
+                "text": it.text,
+                "item_hash": it.item_hash,
+                "confidence_score": it.confidence_score,
+                "last_verified_at": it.last_verified_at,
+                "created_at": int(it.created_at),
+                "updated_at": int(it.updated_at),
+                "metadata_json": it.metadata_json,
+            }
+
+    def delete_item(self, *, user_id: str, item_id: int) -> bool:
+        uid = str(user_id or "").strip()
+        if not uid:
+            return False
+        with get_session() as session:
+            res = session.execute(
+                delete(UserMemoryItem).where(
+                    UserMemoryItem.user_id == uid,
+                    UserMemoryItem.item_id == int(item_id),
+                )
+            )
+            return bool(res.rowcount)
 
     def dense_search(
         self,

@@ -8,7 +8,7 @@ from app.infrastructure.config.settings import settings
 
 def _get_redis_url() -> str:
     queue_cfg = settings.queue
-    url = queue_cfg.redis_url or "redis://localhost:6379/0"
+    url = queue_cfg.redis_url or "redis://:redissecret@localhost:6379/0"
     return str(url)
 
 

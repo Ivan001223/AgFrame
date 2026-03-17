@@ -24,11 +24,13 @@ cd "$PROJECT_ROOT"
   --cov-fail-under=80
 
 "$PYTHON_BIN" "$PROJECT_ROOT/scripts/perf_bench.py" --out "$OUT_DIR/perf.json"
+"$PYTHON_BIN" "$PROJECT_ROOT/scripts/eval_context_pruning.py" --out "$OUT_DIR/context_pruning_eval.json"
 "$PYTHON_BIN" "$PROJECT_ROOT/scripts/security_scan.py" --out "$OUT_DIR/security.json"
 "$PYTHON_BIN" "$PROJECT_ROOT/scripts/generate_test_report.py" \
   --pytest-json "$OUT_DIR/pytest.json" \
   --coverage-xml "$OUT_DIR/coverage.xml" \
   --perf-json "$OUT_DIR/perf.json" \
+  --context-pruning-eval-json "$OUT_DIR/context_pruning_eval.json" \
   --security-json "$OUT_DIR/security.json" \
   --out "$OUT_DIR/report.md" \
   --defects "$OUT_DIR/defects.md"

@@ -90,6 +90,8 @@ npx next build
 
 - `./reports/test_suite/<timestamp>/pytest.json`
 - `./reports/test_suite/<timestamp>/coverage.xml`
+- `./reports/test_suite/<timestamp>/perf.json`（包含基础性能基准与 context pruning benchmark）
+- `./reports/test_suite/<timestamp>/context_pruning_eval.json`（包含关键行保留率与 pruning 质量评测）
 - `./reports/test_suite/<timestamp>/security.json`
 - `./reports/test_suite/<timestamp>/live_smoke.log`（仅当设置 `LIVE_SMOKE_BASE_URL` 时生成）
 - `./reports/test_suite/<timestamp>/report.md`

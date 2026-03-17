@@ -18,6 +18,7 @@ os.environ.setdefault("AUTH_SECRET_KEY", "x" * 64)
 
 from app.infrastructure.utils.security import create_access_token, decode_access_token
 from app.infrastructure.utils.text_split import split_text_by_chars
+from app.runtime.prompts.context_pruner import ContextPruningConfig, prune_documents
 from app.runtime.prompts.prompt_builder import PromptBudget, build_system_prompt
 
 
@@ -30,6 +31,20 @@ class BenchResult:
     p95_ms: float
     min_ms: float
     max_ms: float
+
+
+@dataclass(frozen=True)
+class PruningSummary:
+    method: str
+    scoring_source: str
+    char_before: int
+    char_after: int
+    char_saved: int
+    char_saved_ratio: float
+    line_before: int
+    line_after: int
+    line_saved: int
+    line_saved_ratio: float
 
 
 def _percentile(values: list[float], p: float) -> float:
@@ -80,7 +95,16 @@ def main() -> int:
     budget = PromptBudget()
     docs = [
         Document(
-            page_content=("x" * 2500),
+            page_content="\n".join(
+                [
+                    "module setup and routing",
+                    "billing retry coordinator",
+                    "retry uses exponential backoff with jitter",
+                    "error classification for upstream provider",
+                    "metrics and tracing hooks",
+                ]
+                * 60
+            ),
             metadata={"doc_id": f"doc_{i}", "parent_chunk_id": f"p_{i}", "page_num": i},
         )
         for i in range(1, 4)
@@ -94,6 +118,16 @@ def main() -> int:
     ]
     history_lines = [f"u: line {i}" for i in range(50)]
     profile = "user_profile:" + ("z" * 5000)
+    pruning_query = "Focus on billing retry and backoff behavior"
+
+    def _run_pruning(method: str):
+        _, summary = prune_documents(
+            docs,
+            query=pruning_query,
+            focus_hint=pruning_query,
+            config=ContextPruningConfig(method=method),
+        )
+        return summary
 
     def _prompt_build():
         build_system_prompt(
@@ -101,6 +135,7 @@ def main() -> int:
             recent_history_lines=history_lines,
             docs=docs,
             memories=memories,
+            query="focus on prompt budget and memory retrieval",
             web_search={"query": "q" * 300, "result": "r" * 4000},
             self_correction="c" * 4000,
             budget=budget,
@@ -119,13 +154,36 @@ def main() -> int:
         bench("prompt_builder.build_system_prompt", _prompt_build, warmup=args.warmup, runs=args.runs),
         bench("text_split.split_text_by_chars", _split_text, warmup=args.warmup, runs=args.runs),
         bench("security.jwt_roundtrip", _jwt_roundtrip, warmup=args.warmup, runs=args.runs),
+        bench("context_pruning.heuristic", lambda: _run_pruning("heuristic"), warmup=args.warmup, runs=args.runs),
+        bench("context_pruning.auto", lambda: _run_pruning("auto"), warmup=args.warmup, runs=args.runs),
+        bench("context_pruning.reranker", lambda: _run_pruning("reranker"), warmup=max(0, args.warmup // 2), runs=max(1, min(args.runs, 10))),
     ]
+    pruning_summaries = []
+    for method in ("heuristic", "auto", "reranker"):
+        summary = _run_pruning(method)
+        pruning_summaries.append(
+            asdict(
+                PruningSummary(
+                    method=method,
+                    scoring_source=str(summary.get("scoring_source") or "heuristic"),
+                    char_before=int(summary.get("char_count_before") or 0),
+                    char_after=int(summary.get("char_count_after") or 0),
+                    char_saved=int((summary.get("char_savings") or {}).get("saved") or 0),
+                    char_saved_ratio=float((summary.get("char_savings") or {}).get("saved_ratio") or 0.0),
+                    line_before=int(summary.get("line_count_before") or 0),
+                    line_after=int(summary.get("line_count_after") or 0),
+                    line_saved=int((summary.get("line_savings") or {}).get("saved") or 0),
+                    line_saved_ratio=float((summary.get("line_savings") or {}).get("saved_ratio") or 0.0),
+                )
+            )
+        )
 
     payload: dict[str, Any] = {
         "timestamp": datetime.now(UTC).isoformat(),
         "python": sys.version,
         "platform": platform.platform(),
         "results": [asdict(r) for r in results],
+        "context_pruning": pruning_summaries,
     }
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)

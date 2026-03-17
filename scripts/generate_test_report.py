@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from scripts.pruning_report_schema import normalize_quality_summary
+
 
 @dataclass(frozen=True)
 class CoverageSummary:
@@ -83,6 +85,36 @@ def _pytest_failures(pytest_json: dict[str, Any]) -> list[dict[str, str]]:
     return out
 
 
+def _fmt_int(value: Any) -> str:
+    try:
+        return str(int(value))
+    except (TypeError, ValueError):
+        return "0"
+
+
+def _pruning_summaries(perf_json: dict[str, Any]) -> list[dict[str, Any]]:
+    items = (perf_json or {}).get("context_pruning", [])
+    if not isinstance(items, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        out.append(item)
+    return out
+
+
+def _pruning_quality_summaries(eval_json: dict[str, Any]) -> list[dict[str, Any]]:
+    items = (eval_json or {}).get("summary", [])
+    if not isinstance(items, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in items:
+        if isinstance(item, dict):
+            out.append(normalize_quality_summary(item))
+    return out
+
+
 def _write_defects(
     *,
     path: str,
@@ -133,6 +165,7 @@ def main() -> int:
     parser.add_argument("--pytest-json", required=True)
     parser.add_argument("--coverage-xml", required=True)
     parser.add_argument("--perf-json", required=True)
+    parser.add_argument("--context-pruning-eval-json", required=True)
     parser.add_argument("--security-json", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--defects", required=True)
@@ -141,6 +174,7 @@ def main() -> int:
     pytest_json = _load_json(args.pytest_json)
     cov = _load_coverage_xml(args.coverage_xml)
     perf = _load_json(args.perf_json)
+    pruning_eval = _load_json(args.context_pruning_eval_json)
     security = _load_json(args.security_json)
 
     summary = _pytest_summary(pytest_json)
@@ -202,6 +236,89 @@ def main() -> int:
             f"| {r.get('name')} | {r.get('p50_ms'):.3f} | {r.get('p95_ms'):.3f} | {r.get('mean_ms'):.3f} | {r.get('runs')} |"
         )
     lines.append("")
+
+    pruning = _pruning_summaries(perf)
+    lines.append("## Context Pruning Benchmark")
+    lines.append("")
+    if not pruning:
+        lines.append("- 无")
+        lines.append("")
+    else:
+        lines.append("| 方法 | source | chars before | chars after | chars saved | saved % | lines saved |")
+        lines.append("|---|---|---:|---:|---:|---:|---:|")
+        for item in pruning:
+            lines.append(
+                f"| {item.get('method')} | "
+                f"{item.get('scoring_source') or '-'} | "
+                f"{_fmt_int(item.get('char_before'))} | "
+                f"{_fmt_int(item.get('char_after'))} | "
+                f"{_fmt_int(item.get('char_saved'))} | "
+                f"{_pct(float(item.get('char_saved_ratio') or 0.0))} | "
+                f"{_fmt_int(item.get('line_saved'))} |"
+            )
+        best = max(pruning, key=lambda item: float(item.get("char_saved_ratio") or 0.0))
+        lines.append("")
+        lines.append(
+            f"- 最佳节省率：`{best.get('method')}`，节省 {_pct(float(best.get('char_saved_ratio') or 0.0))} chars，"
+            f"共节省 {_fmt_int(best.get('char_saved'))}。"
+        )
+        lines.append("")
+
+    pruning_quality = _pruning_quality_summaries(pruning_eval)
+    lines.append("## Context Pruning Quality")
+    lines.append("")
+    if not pruning_quality:
+        lines.append("- 无")
+        lines.append("")
+    else:
+        lines.append("| 方法 | effective methods | scoring sources | case count | hard cases | all required rate | hard required rate | avg required recall | hard avg recall | avg char saved % | unique outputs | divergence cases | win count | tie count |")
+        lines.append("|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+        for item in pruning_quality:
+            lines.append(
+                f"| {item.get('method')} | "
+                f"{', '.join(item.get('effective_methods') or []) or '-'} | "
+                f"{', '.join(item.get('scoring_sources') or []) or '-'} | "
+                f"{_fmt_int(item.get('case_count'))} | "
+                f"{_fmt_int(item.get('hard_case_count'))} | "
+                f"{_pct(float(item.get('all_required_rate') or 0.0))} | "
+                f"{_pct(float(item.get('hard_all_required_rate') or 0.0))} | "
+                f"{_pct(float(item.get('avg_required_recall') or 0.0))} | "
+                f"{_pct(float(item.get('hard_avg_required_recall') or 0.0))} | "
+                f"{_pct(float(item.get('avg_char_saved_ratio') or 0.0))} | "
+                f"{_fmt_int(item.get('unique_output_count'))} | "
+                f"{_fmt_int(item.get('divergence_case_count'))} | "
+                f"{_fmt_int(item.get('win_count'))} | "
+                f"{_fmt_int(item.get('tie_count'))} |"
+            )
+        best_quality = max(
+            pruning_quality,
+            key=lambda item: (
+                float(item.get("all_required_rate") or 0.0),
+                float(item.get("avg_required_recall") or 0.0),
+            ),
+        )
+        lines.append("")
+        lines.append(
+            f"- 最佳保留质量：`{best_quality.get('method')}`，关键行全保留率 "
+            f"{_pct(float(best_quality.get('all_required_rate') or 0.0))}，平均召回 "
+            f"{_pct(float(best_quality.get('avg_required_recall') or 0.0))}。"
+        )
+        fallback_methods = [
+            item.get("method")
+            for item in pruning_quality
+            if "local_phrase_fallback" in (item.get("scoring_sources") or [])
+        ]
+        model_backed_methods = [
+            item.get("method")
+            for item in pruning_quality
+            if "reranker_model" in (item.get("scoring_sources") or [])
+        ]
+        if fallback_methods and not model_backed_methods:
+            lines.append(
+                f"- 当前环境未检测到模型型 reranker source；`{', '.join(str(method) for method in fallback_methods)}` "
+                "使用 `local_phrase_fallback`。"
+            )
+        lines.append("")
 
     lines.append("## 安全测试")
     lines.append("")

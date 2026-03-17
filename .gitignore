@@ -106,3 +106,4 @@ frontend/*.tsbuildinfo
 *.orig
 *.rej
 *.retry
+tmp/

@@ -7,9 +7,11 @@ from typing import Any
 import anyio
 
 from app.infrastructure.utils.logging import bind_logger, get_logger
+from app.runtime.contracts.retrieval_state import clear_retrieval_artifacts_inplace
 from app.runtime.graph.memory_router import route_memory
 from app.runtime.graph.registry import register_node
 from app.runtime.graph.state import AgentState
+from app.runtime.contracts.trace import build_agent_trace_payload
 
 _log = get_logger("workflow.router")
 
@@ -18,9 +20,10 @@ _log = get_logger("workflow.router")
 async def router_node(state: AgentState) -> dict[str, Any]:
     t0 = time.perf_counter()
     ctx = dict(state.get("context") or {})
-    trace = dict(state.get("trace") or {})
+    clear_retrieval_artifacts_inplace(ctx)
+    trace = build_agent_trace_payload(current=state.get("trace"))
     trace_id = trace.get("trace_id") or ctx.get("trace_id") or str(uuid.uuid4())
-    trace["trace_id"] = trace_id
+    trace = build_agent_trace_payload(current=trace, trace_id=trace_id)
     ctx["trace_id"] = trace_id
 
     user_id = state.get("user_id") or ctx.get("user_id") or "-"
@@ -43,4 +46,14 @@ async def router_node(state: AgentState) -> dict[str, Any]:
         }
     ctx["route"] = route
     log.info("routed needs_docs=%s needs_history=%s cost_ms=%d", route["needs_docs"], route["needs_history"], int((time.perf_counter() - t0) * 1000))
-    return {"route": route, "context": ctx, "trace": trace}
+    return {
+        "route": route,
+        "context": ctx,
+        "trace": trace,
+        "retrieved_docs": [],
+        "retrieved_docs_candidates": [],
+        "retrieved_docs_candidates_raw": [],
+        "retrieved_memories": [],
+        "retrieved_profile_items": [],
+        "citations": [],
+    }

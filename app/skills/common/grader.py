@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field
 
 from app.infrastructure.config.settings import settings
 from app.infrastructure.utils.logging import bind_logger, get_logger
+from app.runtime.contracts.trace import build_agent_trace_payload
+from app.runtime.contracts.workflow_context import build_workflow_context_payload
 from app.runtime.graph.registry import register_node
 from app.runtime.graph.state import AgentState
 from app.runtime.llm.structured_output import StructuredOutputMode, invoke_structured
@@ -65,8 +67,8 @@ def _get_structured_mode() -> StructuredOutputMode:
 @register_node("grader")
 async def grader_node(state: AgentState) -> dict[str, Any]:
     t0 = time.perf_counter()
-    ctx = dict(state.get("context") or {})
-    trace = dict(state.get("trace") or {})
+    ctx = build_workflow_context_payload(current=state.get("context"))
+    trace = build_agent_trace_payload(current=state.get("trace"))
     trace_id = trace.get("trace_id") or ctx.get("trace_id")
     user_id = state.get("user_id") or ctx.get("user_id") or "-"
     session_id = ctx.get("session_id") or "-"
@@ -107,17 +109,33 @@ async def grader_node(state: AgentState) -> dict[str, Any]:
             mode=_get_structured_mode(),
             sanitize_messages=False,
         )
-        ctx["grade"] = result.model_dump()
+        ctx = build_workflow_context_payload(current=ctx, grade=result.model_dump())
         if result.verdict == "rewrite":
-            ctx["self_correction"] = result.rewrite_instructions or ""
+            ctx = build_workflow_context_payload(
+                current=ctx,
+                clear_search_query=True,
+                clear_web_search=True,
+                self_correction=result.rewrite_instructions or "",
+            )
         elif result.verdict == "search":
-            ctx["search_query"] = result.search_query or question
-            ctx["self_correction"] = result.rewrite_instructions or ""
+            ctx = build_workflow_context_payload(
+                current=ctx,
+                clear_web_search=True,
+                search_query=result.search_query or question,
+                self_correction=result.rewrite_instructions or "",
+            )
+        else:
+            ctx = build_workflow_context_payload(
+                current=ctx,
+                clear_search_query=True,
+                clear_web_search=True,
+                clear_self_correction=True,
+            )
 
         attempts = int(trace.get("self_correction_attempts") or 0)
         if result.verdict != "accept":
             attempts += 1
-        trace["self_correction_attempts"] = attempts
+        trace = build_agent_trace_payload(current=trace, self_correction_attempts=attempts)
 
         bind_logger(
             _log,
@@ -135,13 +153,19 @@ async def grader_node(state: AgentState) -> dict[str, Any]:
     except Exception as e:
         errors = list(state.get("errors") or [])
         errors.append(f"grader_error: {e}")
-        ctx["grade"] = {
-            "verdict": "rewrite",
-            "reasoning": f"Error: {e}",
-            "issues": ["grader_exception"],
-            "rewrite_instructions": "请基于已给出的上下文，重新回答用户问题；不确定的内容明确说明缺口，不要编造。",
-            "search_query": None,
-        }
+        ctx = build_workflow_context_payload(
+            current=ctx,
+            grade={
+                "verdict": "rewrite",
+                "reasoning": f"Error: {e}",
+                "issues": ["grader_exception"],
+                "rewrite_instructions": "请基于已给出的上下文，重新回答用户问题；不确定的内容明确说明缺口，不要编造。",
+                "search_query": None,
+            },
+            clear_search_query=True,
+            clear_web_search=True,
+            self_correction="请基于已给出的上下文，重新回答用户问题；不确定的内容明确说明缺口，不要编造。",
+        )
         bind_logger(
             _log,
             trace_id=str(trace_id or "-"),
@@ -150,4 +174,3 @@ async def grader_node(state: AgentState) -> dict[str, Any]:
             node="grader",
         ).info("graded exception cost_ms=%d", int((time.perf_counter() - t0) * 1000))
         return {"context": ctx, "errors": errors, "trace": trace}
-

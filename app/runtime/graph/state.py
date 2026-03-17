@@ -6,6 +6,10 @@ from langchain_core.documents import Document
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
+from app.runtime.contracts.pruning import RetrievalDebugPayload
+from app.runtime.contracts.trace import AgentTracePayload
+from app.runtime.contracts.workflow_context import WorkflowContextPayload
+
 
 class RouteDecision(TypedDict, total=False):
     needs_docs: bool
@@ -50,17 +54,20 @@ class AgentState(TypedDict, total=False):
     reasoning: str
 
     # 通用上下文：存储跨节点共享的数据
-    context: dict[str, Any]
+    context: WorkflowContextPayload
     user_id: str
 
     route: RouteDecision
+    context_focus_hint: str
     retrieved_docs: list[Document]
     retrieved_docs_candidates: list[Document]
+    retrieved_docs_candidates_raw: list[Document]
     retrieved_memories: list[Document]
+    retrieved_profile_items: list[dict[str, Any]]
     citations: list[Citation]
     errors: list[str]
-    retrieval_debug: dict[str, Any]
-    trace: dict[str, Any]
+    retrieval_debug: RetrievalDebugPayload
+    trace: AgentTracePayload
 
     # 人机协同状态
     action_required: ActionRequired | None

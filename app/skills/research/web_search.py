@@ -6,6 +6,8 @@ from typing import Any
 from langchain_core.messages import BaseMessage
 
 from app.infrastructure.utils.logging import bind_logger, get_logger
+from app.runtime.contracts.trace import build_agent_trace_payload
+from app.runtime.contracts.workflow_context import build_workflow_context_payload
 from app.runtime.graph.registry import register_node
 from app.runtime.graph.state import AgentState
 from app.skills.research.enhanced_search import enhanced_web_search
@@ -25,8 +27,8 @@ def _get_last_user_query(messages: list[BaseMessage]) -> str:
 @register_node("web_search")
 async def web_search_node(state: AgentState) -> dict[str, Any]:
     t0 = time.perf_counter()
-    ctx = dict(state.get("context") or {})
-    trace = dict(state.get("trace") or {})
+    ctx = build_workflow_context_payload(current=state.get("context"))
+    trace = build_agent_trace_payload(current=state.get("trace"))
     trace_id = trace.get("trace_id") or ctx.get("trace_id")
     user_id = state.get("user_id") or ctx.get("user_id") or "-"
     session_id = ctx.get("session_id") or "-"
@@ -43,7 +45,10 @@ async def web_search_node(state: AgentState) -> dict[str, Any]:
             use_cache=True,
             max_results=5,
         )
-        ctx["web_search"] = {"query": query, "result": str(result)}
+        ctx = build_workflow_context_payload(
+            current=ctx,
+            web_search={"query": query, "result": str(result)},
+        )
         bind_logger(
             _log,
             trace_id=str(trace_id or "-"),
@@ -55,7 +60,10 @@ async def web_search_node(state: AgentState) -> dict[str, Any]:
     except Exception as e:
         errors = list(state.get("errors") or [])
         errors.append(f"web_search_error: {e}")
-        ctx["web_search"] = {"query": query, "result": f"Search failed: {e}"}
+        ctx = build_workflow_context_payload(
+            current=ctx,
+            web_search={"query": query, "result": f"Search failed: {e}"},
+        )
         bind_logger(
             _log,
             trace_id=str(trace_id or "-"),
@@ -64,4 +72,3 @@ async def web_search_node(state: AgentState) -> dict[str, Any]:
             node="web_search",
         ).info("search failed cost_ms=%d", int((time.perf_counter() - t0) * 1000))
         return {"context": ctx, "errors": errors}
-

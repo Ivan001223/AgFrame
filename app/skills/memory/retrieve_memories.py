@@ -9,6 +9,8 @@ from langchain_core.messages import BaseMessage
 from app.infrastructure.database.schema import ensure_schema_if_possible
 from app.infrastructure.utils.logging import bind_logger, get_logger
 from app.memory.long_term.user_memory_engine import UserMemoryEngine
+from app.runtime.contracts.pruning import build_chat_context_pruning_payload
+from app.runtime.contracts.trace import build_agent_trace_payload
 from app.runtime.graph.registry import register_node
 from app.runtime.graph.state import AgentState
 
@@ -33,7 +35,8 @@ async def retrieve_memories_node(state: AgentState) -> dict[str, Any]:
     t0 = time.perf_counter()
     messages = list(state.get("messages") or [])
     query = _get_last_user_query(messages)
-    user_id = state.get("user_id") or (state.get("context") or {}).get("user_id") or "default"
+    ctx = build_chat_context_pruning_payload(current=state.get("context"))
+    user_id = state.get("user_id") or ctx.get("user_id") or "default"
     memories = []
     if ensure_schema_if_possible():
         try:
@@ -43,9 +46,9 @@ async def retrieve_memories_node(state: AgentState) -> dict[str, Any]:
         except Exception as e:
             _log.warning(f"Failed to retrieve memories: {e}")
             memories = []
-    ctx = dict(state.get("context") or {})
     ctx["retrieved_memories"] = memories
-    trace_id = (state.get("trace") or {}).get("trace_id") or ctx.get("trace_id")
+    trace = build_agent_trace_payload(current=state.get("trace"))
+    trace_id = trace.get("trace_id") or ctx.get("trace_id")
     session_id = ctx.get("session_id") or "-"
     bind_logger(_log, trace_id=str(trace_id or "-"), user_id=str(user_id), session_id=str(session_id), node="retrieve_memories").info(
         "retrieved memories=%d cost_ms=%d", len(memories), int((time.perf_counter() - t0) * 1000)

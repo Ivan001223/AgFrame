@@ -8,6 +8,8 @@ from langchain_core.messages import BaseMessage
 
 from app.infrastructure.config.settings import settings
 from app.infrastructure.utils.logging import bind_logger, get_logger
+from app.runtime.contracts.pruning import build_chat_context_pruning_payload
+from app.runtime.contracts.trace import build_agent_trace_payload
 from app.runtime.graph.registry import register_node
 from app.runtime.graph.state import AgentState
 from app.skills.rag.rag_engine import get_rag_engine
@@ -37,7 +39,7 @@ def _get_final_k() -> int:
 @register_node("rerank_docs")
 async def rerank_docs_node(state: AgentState) -> dict[str, Any]:
     t0 = time.perf_counter()
-    ctx = dict(state.get("context") or {})
+    ctx = build_chat_context_pruning_payload(current=state.get("context"))
     candidates = state.get("retrieved_docs_candidates") or ctx.get("retrieved_docs_candidates") or []
     messages = list(state.get("messages") or [])
     query = _get_last_user_query(messages)
@@ -51,7 +53,8 @@ async def rerank_docs_node(state: AgentState) -> dict[str, Any]:
     )
 
     ctx["retrieved_docs"] = docs
-    trace_id = (state.get("trace") or {}).get("trace_id") or ctx.get("trace_id")
+    trace = build_agent_trace_payload(current=state.get("trace"))
+    trace_id = trace.get("trace_id") or ctx.get("trace_id")
     user_id = state.get("user_id") or ctx.get("user_id") or "-"
     session_id = ctx.get("session_id") or "-"
     bind_logger(
@@ -67,4 +70,3 @@ async def rerank_docs_node(state: AgentState) -> dict[str, Any]:
         int((time.perf_counter() - t0) * 1000),
     )
     return {"retrieved_docs": docs, "context": ctx}
-

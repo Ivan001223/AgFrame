@@ -7,6 +7,14 @@ from typing import Any
 
 from langchain_core.documents import Document
 
+from app.runtime.prompts.context_pruner import (
+    AggregatePruningSummary,
+    ContextPruningConfig,
+    PromptPruningSummary,
+    build_prompt_pruning_summary,
+    prune_documents,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -94,17 +102,34 @@ def build_system_prompt(
     recent_history_lines: Sequence[str],
     docs: Sequence[Document],
     memories: Sequence[Document],
+    query: str = "",
+    focus_hint: str | None = None,
     web_search: dict[str, Any] | None = None,
     self_correction: str | None = None,
     budget: PromptBudget | None = None,
-) -> tuple[str, list[dict[str, Any]]]:
+    pruning: ContextPruningConfig | None = None,
+) -> tuple[str, list[dict[str, Any]], PromptPruningSummary]:
     b = budget or PromptBudget()
+    pruning_cfg = pruning or ContextPruningConfig()
 
     recent_lines = list(recent_history_lines)[-b.max_recent_history_lines :]
     profile_block = _truncate(str(profile), b.max_profile_chars_total)
 
+    pruned_docs, doc_pruning = prune_documents(
+        list(docs)[: b.max_docs],
+        query=query,
+        focus_hint=focus_hint,
+        config=pruning_cfg,
+    )
+    pruned_memories, memory_pruning = prune_documents(
+        list(memories)[: b.max_memories],
+        query=query,
+        focus_hint=focus_hint,
+        config=pruning_cfg,
+    )
+
     doc_items: list[str] = []
-    for i, d in enumerate(list(docs)[: b.max_docs], start=1):
+    for i, d in enumerate(pruned_docs, start=1):
         meta = dict(getattr(d, "metadata", {}) or {})
         ref = (
             f"doc_id={meta.get('doc_id')}, parent_chunk_id={meta.get('parent_chunk_id')}, "
@@ -114,7 +139,7 @@ def build_system_prompt(
         doc_items.append(f"[Doc {i}] ({ref})\n{content}")
 
     mem_items: list[str] = []
-    for i, m in enumerate(list(memories)[: b.max_memories], start=1):
+    for i, m in enumerate(pruned_memories, start=1):
         meta = dict(getattr(m, "metadata", {}) or {})
         ref = (
             f"session_id={meta.get('session_id')}, "
@@ -140,6 +165,7 @@ def build_system_prompt(
         "你是一个严谨的助理。回答时优先使用提供的上下文与用户画像。\n"
         "当引用文档内容时，尽量给出对应 Doc 编号；当引用历史记忆时，尽量给出 Memory 编号。\n"
         "如果上下文不足以回答细节，明确说明缺失点并给出下一步需要的信息。\n\n"
+        f"<context_focus_hint>\n{_truncate(str(focus_hint or query), 300)}\n</context_focus_hint>\n\n"
         f"<user_profile>\n{profile_block}\n</user_profile>\n\n"
         f"<recent_history>\n{chr(10).join(recent_lines) if recent_lines else ''}\n</recent_history>\n\n"
         f"<retrieved_docs>\n{doc_block}\n</retrieved_docs>\n\n"
@@ -148,7 +174,11 @@ def build_system_prompt(
     )
 
     citations = build_citations(
-        docs=list(docs)[: b.max_docs], memories=list(memories)[: b.max_memories]
+        docs=pruned_docs, memories=pruned_memories
     )
-    return system_prompt, citations
-
+    pruning_summary = build_prompt_pruning_summary(
+        focus_hint=focus_hint or query,
+        docs=doc_pruning,
+        memories=memory_pruning,
+    )
+    return system_prompt, citations, pruning_summary

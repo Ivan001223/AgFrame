@@ -98,7 +98,21 @@
       "max_memories": 3,
       "max_doc_chars_total": 6000,
       "max_memory_chars_total": 3000,
+      "max_profile_chars_total": 2500,
       "max_item_chars": 2000
+    },
+    "context_pruning": {
+      "enabled": true,
+      "method": "heuristic",
+      "auto_reranker_min_lines": 40,
+      "auto_reranker_min_chars": 2500,
+      "min_keywords": 2,
+      "min_keep_lines": 4,
+      "max_keep_ratio": 0.45,
+      "neighbor_window": 1,
+      "reranker_window_radius": 1,
+      "max_lines_per_item": 24,
+      "score_threshold": 0.18
     }
   },
   "nodes": {

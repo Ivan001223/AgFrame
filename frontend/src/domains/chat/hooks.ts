@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/http/client';
 import { getStoredUsername } from '@/lib/auth/session';
+import { ContextPruningSummary, extractContextPruning } from '@/domains/chat/pruning';
 
 export type ChatMessage = {
   role: 'user' | 'assistant' | 'system';
@@ -23,6 +24,7 @@ export type InterruptStatusDTO = {
 type ChatInvokeParams = {
   sessionId: string;
   messages: ChatMessage[];
+  contextFocusHint?: string;
 };
 
 function normalizeMessageContent(value: unknown): string {
@@ -93,7 +95,7 @@ async function persistConversation(sessionId: string, messages: ChatMessage[]) {
 
 export function useChatInvokeMutation() {
   return useMutation({
-    mutationFn: async ({ sessionId, messages }: ChatInvokeParams) => {
+    mutationFn: async ({ sessionId, messages, contextFocusHint }: ChatInvokeParams) => {
       const payload = await apiClient<Record<string, unknown>>('/chat/invoke', {
         method: 'POST',
         body: JSON.stringify({
@@ -101,6 +103,7 @@ export function useChatInvokeMutation() {
             messages,
             context: {
               session_id: sessionId,
+              context_focus_hint: contextFocusHint?.trim() || undefined,
             },
           },
           config: {
@@ -123,6 +126,7 @@ export function useChatInvokeMutation() {
         payload,
         reply,
         messages: nextMessages,
+        contextPruning: extractContextPruning(payload),
       };
     },
   });

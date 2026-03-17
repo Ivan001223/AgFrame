@@ -2,6 +2,7 @@
 
 import { FormEvent, useMemo, useState } from 'react';
 import { Bot, LoaderCircle, RefreshCw, Send, ShieldAlert } from 'lucide-react';
+import { ContextPruningSummary, formatPruningBlock } from '@/domains/chat/pruning';
 import {
   ChatMessage,
   useApproveInterruptMutation,
@@ -24,7 +25,9 @@ const STARTER_MESSAGE: ChatMessage = {
 export default function ChatPage() {
   const [sessionId, setSessionId] = useState(createSessionId);
   const [draft, setDraft] = useState('');
+  const [contextFocusHint, setContextFocusHint] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([STARTER_MESSAGE]);
+  const [contextPruning, setContextPruning] = useState<ContextPruningSummary | null>(null);
 
   const chatMutation = useChatInvokeMutation();
   const interruptQuery = useInterruptStatusQuery(sessionId);
@@ -38,6 +41,8 @@ export default function ChatPage() {
   const startNewSession = () => {
     setSessionId(createSessionId());
     setDraft('');
+    setContextFocusHint('');
+    setContextPruning(null);
     setMessages([STARTER_MESSAGE]);
   };
 
@@ -58,9 +63,10 @@ export default function ChatPage() {
       {
         sessionId,
         messages: nextMessages,
+        contextFocusHint,
       },
       {
-        onSuccess: ({ messages: persistedMessages, reply }) => {
+        onSuccess: ({ messages: persistedMessages, reply, contextPruning: pruningSummary }) => {
           setMessages(
             reply
               ? persistedMessages
@@ -72,6 +78,7 @@ export default function ChatPage() {
                   },
                 ]
           );
+          setContextPruning(pruningSummary ?? null);
           interruptQuery.refetch();
         },
         onError: (error) => {
@@ -91,6 +98,9 @@ export default function ChatPage() {
   };
 
   const actionRequired = interruptQuery.data?.action_required;
+  const candidateStats = formatPruningBlock(contextPruning?.candidatePruning);
+  const promptDocStats = formatPruningBlock(contextPruning?.promptPruning?.docs);
+  const promptMemoryStats = formatPruningBlock(contextPruning?.promptPruning?.memories);
 
   return (
     <div className="mx-auto grid max-w-7xl gap-6 p-8 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -148,6 +158,17 @@ export default function ChatPage() {
           onSubmit={handleSubmit}
           className="border-t border-gray-200 px-6 py-4 dark:border-gray-800"
         >
+          <div className="mb-3">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              Goal Hint
+            </label>
+            <input
+              value={contextFocusHint}
+              onChange={(event) => setContextFocusHint(event.target.value)}
+              placeholder="Optional. Example: focus on billing limits and retry logic."
+              className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-gray-700 dark:bg-gray-950 dark:text-white dark:focus:ring-indigo-900"
+            />
+          </div>
           <div className="flex gap-3">
             <textarea
               value={draft}
@@ -189,7 +210,82 @@ export default function ChatPage() {
                     : 'Clear'}
               </dd>
             </div>
+            <div>
+              <dt className="text-gray-500 dark:text-gray-400">Active focus</dt>
+              <dd className="mt-1 text-gray-900 dark:text-white">
+                {contextPruning?.focus_hint || contextFocusHint || 'Default to latest user query'}
+              </dd>
+            </div>
           </dl>
+        </div>
+
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
+            <Bot className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+            Context pruning
+          </div>
+          {!contextPruning ? (
+            <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">
+              Send a message to inspect how much retrieved context was kept after pruning.
+            </p>
+          ) : (
+            <dl className="mt-4 space-y-3 text-sm">
+              <div>
+                <dt className="text-gray-500 dark:text-gray-400">Candidate pruning</dt>
+                <dd className="mt-1 text-gray-900 dark:text-white">
+                  {candidateStats.keptText}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-gray-500 dark:text-gray-400">Candidate saved</dt>
+                <dd className="mt-1 text-gray-900 dark:text-white">
+                  {candidateStats.savedText}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-gray-500 dark:text-gray-400">Candidate items pruned</dt>
+                <dd className="mt-1 text-gray-900 dark:text-white">
+                  {candidateStats.itemsText ?? '0 / 0 items'}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-gray-500 dark:text-gray-400">Prompt docs kept</dt>
+                <dd className="mt-1 text-gray-900 dark:text-white">
+                  {promptDocStats.keptText}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-gray-500 dark:text-gray-400">Prompt docs saved</dt>
+                <dd className="mt-1 text-gray-900 dark:text-white">
+                  {promptDocStats.savedText}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-gray-500 dark:text-gray-400">Prompt memory kept</dt>
+                <dd className="mt-1 text-gray-900 dark:text-white">
+                  {promptMemoryStats.keptText}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-gray-500 dark:text-gray-400">Prompt memory saved</dt>
+                <dd className="mt-1 text-gray-900 dark:text-white">
+                  {promptMemoryStats.savedText}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-gray-500 dark:text-gray-400">Pruning method</dt>
+                <dd className="mt-1 text-gray-900 dark:text-white">
+                  {contextPruning.candidatePruning?.method || contextPruning.promptPruning?.method || 'heuristic'}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-gray-500 dark:text-gray-400">Scoring source</dt>
+                <dd className="mt-1 text-gray-900 dark:text-white">
+                  {contextPruning.candidatePruning?.scoring_source || contextPruning.promptPruning?.scoring_source || 'heuristic'}
+                </dd>
+              </div>
+            </dl>
+          )}
         </div>
 
         <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">

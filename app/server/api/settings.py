@@ -7,29 +7,33 @@ from sqlalchemy import select
 from app.infrastructure.config.settings import settings
 from app.infrastructure.database.models import User, UserProfile
 from app.infrastructure.database.orm import get_session
+from app.server.api.dto import dump_settings_with_runtime_status
 from app.server.api.auth import get_current_active_user, get_current_admin_user
 
 router = APIRouter()
 
 
+def _apply_settings_update(target: Any, patch: dict[str, Any]) -> None:
+    for key, value in patch.items():
+        if not hasattr(target, key):
+            continue
+        current = getattr(target, key)
+        if isinstance(value, dict) and hasattr(current, "model_dump"):
+            _apply_settings_update(current, value)
+            continue
+        setattr(target, key, value)
+
+
 # 系统全局配置（仅 Admin）
 @router.get("/settings", dependencies=[Depends(get_current_admin_user)])
 async def get_settings():
-    return settings.model_dump()
+    return dump_settings_with_runtime_status(settings)
 
 
 @router.post("/settings", dependencies=[Depends(get_current_admin_user)])
 async def update_settings(config: dict[str, Any]):
-    # 更新 settings 对象
-    for key, value in config.items():
-        if hasattr(settings, key):
-            config_obj = getattr(settings, key)
-            if hasattr(config_obj, "model_dump"):
-                # 嵌套配置对象
-                for sub_key, sub_value in value.items():
-                    if hasattr(config_obj, sub_key):
-                        setattr(config_obj, sub_key, sub_value)
-    return settings.model_dump()
+    _apply_settings_update(settings, config)
+    return dump_settings_with_runtime_status(settings)
 
 
 # 用户个性化配置（隔离）

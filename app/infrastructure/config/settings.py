@@ -162,12 +162,29 @@ class PromptBudgetConfig(BaseSettings):
     max_memories: int = 3
     max_doc_chars_total: int = 6000
     max_memory_chars_total: int = 3000
+    max_profile_chars_total: int = 2500
     max_item_chars: int = 2000
+
+
+class ContextPruningConfig(BaseSettings):
+    """目标驱动上下文裁剪配置"""
+    enabled: bool = True
+    method: str = "heuristic"
+    auto_reranker_min_lines: int = 40
+    auto_reranker_min_chars: int = 2500
+    min_keywords: int = 2
+    min_keep_lines: int = 4
+    max_keep_ratio: float = 0.45
+    neighbor_window: int = 1
+    reranker_window_radius: int = 1
+    max_lines_per_item: int = 24
+    score_threshold: float = 0.18
 
 
 class PromptConfig(BaseSettings):
     """提示词配置"""
     budget: PromptBudgetConfig = Field(default_factory=PromptBudgetConfig)
+    context_pruning: ContextPruningConfig = Field(default_factory=ContextPruningConfig)
 
 
 class NodesConfig(BaseSettings):

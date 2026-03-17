@@ -44,11 +44,12 @@ def main():
         "retrieved_profile_items": profile_items,
     }
 
-    system_prompt, _ = build_system_prompt(
+    system_prompt, _, _ = build_system_prompt(
         profile=profile_view,
         recent_history_lines=[],
         docs=[],
         memories=memories,
+        query=query,
         budget=PromptBudget(),
     )
 
@@ -68,4 +69,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

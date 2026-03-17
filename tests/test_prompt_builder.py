@@ -3,6 +3,8 @@ from __future__ import annotations
 from langchain_core.documents import Document
 
 from app.runtime.prompts import prompt_builder
+from app.runtime.prompts import context_pruner
+from app.runtime.prompts.context_pruner import ContextPruningConfig, prune_document_content
 from app.runtime.prompts.prompt_builder import PromptBudget, build_citations, build_system_prompt
 
 
@@ -76,11 +78,13 @@ def test_build_system_prompt_respects_budget_limits():
         max_item_chars=20,
     )
 
-    prompt, citations = build_system_prompt(
+    prompt, citations, pruning = build_system_prompt(
         profile="profile" * 10,
         recent_history_lines=["l1", "l2", "l3"],
         docs=docs,
         memories=memories,
+        query="find x",
+        focus_hint="focus on x",
         web_search={"query": "q" * 400, "result": "r" * 4000},
         self_correction="c" * 4000,
         budget=budget,
@@ -90,8 +94,356 @@ def test_build_system_prompt_respects_budget_limits():
     assert "l2" in prompt and "l3" in prompt
     assert "l1" not in prompt
     assert "<retrieved_docs>\n" in prompt
+    assert "<context_focus_hint>\nfocus on x\n</context_focus_hint>" in prompt
     assert "Doc 1" in prompt
     assert "Doc 2" not in prompt
     assert len(citations) == 2
     assert citations[0]["kind"] == "doc"
     assert citations[1]["kind"] == "memory"
+    assert pruning["focus_hint"] == "focus on x"
+    assert pruning["docs"]["char_savings"]["saved"] >= 0
+    assert pruning["memories"]["char_savings"]["saved"] >= 0
+    assert pruning["method"] == "heuristic"
+    assert pruning["scoring_source"] == "heuristic"
+
+
+def test_prune_document_content_keeps_goal_relevant_lines():
+    content = "\n".join(
+        [
+            "alpha setup",
+            "billing retry pipeline",
+            "retry uses exponential backoff",
+            "metrics and tracing",
+            "final cleanup",
+        ]
+    )
+
+    pruned, stats = prune_document_content(
+        content,
+        query="How does retry work?",
+        focus_hint="billing retry",
+        config=ContextPruningConfig(
+            enabled=True,
+            min_keep_lines=2,
+            max_keep_ratio=0.6,
+            neighbor_window=0,
+            max_lines_per_item=3,
+            score_threshold=0.2,
+        ),
+    )
+
+    assert "billing retry pipeline" in pruned
+    assert "retry uses exponential backoff" in pruned
+    assert stats["char_count_after"] < stats["char_count_before"]
+
+
+def test_prune_document_content_supports_reranker_mode(monkeypatch):
+    class _Reranker:
+        def rerank(self, query: str, documents: list[str], top_k: int = 3):
+            assert query.startswith("retry backoff")
+            scores = []
+            for index, document in enumerate(documents):
+                score = 1.0 if "backoff" in document else 0.0
+                scores.append((document, score, index))
+            scores.sort(key=lambda item: item[1], reverse=True)
+            return scores[:top_k]
+
+    monkeypatch.setattr(context_pruner, "get_reranker", lambda: _Reranker())
+
+    content = "\n".join(
+        [
+            "setup",
+            "retry loop",
+            "backoff strategy",
+            "cleanup",
+        ]
+    )
+
+    pruned, stats = prune_document_content(
+        content,
+        query="How does retry work?",
+        focus_hint="retry backoff",
+        config=ContextPruningConfig(
+            enabled=True,
+            method="reranker",
+            min_keep_lines=1,
+            max_keep_ratio=0.5,
+            neighbor_window=0,
+            max_lines_per_item=2,
+            score_threshold=0.2,
+        ),
+    )
+
+    assert "backoff strategy" in pruned
+    assert stats["method"] == "reranker"
+    assert stats["scoring_source"] == "reranker_model"
+
+
+def test_prune_document_content_auto_mode_falls_back_to_heuristic_for_short_text(monkeypatch):
+    class _Reranker:
+        def rerank(self, query: str, documents: list[str], top_k: int = 3):
+            raise AssertionError("reranker should not be called for short content")
+
+    monkeypatch.setattr(context_pruner, "get_reranker", lambda: _Reranker())
+
+    pruned, stats = prune_document_content(
+        "alpha\nretry handler\ncleanup",
+        query="retry",
+        focus_hint="retry",
+        config=ContextPruningConfig(
+            enabled=True,
+            method="auto",
+            auto_reranker_min_lines=10,
+            auto_reranker_min_chars=100,
+            min_keep_lines=1,
+            max_keep_ratio=0.5,
+            neighbor_window=0,
+            max_lines_per_item=2,
+            score_threshold=0.2,
+        ),
+    )
+
+    assert "retry handler" in pruned
+    assert stats["method"] == "heuristic"
+
+
+def test_prune_document_content_auto_mode_uses_reranker_for_long_text(monkeypatch):
+    class _Reranker:
+        def rerank(self, query: str, documents: list[str], top_k: int = 3):
+            assert query.startswith("retry backoff")
+            scores = []
+            for index, document in enumerate(documents):
+                score = 1.0 if "backoff" in document else 0.0
+                scores.append((document, score, index))
+            scores.sort(key=lambda item: item[1], reverse=True)
+            return scores[:top_k]
+
+    monkeypatch.setattr(context_pruner, "get_reranker", lambda: _Reranker())
+
+    content = "\n".join(["setup"] * 8 + ["critical backoff line"] + ["cleanup"] * 8)
+    pruned, stats = prune_document_content(
+        content,
+        query="retry",
+        focus_hint="retry backoff",
+        config=ContextPruningConfig(
+            enabled=True,
+            method="auto",
+            auto_reranker_min_lines=10,
+            auto_reranker_min_chars=50,
+            min_keep_lines=1,
+            max_keep_ratio=0.2,
+            neighbor_window=0,
+            max_lines_per_item=2,
+            score_threshold=0.2,
+        ),
+    )
+
+    assert "critical backoff line" in pruned
+    assert stats["method"] == "reranker"
+
+
+def test_prune_document_content_heuristic_covers_focus_keywords_on_distractors():
+    content = "\n".join(
+        [
+            "provider health check",
+            "retry button label in ui",
+            "provider fallback copy text",
+            "provider retry scheduler",
+            "backoff state machine with jitter",
+            "manual retry notification",
+            "metrics snapshot",
+        ]
+    )
+
+    pruned, stats = prune_document_content(
+        content,
+        query="What code applies exponential retry after provider failures?",
+        focus_hint="provider retry backoff",
+        config=ContextPruningConfig(
+            enabled=True,
+            method="heuristic",
+            min_keep_lines=2,
+            max_keep_ratio=0.45,
+            neighbor_window=0,
+            max_lines_per_item=4,
+            score_threshold=0.18,
+        ),
+    )
+
+    assert "provider retry scheduler" in pruned
+    assert "backoff state machine with jitter" in pruned
+    assert stats["line_count_after"] <= 4
+
+
+def test_prune_document_content_heuristic_uses_semantic_aliases():
+    content = "\n".join(
+        [
+            "oauth callback received",
+            "mint fresh session secret for the browser",
+            "extend identity lease in storage",
+            "ui success banner",
+        ]
+    )
+
+    pruned, stats = prune_document_content(
+        content,
+        query="Which code renews login credentials after callback?",
+        focus_hint="refresh token rotate after oauth callback",
+        config=ContextPruningConfig(
+            enabled=True,
+            method="heuristic",
+            min_keep_lines=2,
+            max_keep_ratio=0.6,
+            neighbor_window=0,
+            max_lines_per_item=3,
+            score_threshold=0.18,
+        ),
+    )
+
+    assert "mint fresh session secret for the browser" in pruned
+    assert "extend identity lease in storage" in pruned
+    assert stats["method"] == "heuristic"
+
+
+def test_prune_document_content_reranker_window_uses_neighbor_context(monkeypatch):
+    class _Reranker:
+        def rerank(self, query: str, documents: list[str], top_k: int = 3):
+            scores = []
+            for index, document in enumerate(documents):
+                score = 0.0
+                if "oauth callback received" in document and "issue browser grant from callback state" in document:
+                    score = 2.0
+                elif "prolong identity artifact in cache" in document:
+                    score = 1.0
+                scores.append((document, score, index))
+            scores.sort(key=lambda item: item[1], reverse=True)
+            return scores[:top_k]
+
+    monkeypatch.setattr(context_pruner, "get_reranker", lambda: _Reranker())
+
+    content = "\n".join(
+        [
+            "oauth callback received",
+            "issue browser grant from callback state",
+            "ui success banner",
+        ]
+    )
+
+    pruned, stats = prune_document_content(
+        content,
+        query="Which code renews login credentials after callback?",
+        focus_hint="refresh token rotate after oauth callback",
+        config=ContextPruningConfig(
+            enabled=True,
+            method="reranker",
+            reranker_window_radius=1,
+            min_keep_lines=1,
+            max_keep_ratio=0.34,
+            neighbor_window=0,
+            max_lines_per_item=1,
+            score_threshold=0.18,
+        ),
+    )
+
+    assert "issue browser grant from callback state" in pruned
+    assert stats["method"] == "reranker"
+    assert stats["scoring_source"] == "reranker_model"
+
+
+def test_prune_document_content_reranker_uses_local_phrase_ranker_when_model_disabled(monkeypatch):
+    class _DisabledReranker:
+        _disabled = True
+
+        def rerank(self, query: str, documents: list[str], top_k: int = 3):
+            raise AssertionError("disabled reranker should use local phrase fallback")
+
+    monkeypatch.setattr(context_pruner, "get_reranker", lambda: _DisabledReranker())
+
+    content = "\n".join(
+        [f"filler line {i}" for i in range(45)]
+        + [
+            "provider callback telemetry",
+            "session token badge",
+            "discard browser grant from callback state",
+            "purge persisted identity lease",
+            "success toast copy",
+        ]
+    )
+
+    pruned, stats = prune_document_content(
+        content,
+        query="Which code revokes stale credentials after the provider callback finishes?",
+        focus_hint="oauth callback revoke refresh token after login",
+        config=ContextPruningConfig(
+            enabled=True,
+            method="reranker",
+            reranker_window_radius=1,
+            min_keep_lines=2,
+            max_keep_ratio=0.2,
+            neighbor_window=0,
+            max_lines_per_item=6,
+            score_threshold=0.18,
+        ),
+    )
+
+    assert "discard browser grant from callback state" in pruned
+    assert "purge persisted identity lease" in pruned
+    assert stats["method"] == "reranker"
+    assert stats["scoring_source"] == "local_phrase_fallback"
+
+
+def test_prune_document_content_reranker_failure_falls_back_to_heuristic(monkeypatch):
+    class _FailingReranker:
+        def rerank(self, query: str, documents: list[str], top_k: int = 3):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(context_pruner, "get_reranker", lambda: _FailingReranker())
+
+    pruned, stats = prune_document_content(
+        "setup\nretry loop\nbackoff strategy\ncleanup",
+        query="How does retry work?",
+        focus_hint="retry backoff",
+        config=ContextPruningConfig(
+            enabled=True,
+            method="reranker",
+            min_keep_lines=1,
+            max_keep_ratio=0.5,
+            neighbor_window=0,
+            max_lines_per_item=2,
+            score_threshold=0.2,
+        ),
+    )
+
+    assert "backoff strategy" in pruned
+    assert stats["method"] == "heuristic"
+    assert stats["scoring_source"] == "heuristic"
+
+
+def test_prune_document_content_neighbor_window_preserves_protected_lines():
+    content = "\n".join(
+        [
+            "alpha setup",
+            "billing retry coordinator",
+            "backoff strategy implementation",
+            "cleanup",
+        ]
+    )
+
+    pruned, stats = prune_document_content(
+        content,
+        query="How does billing retry backoff work?",
+        focus_hint="billing retry backoff",
+        config=ContextPruningConfig(
+            enabled=True,
+            method="heuristic",
+            min_keep_lines=2,
+            max_keep_ratio=0.5,
+            neighbor_window=1,
+            max_lines_per_item=2,
+            score_threshold=0.18,
+        ),
+    )
+
+    assert "billing retry coordinator" in pruned
+    assert "backoff strategy implementation" in pruned
+    assert stats["line_count_after"] <= 2

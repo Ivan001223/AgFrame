@@ -1,0 +1,116 @@
+{
+  "metadata": {
+    "name": "context_pruning_cases",
+    "version": "1.3.0",
+    "description": "Fixed cases for evaluating whether pruning keeps goal-critical lines, including adversarial distractors."
+  },
+  "cases": [
+    {
+      "id": "billing-retry",
+      "query": "How does retry behave for billing failures?",
+      "focus_hint": "billing retry backoff",
+      "content": "module bootstrap\nrouter init\nbilling retry coordinator\nretry uses exponential backoff with jitter\nprovider timeout classification\nmetrics and tracing\ncleanup hook",
+      "must_keep_lines": [
+        "billing retry coordinator",
+        "retry uses exponential backoff with jitter"
+      ]
+    },
+    {
+      "id": "auth-refresh",
+      "query": "Where is token refresh handled?",
+      "focus_hint": "auth refresh token",
+      "content": "http client setup\nauth middleware\nrefresh token loader\ntoken refresh writes new expiry\naudit logging\nmetrics flush",
+      "must_keep_lines": [
+        "refresh token loader",
+        "token refresh writes new expiry"
+      ]
+    },
+    {
+      "id": "queue-failure",
+      "query": "How are failed jobs retried?",
+      "focus_hint": "queue retry dead letter",
+      "content": "worker startup\njob routing\ndead letter requeue policy\nretry count increments in redis\nincident event append\nhealth check",
+      "must_keep_lines": [
+        "dead letter requeue policy",
+        "retry count increments in redis"
+      ]
+    },
+    {
+      "id": "billing-distractors",
+      "difficulty": "hard",
+      "query": "What code applies exponential retry after provider failures?",
+      "focus_hint": "provider retry backoff",
+      "content": "provider health check\nretry button label in ui\nprovider fallback copy text\nprovider retry scheduler\nbackoff state machine with jitter\nmanual retry notification\nmetrics snapshot",
+      "must_keep_lines": [
+        "provider retry scheduler",
+        "backoff state machine with jitter"
+      ]
+    },
+    {
+      "id": "auth-ambiguous-token",
+      "difficulty": "hard",
+      "query": "Which lines rotate refresh tokens after auth succeeds?",
+      "focus_hint": "auth refresh token rotate",
+      "content": "token theme color\nsession token banner\nrefresh token store\nrotate refresh token after login\ncsrf middleware\ntoken analytics event",
+      "must_keep_lines": [
+        "refresh token store",
+        "rotate refresh token after login"
+      ]
+    },
+    {
+      "id": "oauth-semantic-rotation",
+      "difficulty": "semantic",
+      "query": "Which code renews login credentials after the provider callback?",
+      "focus_hint": "refresh token rotate after oauth callback",
+      "content": "oauth handshake start\noauth callback received\nprovider profile fetch\nsession cookie hydrate\nmint fresh session secret for the browser\nextend identity lease in storage\naudit entry append\nui success banner",
+      "must_keep_lines": [
+        "mint fresh session secret for the browser",
+        "extend identity lease in storage"
+      ]
+    },
+    {
+      "id": "oauth-semantic-revoke",
+      "difficulty": "semantic",
+      "query": "Which code revokes stale credentials after the provider callback finishes?",
+      "focus_hint": "oauth callback revoke refresh token after login",
+      "content": "oauth start button\nprovider callback telemetry\nprofile hydration panel\nsession token badge\ndiscard browser grant from callback state\npurge persisted identity lease\nsecurity audit append\nsuccess toast copy",
+      "must_keep_lines": [
+        "discard browser grant from callback state",
+        "purge persisted identity lease"
+      ]
+    },
+    {
+      "id": "retry-semantic-handoff",
+      "difficulty": "hard",
+      "query": "Where do we delay queue handoff after an upstream timeout?",
+      "focus_hint": "provider retry backoff after timeout",
+      "content": "queue boot\nretry icon copy\nprovider timeout marker\nreapply stagger before queue handoff\nmanual retry banner\nhealth pulse\narchive sweep",
+      "must_keep_lines": [
+        "provider timeout marker",
+        "reapply stagger before queue handoff"
+      ]
+    },
+    {
+      "id": "oauth-long-window",
+      "difficulty": "hard",
+      "query": "Which code revokes stale credentials after the provider callback finishes?",
+      "focus_hint": "oauth callback revoke refresh token after login",
+      "content": "filler line 1\nfiller line 2\nfiller line 3\nfiller line 4\nfiller line 5\nfiller line 6\nfiller line 7\nfiller line 8\nfiller line 9\nfiller line 10\nfiller line 11\nfiller line 12\nfiller line 13\nfiller line 14\nfiller line 15\nfiller line 16\nfiller line 17\nfiller line 18\nfiller line 19\nfiller line 20\nfiller line 21\nfiller line 22\nfiller line 23\nfiller line 24\nfiller line 25\nfiller line 26\nfiller line 27\nfiller line 28\nfiller line 29\nfiller line 30\nfiller line 31\nfiller line 32\nfiller line 33\nfiller line 34\nfiller line 35\nfiller line 36\nfiller line 37\nfiller line 38\nfiller line 39\nfiller line 40\nfiller line 41\nprovider callback telemetry\nsession token badge\ndiscard browser grant from callback state\npurge persisted identity lease\nsecurity audit append\nsuccess toast copy",
+      "must_keep_lines": [
+        "discard browser grant from callback state",
+        "purge persisted identity lease"
+      ]
+    },
+    {
+      "id": "retry-long-handoff",
+      "difficulty": "hard",
+      "query": "Where do we delay queue handoff after an upstream timeout?",
+      "focus_hint": "provider retry backoff after timeout",
+      "content": "padding row 1\npadding row 2\npadding row 3\npadding row 4\npadding row 5\npadding row 6\npadding row 7\npadding row 8\npadding row 9\npadding row 10\npadding row 11\npadding row 12\npadding row 13\npadding row 14\npadding row 15\npadding row 16\npadding row 17\npadding row 18\npadding row 19\npadding row 20\npadding row 21\npadding row 22\npadding row 23\npadding row 24\npadding row 25\npadding row 26\npadding row 27\npadding row 28\npadding row 29\npadding row 30\npadding row 31\npadding row 32\npadding row 33\npadding row 34\npadding row 35\npadding row 36\npadding row 37\npadding row 38\npadding row 39\npadding row 40\nretry button label in ui\nprovider timeout marker\nreapply stagger before queue handoff\nmanual retry banner\nhealth pulse\narchive sweep",
+      "must_keep_lines": [
+        "provider timeout marker",
+        "reapply stagger before queue handoff"
+      ]
+    }
+  ]
+}

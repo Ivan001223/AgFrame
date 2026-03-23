@@ -1,8 +1,8 @@
-
+import importlib
 import logging
+from typing import Any
 
 import httpx
-import torch
 from langchain_core.embeddings import Embeddings
 
 from app.infrastructure.config.settings import settings
@@ -77,7 +77,20 @@ class ModelEmbeddings(Embeddings):
         self._tokenizer = None
         self._st_model = None
         self._loaded_source = None
-        self._device = get_best_device() if str(device).lower() in {"auto", ""} else str(device)
+        if self._use_remote_api:
+            self._device = "remote"
+        else:
+            self._device = get_best_device() if str(device).lower() in {"auto", ""} else str(device)
+
+    @staticmethod
+    def _torch() -> Any:
+        try:
+            return importlib.import_module("torch")
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "缺少可选依赖 'torch'。如需本地 embeddings 模型，请执行 "
+                "`uv sync --group local-inference`。"
+            ) from exc
 
     def _load_model(self):
         """懒加载模型：仅在首次使用时加载"""
@@ -199,6 +212,7 @@ class ModelEmbeddings(Embeddings):
                     )
                 inputs = {k: v.to(self._device) for k, v in inputs.items()}
 
+                torch = self._torch()
                 with torch.inference_mode():
                     if self._device == "cuda":
                         with torch.autocast(device_type="cuda", dtype=torch.float16):

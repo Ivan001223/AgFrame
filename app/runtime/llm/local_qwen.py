@@ -1,9 +1,8 @@
+import importlib
 from collections.abc import Callable, Iterator, Sequence
 from logging import getLogger
 from threading import Thread
 from typing import Any
-
-import torch
 
 logger = getLogger(__name__)
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
@@ -18,11 +17,35 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
-from qwen_vl_utils import process_vision_info
-from transformers import AutoModelForImageTextToText, AutoProcessor, TextIteratorStreamer
-
 from app.infrastructure.config.settings import settings
 from app.runtime.llm.model_importer import require_pinned_revision
+
+
+def _require_torch() -> Any:
+    try:
+        return importlib.import_module("torch")
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "缺少可选依赖 'torch'。如需本地 Qwen OCR，请执行 `uv sync --group local-inference`。"
+        ) from exc
+
+
+def _require_transformers() -> Any:
+    try:
+        return importlib.import_module("transformers")
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "缺少可选依赖 'transformers'。如需本地 Qwen OCR，请执行 `uv sync --group local-inference`。"
+        ) from exc
+
+
+def _require_qwen_vl_utils() -> Any:
+    try:
+        return importlib.import_module("qwen_vl_utils")
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "缺少可选依赖 'qwen-vl-utils'。如需本地 Qwen OCR，请执行 `uv sync --group local-inference`。"
+        ) from exc
 
 
 class LocalQwen3VL(BaseChatModel):
@@ -41,6 +64,8 @@ class LocalQwen3VL(BaseChatModel):
     def _load_model(self):
         if self.model is None:
             logger.info(f"Loading local Qwen3-VL: {self.model_name}")
+            torch = _require_torch()
+            transformers = _require_transformers()
             device = "cuda" if torch.cuda.is_available() else "cpu"
             dtype = torch.bfloat16 if device == "cuda" else torch.float32
             revision = str(settings.model_manager.revision or "").strip() or None
@@ -75,7 +100,7 @@ class LocalQwen3VL(BaseChatModel):
                 except Exception as e:
                     logger.debug(f"Download error: {e}")
 
-                self.model = AutoModelForImageTextToText.from_pretrained(
+                self.model = transformers.AutoModelForImageTextToText.from_pretrained(
                     self.model_name, 
                     revision=revision,
                     torch_dtype=dtype, 
@@ -85,7 +110,7 @@ class LocalQwen3VL(BaseChatModel):
                 if device == "cpu":
                     self.model = self.model.to("cpu")
                     
-                self.processor = AutoProcessor.from_pretrained(
+                self.processor = transformers.AutoProcessor.from_pretrained(
                     self.model_name,
                     revision=revision,
                     trust_remote_code=True,
@@ -130,6 +155,7 @@ class LocalQwen3VL(BaseChatModel):
         return conversation
 
     def _prepare_inputs(self, conversation: list[dict[str, Any]]):
+        process_vision_info = _require_qwen_vl_utils().process_vision_info
         text = self.processor.apply_chat_template(conversation, tokenize=False, add_generation_prompt=True)
         image_inputs, video_inputs = process_vision_info(conversation)
         inputs = self.processor(
@@ -149,6 +175,7 @@ class LocalQwen3VL(BaseChatModel):
         **kwargs: Any,
     ) -> Iterator[ChatGenerationChunk]:
         try:
+            TextIteratorStreamer = _require_transformers().TextIteratorStreamer
             conversation = self._messages_to_conversation(messages)
             inputs = self._prepare_inputs(conversation)
             
@@ -180,6 +207,7 @@ class LocalQwen3VL(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         try:
+            torch = _require_torch()
             conversation = self._messages_to_conversation(messages)
             inputs = self._prepare_inputs(conversation)
 

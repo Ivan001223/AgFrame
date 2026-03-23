@@ -1,8 +1,8 @@
-
+import importlib
 import logging
+from typing import Any
 
 import httpx
-import torch
 
 from app.infrastructure.config.settings import settings
 
@@ -75,7 +75,20 @@ class ModelReranker:
         self._tokenizer = None
         self._cross_encoder = None
         self._loaded_source = None
-        self._device = get_best_device() if str(device).lower() in {"auto", ""} else str(device)
+        if self._disabled or self._use_remote_api:
+            self._device = "remote" if self._use_remote_api else "cpu"
+        else:
+            self._device = get_best_device() if str(device).lower() in {"auto", ""} else str(device)
+
+    @staticmethod
+    def _torch() -> Any:
+        try:
+            return importlib.import_module("torch")
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "缺少可选依赖 'torch'。如需本地 reranker 模型，请执行 "
+                "`uv sync --group local-inference`。"
+            ) from exc
 
     def _load_model(self):
         """懒加载模型：仅在首次使用时加载"""
@@ -152,6 +165,7 @@ class ModelReranker:
         if self._backend == "sentence_transformers":
             pairs = [(q, d) for d in docs]
             try:
+                torch = self._torch()
                 batch_scores = self._cross_encoder.predict(
                     pairs, batch_size=self._batch_size, show_progress_bar=False
                 )
@@ -170,6 +184,7 @@ class ModelReranker:
                 all_scores: list[float] = []
                 for start in range(0, len(docs), self._batch_size):
                     pairs = [[q, d] for d in docs[start : start + self._batch_size]]
+                    torch = self._torch()
                     with torch.inference_mode():
                         batch_scores = self._model.compute_score(pairs)
                     if isinstance(batch_scores, torch.Tensor):
@@ -227,6 +242,7 @@ class ModelReranker:
                 max_length=self._max_length,
             )
             inputs = {k: v.to(self._device) for k, v in inputs.items()}
+            torch = self._torch()
             with torch.inference_mode():
                 if self._device == "cuda":
                     with torch.autocast(device_type="cuda", dtype=torch.float16):

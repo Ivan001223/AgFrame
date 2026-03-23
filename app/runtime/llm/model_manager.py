@@ -1,20 +1,39 @@
 from __future__ import annotations
 
+import importlib
 import logging
 import os
 from dataclasses import dataclass
 from typing import Any
 
-import torch
-
 logger = logging.getLogger(__name__)
-from transformers import AutoModel, AutoProcessor
-
 from app.runtime.llm.model_importer import resolve_pretrained_source
+
+
+def _require_torch() -> Any:
+    try:
+        return importlib.import_module("torch")
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "缺少可选依赖 'torch'。如需本地 embeddings/reranker/Qwen 模型，请执行 "
+            "`uv sync --group local-inference`。"
+        ) from exc
+
+
+def _require_transformers() -> tuple[Any, Any]:
+    try:
+        module = importlib.import_module("transformers")
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "缺少可选依赖 'transformers'。如需本地 embeddings/reranker/Qwen 模型，请执行 "
+            "`uv sync --group local-inference`。"
+        ) from exc
+    return module.AutoModel, module.AutoProcessor
 
 
 def get_best_device() -> str:
     """获取当前环境可用的最佳计算设备 (cuda > mps > cpu)"""
+    torch = _require_torch()
     if torch.cuda.is_available():
         return "cuda"
     if torch.backends.mps.is_available():
@@ -22,8 +41,9 @@ def get_best_device() -> str:
     return "cpu"
 
 
-def torch_dtype_for_device(device: str) -> torch.dtype:
+def torch_dtype_for_device(device: str) -> Any:
     """根据设备类型选择合适的 torch 数据类型"""
+    torch = _require_torch()
     return torch.float32 if device == "cpu" else torch.float16
 
 
@@ -146,8 +166,8 @@ def load_model_and_processor(
     *,
     spec: ModelSpec,
     device: str,
-    model_cls: type[Any] = AutoModel,
-    processor_cls: type[Any] = AutoProcessor,
+    model_cls: type[Any] | None = None,
+    processor_cls: type[Any] | None = None,
     require_processor: bool = True,
 ) -> tuple[Any, Any | None]:
     """
@@ -162,6 +182,10 @@ def load_model_and_processor(
         modelscope_fallback_to_hf=spec.modelscope_fallback_to_hf,
     )
     source = imported.pretrained_source
+    if model_cls is None or processor_cls is None:
+        default_model_cls, default_processor_cls = _require_transformers()
+        model_cls = model_cls or default_model_cls
+        processor_cls = processor_cls or default_processor_cls
     model = model_cls.from_pretrained(
         source,
         trust_remote_code=spec.trust_remote_code,

@@ -1,4 +1,5 @@
 import os
+from importlib import import_module
 from typing import Any
 
 from langchain_community.document_loaders import (
@@ -8,7 +9,6 @@ from langchain_community.document_loaders import (
 )
 from langchain_core.documents import Document
 from pypdf import PdfReader
-from unstructured.partition.pdf import partition_pdf
 
 from app.infrastructure.config.settings import settings
 
@@ -36,6 +36,21 @@ from app.skills.rag.hybrid_retriever_service import (
 )
 
 logger = get_logger("rag_engine")
+
+
+def _partition_pdf(*, filename: str, infer_table_structure: bool, strategy: str):
+    try:
+        partition_pdf = import_module("unstructured.partition.pdf").partition_pdf
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "缺少可选依赖 'unstructured'。如需高精度 PDF 解析，请执行 "
+            "`uv sync --group document-ai`。"
+        ) from exc
+    return partition_pdf(
+        filename=filename,
+        infer_table_structure=infer_table_structure,
+        strategy=strategy,
+    )
 
 
 class RAGEngine:
@@ -101,7 +116,7 @@ class RAGEngine:
             logger.info(f"正在使用 Unstructured 处理 PDF：{file_path}...")
             try:
                 # 尝试使用 unstructured 进行高级解析（支持表格）
-                elements = partition_pdf(
+                elements = _partition_pdf(
                     filename=file_path,
                     infer_table_structure=True,
                     strategy="hi_res",

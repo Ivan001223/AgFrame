@@ -3,12 +3,15 @@
 ## 1. 快速单测
 
 ```bash
+uv python install 3.11.15
 uv run pytest -v --tb=short
 ```
 
 说明：
 
 - `ragas` 等评测依赖安装在开发环境中，不作为服务运行时必需依赖
+- 如需运行评测相关用例，请先执行 `uv sync --group evals`
+- 如需运行依赖本地模型或高级文档解析的链路，请额外执行 `uv sync --group local-inference --group document-ai`
 - 前端门禁建议使用 Node 22 LTS
 
 ## 2. 指定模块回归

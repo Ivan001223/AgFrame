@@ -33,88 +33,59 @@
 
 ## 📐 架构总览
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      FastAPI Server                         │
-│                  (Auth / REST / LangServe)                  │
-└─────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────────┐
-│                    LangGraph Runtime                        │
-│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
-│   │ Orchestr │  │  State   │  │  Nodes   │  │ Routers  │  │
-│   └──────────┘  └──────────┘  └──────────┘  └──────────┘  │
-└─────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────────┐
-│                      Skills / Services                      │
-│  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐     │
-│  │  RAG   │ │ Memory │ │ Profile│ │ Research│ │ Tools  │    │
-│  └────────┘ └────────┘ └────────┘ └────────┘ └────────┘     │
-└─────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────────┐
-│                   Infrastructure                            │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐    │
-│  │ pgvector │ │  Redis   │ │ PostgreSQL│ │ Langfuse     │   │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────────┘    │
-└─────────────────────────────────────────────────────────────┘
+**AgFrame** 不仅仅是一个后端脚手架，而是一个**开箱即用、具备生产级可用性**的 AI 基础设施平台。它集成了 FastAPI、LangGraph、Next.js，并辅以 PgVector、Redis、ARQ、Langfuse 等全套中间件，帮助你快速构建、部署和维护复杂的 AI 应用。
+
+### 🧰 技术栈
+
+| **领域**     | **核心组件**                                                                 |
+| :----------- | :--------------------------------------------------------------------------- |
+| **后端 API**   | `Python 3.11+`, `FastAPI`, `LangGraph`, `LangServe`, `SQLAlchemy`, `ARQ`     |
+| **前端应用**   | `Next.js 16`, `React 19`, `TypeScript`, `React Query`, `Zod`, `Hook Form`    |
+| **存储队列**   | `PostgreSQL + pgvector`, `Redis`, `RabbitMQ` (预留), `MinIO`                 |
+| **观测基石**   | `Langfuse`, `ClickHouse`                                                     |
+
+```mermaid
+graph LR
+    A[Next.js 16 Frontend] -->|REST/Stream| B(FastAPI Server)
+    B --> C{LangGraph Agents}
+    C --> D[PgVector/Document]
+    C --> E[LLM Providers]
+    B --> F[ARQ/Redis Worker]
+    F --> D
+    F --> G[MinIO Storage]
+    B --> H[Langfuse Observability]
 ```
 
-## 📂 目录结构
+---
 
+## 📁 项目结构 / Structure
+
+<details>
+<summary><b>点击展开目录树</b></summary>
+<br>
+
+```text
+AgFrame/
+├─ app/
+│  ├─ server/                # FastAPI 入口与 API 路由
+│  ├─ runtime/               # LangGraph / LLM / Prompt 运行时
+│  ├─ skills/                # RAG、Memory、Research、Tools 等能力
+│  ├─ infrastructure/        # 配置、数据库、队列、日志、观测
+│  ├─ memory/                # 长期记忆与向量存储
+│  ├─ agents/                # Agent 节点工厂
+│  └─ examples/              # 示例与验证脚本
+├─ frontend/                 # Next.js 工作台
+├─ configs/                  # 配置文件
+├─ docker/                   # Docker 初始化资源
+├─ docs/                     # 补充文档
+├─ scripts/                  # 测试、冒烟、评测、worker 启动脚本
+├─ tests/                    # 测试
+├─ docker-compose.yml
+└─ pyproject.toml
 ```
-╭────────────────────────────────────────────────────────────────────────────╮
-│                              AgFrame /                                     │
-╰────────────────────────────────────────────────────────────────────────────╯
-│
-├── app/
-│   ├── server/              # 🚀 FastAPI 入口
-│   │   ├── api/             #   路由层
-│   │   └── main.py          #   应用启动
-│   ├── runtime/             # ⚙️ 运行时核心
-│   │   ├── graph/           #   LangGraph 工作流
-│   │   │   ├── graph.py     #   图定义
-│   │   │   ├── state.py     #   State Schema
-│   │   │   ├── orchestrator.py # 编排器
-│   │   │   ├── registry.py  #   节点注册表
-│   │   │   └── nodes/       #   节点实现
-│   │   ├── llm/             #   LLM 工厂
-│   │   └── prompts/         #   Prompt 模板
-│   ├── skills/              # 🛠️ 原子能力层
-│   │   ├── rag/             #   混合检索
-│   │   ├── memory/          #   记忆检索技能
-│   │   ├── profile/         #   用户画像
-│   │   ├── research/        #   网络搜索
-│   │   ├── ocr/             #   图片 OCR
-│   │   ├── common/          #   公共技能
-│   │   └── tools/           #   代码执行
-│   ├── infrastructure/      # 🏗️ 基础设施
-│   │   ├── config/          #   配置管理
-│   │   ├── database/        #   SQLAlchemy ORM
-│   │   ├── checkpoint/      #   Redis Checkpoint
-│   │   ├── queue/           #   ARQ 异步任务
-│   │   ├── sandbox/         #   代码沙箱
-│   │   ├── observability/   #   可观测性
-│   │   └── utils/           #   工具函数
-│   ├── agents/              # 🤖 Agent 节点工厂
-│   ├── memory/              # 🧠 记忆模块
-│   │   ├── long_term/       #   长期记忆引擎
-│   │   └── vector_stores/   #   向量存储 (pgvector)
-│   └── examples/            # 🔬 调试脚本与示例
-│
-├── configs/                 # ⚙️ 配置文件
-├── docker/                 # 🐳 Docker 初始化脚本
-├── docs/                   # 📖 部署/安全/测试文档
-├── frontend/               # 💻 Next.js 工作台前端
-├── scripts/                # 🧰 工具脚本
-├── data/                   # 📁 运行时数据
-├── tests/                  # 🧪 单元测试
-│
-├── docker-compose.yml      # 🐳 基础设施编排
-├── pyproject.toml         # 🐍 Python 项目配置
-└── uv.lock                 # 🔒 依赖锁文件
-```
+</details>
+
+---
 
 ## ⚡ 核心特性
 
@@ -188,28 +159,44 @@
 | 💻 **前端工作台** | `/login`、`/chat`、`/knowledge`、`/conversations`、`/memory`、`/tasks`、`/settings`、`/admin/settings` 已实现并对齐后端 |
 | 🛡️ **前端门禁** | Node 22 环境下 `npm run lint` 与 `npx next build` 已通过 |
 
-## 🚀 快速开始
+---
 
-### 1️⃣ 环境准备
+## 🚀 快速开始 / Quick Start
+
+### 1. 准备环境与依赖
+
+本项目推荐使用 [uv](https://github.com/astral-sh/uv) 进行 Python 环境与依赖管理：
 
 ```bash
+uv python install 3.11
 uv sync
 ```
 
 说明：
-
 - 默认会创建 `.venv/` 并安装开发依赖
 - 如需显式指定 Python 3.11，可先执行 `uv python install 3.11`
 - 常用命令建议统一使用 `uv run ...`
 
-### 2️⃣ 配置
+### 2. 核心配置
+
+复制配置模板并修改其中的敏感信息与连接串：
 
 ```bash
 cp configs/config.example.json configs/config.json
-# 编辑 configs/config.json 配置各项参数
 ```
+*(Windows PowerShell 请使用 `Copy-Item configs/config.example.json configs/config.json`)*
 
-**配置结构示例**：
+**⚠️ 必须修改的配置项：**
+- `auth.secret_key` (至少 32 个字符)
+- `database.password` (避免使用弱密码)
+- `llm.api_key`
+
+完整样例请直接参考 `configs/config.example.json`。
+
+**环境变量覆盖**：
+*提示：也可以通过环境变量形如 `AUTH_SECRET_KEY` 来覆盖 JSON 配置。*
+
+配置示例（关键字段）：
 
 ```json
 {
@@ -218,169 +205,33 @@ cp configs/config.example.json configs/config.json
     "base_url": "https://api.openai.com/v1",
     "model": "gpt-4o"
   },
-  "model_manager": {
-    "provider": "modelscope",
-    "cache_dir": "",
-    "revision": "",
-    "trust_remote_code": true,
-    "modelscope_fallback_to_hf": true
-  },
-  "local_models": {
-    "ocr_model": "",
-    "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
-    "rerank_model": "Qwen/Qwen3-Reranker-0.6B"
-  },
   "embeddings": {
     "provider": "modelscope",
-    "backend": "sentence_transformers",
-    "model_name": "Qwen/Qwen3-Embedding-0.6B",
-    "base_url": "",
-    "api_key": "",
-    "timeout_seconds": 30,
-    "env_var": "MODEL_PATH_EMBEDDING",
-    "device": "auto"
+    "model_name": "Qwen/Qwen3-Embedding-0.6B"
   },
   "reranker": {
     "provider": "modelscope",
-    "backend": "sentence_transformers",
-    "model_name": "Qwen/Qwen3-Reranker-0.6B",
-    "base_url": "",
-    "api_key": "",
-    "timeout_seconds": 30,
-    "env_var": "MODEL_PATH_RERANKER",
-    "device": "auto"
-  },
-  "search": {
-    "provider": "duckduckgo",
-    "tavily_api_key": ""
+    "model_name": "Qwen/Qwen3-Reranker-0.6B"
   },
   "database": {
-    "type": "postgres",
-    "url": "postgresql+psycopg://<DB_USER>:<DB_PASSWORD>@localhost:5432/<DB_NAME>",
-    "host": "localhost",
-    "port": 5432,
-    "user": "postgres",
-    "password": "<DB_PASSWORD>",
-    "db_name": "agent_app"
+    "url": "postgresql+psycopg://<DB_USER>:<DB_PASSWORD>@localhost:5432/<DB_NAME>"
   },
   "queue": {
     "redis_url": "redis://:redissecret@localhost:6379/0"
   },
-  "storage_s3": {
-    "s3_endpoint": "",
-    "s3_access_key": "",
-    "s3_secret_key": "",
-    "s3_bucket": "agframe",
-    "s3_secure": false
-  },
   "auth": {
-    "secret_key": "<AUTH_SECRET_KEY_AT_LEAST_32_CHARS>",
-    "algorithm": "HS256",
-    "access_token_expire_minutes": 30
-  },
-  "general": {
-    "app_name": "My Agent App"
-  },
-  "rag": {
-    "retrieval": {
-      "mode": "hybrid",
-      "dense_k": 20,
-      "sparse_k": 20,
-      "candidate_k": 20,
-      "final_k": 3,
-      "rrf_k": 60,
-      "weights": [0.5, 0.5]
-    }
-  },
-  "prompt": {
-    "budget": {
-      "max_recent_history_lines": 10,
-      "max_docs": 3,
-      "max_memories": 3
-    }
-  },
-  "nodes": {
-    "enabled": [
-      "router",
-      "retrieve_docs",
-      "rerank_docs",
-      "retrieve_memories",
-      "assemble",
-      "generate"
-    ]
-  },
-  "feature_flags": {
-    "enable_docs_rag": true,
-    "enable_chat_memory": true,
-    "enable_self_correction": true,
-    "enable_human_approval": false,
-    "pgvector_dimension": 1024
-  },
-  "sandbox": {
-    "enabled": false,
-    "image": "python:3.11-slim",
-    "timeout": 30
-  },
-  "self_correction": {
-    "max_attempts": 2
-  },
-  "server": {
-    "host": "0.0.0.0",
-    "port": 8000,
-    "cors_origins": [],
-    "cors_allow_credentials": false
-  },
-  "storage_local": {
-    "documents_dir": "data/documents",
-    "uploads_dir": "data/uploads",
-    "data_dir": "data"
+    "secret_key": "<AUTH_SECRET_KEY_AT_LEAST_32_CHARS>"
   }
 }
 ```
 
-完整样例请直接参考 `configs/config.example.json`。
+### 3. 一键启动基础设施
 
-**环境变量覆盖**：
-
-敏感配置可通过环境变量覆盖：
+使用 Docker Compose 快速拉起数据库、缓存、对象存储和可观测性组件：
 
 ```bash
-export LLM_API_KEY="sk-xxx"
-export DATABASE_URL="postgresql+psycopg://<DB_USER>:<DB_PASSWORD>@localhost:5432/<DB_NAME>"
-export REDIS_URL="redis://:redissecret@localhost:6379/0"
-```
-
-说明：
-
-- 远端 Hugging Face / ModelScope 模型下载建议显式设置 `revision`
-- 前端建议使用 Node 22 LTS
-- 常见敏感项优先用环境变量覆盖，完整映射见 `configs/config.example.json` 中 `env_overrides`
-
-### 3️⃣ 启动依赖
-
-```bash
-# 复制环境变量模板 (如果存在，否则手动创建 .env)
-# cp .env.example .env
-
-# 启动所有基础设施
 docker-compose up -d
-
-# 验证服务状态
-docker-compose ps
 ```
-
-### 3️⃣.1 启动前端
-
-```bash
-cd frontend
-export NEXT_PUBLIC_API_URL="http://127.0.0.1:8000"
-npm install
-npm run lint -- --max-warnings=0
-npx next build
-npm run dev
-```
-
-**启动的服务：**
 
 | 🔌 服务 | 🚪 端口 | 📝 用途 |
 |:---|:---:|:---|
@@ -391,23 +242,37 @@ npm run dev
 | MinIO | 9000/9001 | S3 对象存储 |
 | Langfuse | 3000 | 可观测性追踪 |
 
-### 4️⃣ 启动后端与 Worker
+初始化 MinIO 存储桶：
+```bash
+docker-compose exec minio mc mb local/agframe
+```
 
+### 4. 启动后端与 Worker
+
+**API 服务器 (端口: 8000)**
 ```bash
 uv run python -m app.server.main
+```
+
+**异步 Worker (处理文档解析等任务)**
+```bash
 uv run arq app.infrastructure.queue.worker_settings
 ```
 
 后端服务运行在 `http://localhost:8000`
 
-- **Swagger Docs**: http://localhost:8000/docs
+### 5. 启动前端工作台
 
-说明：
+```bash
+cd frontend
+export NEXT_PUBLIC_API_URL="http://127.0.0.1:8000"
+npm install
+npm run dev
+```
 
-- 如果你启用了 MinIO/S3 存储，需要自行在 MinIO 中创建 `agframe` bucket
-- 仓库当前未内置 `mc` 初始化脚本，建议通过 MinIO Console 或你自己的 `mc` 客户端完成
+前端启动后，打开 [http://127.0.0.1:3000](http://127.0.0.1:3000) 即可访问。
 
-## ⏹️ 停止服务
+### ⏹️ 停止服务
 
 ```bash
 # 停止所有基础设施
@@ -417,14 +282,55 @@ docker-compose down
 docker-compose down -v
 ```
 
-## 📖 文档索引
+---
 
-- [部署最小文档](./docs/deployment.md)
-- [安全最小文档](./docs/security.md)
-- [测试最小文档](./docs/testing.md)
-- [前端架构文档](./docs/frontend-architecture.md)
-- [0.1.1 发布计划](./docs/release-0.1.1-plan.md)
-- [Roadmap](./docs/roadmap.md)
+## 🔌 核心 API 清单 / API Reference
+
+<details>
+<summary><b>点击查看详细 API 列表</b></summary>
+<br>
+
+| 方法 | 路径 | 说明 |
+| :--- | :--- | :--- |
+| `POST` | `/auth/register` | 用户注册 (首个用户自动为 admin) |
+| `POST` | `/auth/token` | 登录并获取 Bearer Token |
+| `GET` | `/auth/users/me` | 当前用户信息 |
+| `GET` | `/health` | 健康检查 |
+| `GET` | `/health/ready` | 就绪检查 |
+| `GET` | `/health/live` | 存活检查 |
+| `POST` | `/chat/invoke` | 对话调用 |
+| `POST` | `/chat/stream` | LangServe 对话流调用 |
+| `POST` | `/chat/batch` | LangServe 批量对话调用 |
+| `POST` | `/upload` | 上传 PDF 并异步解析入库 |
+| `POST` | `/upload/image` | 上传图片 |
+| `GET` | `/documents` | 文档列表 / 搜索 |
+| `GET` | `/documents/{doc_id}` | 文档详情与预览 |
+| `DELETE` | `/documents/{doc_id}` | 删除文档 |
+| `POST` | `/documents/{doc_id}/reindex` | 文档重建索引 |
+| `GET` | `/tasks/summary` | 任务聚合摘要 |
+| `GET` | `/tasks/incidents` | 任务事件流 |
+| `PATCH` | `/tasks/incidents/{incident_id}` | 标记事件处理状态 |
+| `GET` | `/tasks/{task_id}` | 任务详情与诊断 |
+| `POST` | `/tasks/{task_id}/retry` | 重试失败任务 |
+| `GET` | `/history/{user_id}` | 会话列表 |
+| `GET` | `/history/{user_id}/{session_id}` | 会话详情 |
+| `POST` | `/history/{user_id}/save` | 保存会话 |
+| `PATCH` | `/history/{user_id}/{session_id}` | 重命名会话 |
+| `DELETE` | `/history/{user_id}/{session_id}` | 删除会话 |
+| `GET` | `/memory/profile` | 查看明细画像详情与长期记忆 |
+| `PUT` | `/memory/profile` | 更新用户画像 |
+| `GET` | `/memory/items` | 查询长期记忆 |
+| `POST` | `/memory/items` | 新增长期记忆 |
+| `DELETE` | `/memory/items/{item_id}` | 删除长期记忆 |
+| `GET` | `/settings` | 获取系统设置（Admin） |
+| `POST` | `/settings` | 更新系统设置（Admin） |
+| `GET` | `/settings/user` | 获取个人设置 |
+| `POST` | `/settings/user` | 更新个人设置 |
+| `POST` | `/vectorstore/docs/clear` | 清空文档向量库（Admin） |
+
+</details>
+
+---
 
 ## 🔧 开发指南
 
@@ -448,48 +354,6 @@ db_host = settings.database.host
 config = settings.model_dump()
 ```
 
-### 🔌 核心 API
-
-| 🏷️ 方法 | 📡 端点 | 🎯 功能 |
-|:---:|:---|:---|
-| `POST` | `/auth/token` | JWT 登录 |
-| `POST` | `/auth/register` | 用户注册 |
-| `GET` | `/auth/users/me` | 获取当前用户 |
-| `GET` | `/health` | 健康检查 |
-| `GET` | `/health/ready` | 就绪检查 |
-| `GET` | `/health/live` | 存活检查 |
-| `POST` | `/chat/invoke` | LangGraph 对话触发 |
-| `POST` | `/upload` | PDF 上传并入队索引 |
-| `POST` | `/upload/image` | 图片上传（OCR 占位） |
-| `GET` | `/documents` | 文档列表/搜索 |
-| `GET` | `/documents/{doc_id}` | 文档详情与预览 |
-| `DELETE` | `/documents/{doc_id}` | 删除文档 |
-| `POST` | `/documents/{doc_id}/reindex` | 文档重建索引 |
-| `GET` | `/tasks/summary` | 任务聚合摘要 |
-| `GET` | `/tasks/incidents` | 任务失败事件流 |
-| `PATCH` | `/tasks/incidents/{incident_id}` | 标记事件已处理/归档 |
-| `GET` | `/tasks/{task_id}` | 查询异步任务状态 |
-| `POST` | `/tasks/{task_id}/retry` | 重试失败任务 |
-| `GET` | `/history/{user_id}` | 查询历史会话 |
-| `GET` | `/history/{user_id}/{session_id}` | 查询单个会话详情 |
-| `POST` | `/history/{user_id}/save` | 保存历史会话 |
-| `PATCH` | `/history/{user_id}/{session_id}` | 重命名历史会话 |
-| `DELETE` | `/history/{user_id}/{session_id}` | 删除历史会话 |
-| `GET` | `/interrupt/{session_id}` | 查询中断状态 |
-| `POST` | `/interrupt/{session_id}/approve` | 审批中断动作 |
-| `GET` | `/interrupt/{session_id}/resume` | 获取恢复参数 |
-| `GET` | `/memory/profile` | 获取当前用户画像 |
-| `PUT` | `/memory/profile` | 更新当前用户画像 |
-| `GET` | `/memory/items` | 获取长期记忆列表 |
-| `POST` | `/memory/items` | 新增长期记忆 |
-| `DELETE` | `/memory/items/{item_id}` | 删除长期记忆 |
-| `GET` | `/settings` | 获取系统配置（Admin） |
-| `POST` | `/settings` | 更新系统配置（Admin） |
-| `GET` | `/settings/user` | 获取个人配置 |
-| `POST` | `/settings/user` | 更新个人配置 |
-| `GET` | `/profile/{user_id}` | 获取用户画像 |
-| `POST` | `/vectorstore/docs/clear` | 清空向量库（Admin） |
-
 ### 🧪 测试与验收
 
 ```bash
@@ -503,16 +367,26 @@ uv run ./scripts/smoke_workbench.sh
 uv run ./scripts/live_workbench_smoke.sh --base-url http://127.0.0.1:8000
 ```
 
-如果需要把 live smoke 纳入测试门禁，可设置：
-
-```bash
-export LIVE_SMOKE_BASE_URL="http://127.0.0.1:8000"
-uv run ./scripts/run_test_suite.sh
-```
-
 ### 📈 运行评测
 
 ```bash
 # 运行所有评估与测试
 uv run ./scripts/run_evals.sh
 ```
+
+---
+
+## 📖 文档索引
+
+- [部署说明](./docs/deployment.md)
+- [安全说明](./docs/security.md)
+- [测试指南](./docs/testing.md)
+- [前端架构](./docs/frontend-architecture.md)
+- [项目路线图](./docs/roadmap.md)
+
+---
+
+<div align="center">
+  <p><b>Version</b>: <code>0.1.1</code></p>
+  <p><i>Made with passion for the Agentic future.</i></p>
+</div>

@@ -138,18 +138,6 @@ def test_prune_document_content_keeps_goal_relevant_lines():
 
 
 def test_prune_document_content_supports_reranker_mode(monkeypatch):
-    class _Reranker:
-        def rerank(self, query: str, documents: list[str], top_k: int = 3):
-            assert query.startswith("retry backoff")
-            scores = []
-            for index, document in enumerate(documents):
-                score = 1.0 if "backoff" in document else 0.0
-                scores.append((document, score, index))
-            scores.sort(key=lambda item: item[1], reverse=True)
-            return scores[:top_k]
-
-    monkeypatch.setattr(context_pruner, "get_reranker", lambda: _Reranker())
-
     content = "\n".join(
         [
             "setup",
@@ -176,16 +164,10 @@ def test_prune_document_content_supports_reranker_mode(monkeypatch):
 
     assert "backoff strategy" in pruned
     assert stats["method"] == "reranker"
-    assert stats["scoring_source"] == "reranker_model"
+    assert stats["scoring_source"] == "lightweight_ranker"
 
 
 def test_prune_document_content_auto_mode_falls_back_to_heuristic_for_short_text(monkeypatch):
-    class _Reranker:
-        def rerank(self, query: str, documents: list[str], top_k: int = 3):
-            raise AssertionError("reranker should not be called for short content")
-
-    monkeypatch.setattr(context_pruner, "get_reranker", lambda: _Reranker())
-
     pruned, stats = prune_document_content(
         "alpha\nretry handler\ncleanup",
         query="retry",
@@ -208,18 +190,6 @@ def test_prune_document_content_auto_mode_falls_back_to_heuristic_for_short_text
 
 
 def test_prune_document_content_auto_mode_uses_reranker_for_long_text(monkeypatch):
-    class _Reranker:
-        def rerank(self, query: str, documents: list[str], top_k: int = 3):
-            assert query.startswith("retry backoff")
-            scores = []
-            for index, document in enumerate(documents):
-                score = 1.0 if "backoff" in document else 0.0
-                scores.append((document, score, index))
-            scores.sort(key=lambda item: item[1], reverse=True)
-            return scores[:top_k]
-
-    monkeypatch.setattr(context_pruner, "get_reranker", lambda: _Reranker())
-
     content = "\n".join(["setup"] * 8 + ["critical backoff line"] + ["cleanup"] * 8)
     pruned, stats = prune_document_content(
         content,
@@ -306,21 +276,6 @@ def test_prune_document_content_heuristic_uses_semantic_aliases():
 
 
 def test_prune_document_content_reranker_window_uses_neighbor_context(monkeypatch):
-    class _Reranker:
-        def rerank(self, query: str, documents: list[str], top_k: int = 3):
-            scores = []
-            for index, document in enumerate(documents):
-                score = 0.0
-                if "oauth callback received" in document and "issue browser grant from callback state" in document:
-                    score = 2.0
-                elif "prolong identity artifact in cache" in document:
-                    score = 1.0
-                scores.append((document, score, index))
-            scores.sort(key=lambda item: item[1], reverse=True)
-            return scores[:top_k]
-
-    monkeypatch.setattr(context_pruner, "get_reranker", lambda: _Reranker())
-
     content = "\n".join(
         [
             "oauth callback received",
@@ -347,18 +302,10 @@ def test_prune_document_content_reranker_window_uses_neighbor_context(monkeypatc
 
     assert "issue browser grant from callback state" in pruned
     assert stats["method"] == "reranker"
-    assert stats["scoring_source"] == "reranker_model"
+    assert stats["scoring_source"] == "lightweight_ranker"
 
 
-def test_prune_document_content_reranker_uses_local_phrase_ranker_when_model_disabled(monkeypatch):
-    class _DisabledReranker:
-        _disabled = True
-
-        def rerank(self, query: str, documents: list[str], top_k: int = 3):
-            raise AssertionError("disabled reranker should use local phrase fallback")
-
-    monkeypatch.setattr(context_pruner, "get_reranker", lambda: _DisabledReranker())
-
+def test_prune_document_content_reranker_uses_lightweight_ranker():
     content = "\n".join(
         [f"filler line {i}" for i in range(45)]
         + [
@@ -389,34 +336,7 @@ def test_prune_document_content_reranker_uses_local_phrase_ranker_when_model_dis
     assert "discard browser grant from callback state" in pruned
     assert "purge persisted identity lease" in pruned
     assert stats["method"] == "reranker"
-    assert stats["scoring_source"] == "local_phrase_fallback"
-
-
-def test_prune_document_content_reranker_failure_falls_back_to_heuristic(monkeypatch):
-    class _FailingReranker:
-        def rerank(self, query: str, documents: list[str], top_k: int = 3):
-            raise RuntimeError("boom")
-
-    monkeypatch.setattr(context_pruner, "get_reranker", lambda: _FailingReranker())
-
-    pruned, stats = prune_document_content(
-        "setup\nretry loop\nbackoff strategy\ncleanup",
-        query="How does retry work?",
-        focus_hint="retry backoff",
-        config=ContextPruningConfig(
-            enabled=True,
-            method="reranker",
-            min_keep_lines=1,
-            max_keep_ratio=0.5,
-            neighbor_window=0,
-            max_lines_per_item=2,
-            score_threshold=0.2,
-        ),
-    )
-
-    assert "backoff strategy" in pruned
-    assert stats["method"] == "heuristic"
-    assert stats["scoring_source"] == "heuristic"
+    assert stats["scoring_source"] == "lightweight_ranker"
 
 
 def test_prune_document_content_neighbor_window_preserves_protected_lines():

@@ -41,6 +41,13 @@ def _get_candidate_k() -> int:
     return settings.rag.retrieval.candidate_k
 
 
+def _get_final_k() -> int:
+    retrieval_k = settings.rag.retrieval.final_k
+    if retrieval_k:
+        return retrieval_k
+    return settings.prompt.budget.max_docs
+
+
 def _build_focus_hint(state: AgentState, query: str) -> str:
     ctx = dict(state.get("context") or {})
     explicit_hint = str(ctx.get("context_focus_hint") or state.get("context_focus_hint") or "").strip()
@@ -59,6 +66,7 @@ async def retrieve_docs_node(state: AgentState) -> dict[str, Any]:
     messages = list(state.get("messages") or [])
     query = _get_last_user_query(messages)
     fetch_k = _get_candidate_k()
+    final_k = _get_final_k()
     focus_hint = _build_focus_hint(state, query)
 
     # 从 context 中获取 user_id (通常由 server 在 invoke 时传入 state)
@@ -78,6 +86,9 @@ async def retrieve_docs_node(state: AgentState) -> dict[str, Any]:
         focus_hint=focus_hint,
         config=build_pruning_config(pruning_cfg),
     )
+    restored_docs = await anyio.to_thread.run_sync(
+        lambda: get_rag_engine().restore_parents(list(pruned_docs), k=final_k)
+    )
 
     retrieval_debug = build_retrieval_debug_payload(
         current=ctx.get("retrieval_debug"),
@@ -89,6 +100,7 @@ async def retrieve_docs_node(state: AgentState) -> dict[str, Any]:
     )
     ctx["retrieved_docs_candidates_raw"] = docs
     ctx["retrieved_docs_candidates"] = pruned_docs
+    ctx["retrieved_docs"] = restored_docs
     ctx = build_chat_context_pruning_payload(
         current=ctx,
         focus_hint=focus_hint,
@@ -112,6 +124,7 @@ async def retrieve_docs_node(state: AgentState) -> dict[str, Any]:
     return {
         "retrieved_docs_candidates_raw": docs,
         "retrieved_docs_candidates": pruned_docs,
+        "retrieved_docs": restored_docs,
         "context_focus_hint": focus_hint,
         "context": ctx,
         "retrieval_debug": retrieval_debug,

@@ -220,7 +220,7 @@ def test_etl_flow():
             if os.path.exists(fake_pdf): os.remove(fake_pdf)
 
 def test_search_pipeline():
-    print("\n>>> Testing Search Pipeline (Hybrid + Rerank) ...")
+    print("\n>>> Testing Search Pipeline (Hybrid + RRF) ...")
     
     engine = RAGEngine()
     
@@ -229,10 +229,9 @@ def test_search_pipeline():
     
     doc_dense = Document(page_content="Dense Result", metadata={"doc_id":1})
     mock_vs.similarity_search.return_value = [doc_dense]
-    mock_vs.sparse_search.return_value = [Document(page_content="Sparse Result", metadata={"doc_id":2})]
-    
-    # Configure Mock Reranker
-    engine.reranker.rerank.return_value = [("Dense Result", 0.9, 0), ("Sparse Result", 0.8, 1)]
+    mock_vs.sparse_search.return_value = [
+        Document(page_content="Sparse Result", metadata={"doc_id":2})
+    ]
     
     results = engine.retrieve_context("test", user_id="u1")
     print(f"Retrieved {len(results)} results.")

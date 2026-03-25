@@ -1,5 +1,6 @@
 import os
 from importlib import import_module
+from dataclasses import replace
 from typing import Any
 
 from langchain_community.document_loaders import (
@@ -28,7 +29,6 @@ from app.infrastructure.utils.text_split import split_text_by_chars
 from app.memory.vector_stores.pgvector_vectorstore import PgVectorVectorStore
 
 from app.runtime.llm.embeddings import get_embeddings
-from app.runtime.llm.reranker import get_reranker
 from app.skills.ocr.ocr_engine import ocr_engine
 from app.skills.rag.hybrid_retriever_service import (
     HybridRetrievalConfig,
@@ -63,7 +63,6 @@ class RAGEngine:
     def __init__(self):
         logger.info("Initializing RAG engine...")
         self.embeddings = get_embeddings()
-        self.reranker = get_reranker()
 
         self._vectorstore = None
         self._hybrid_retriever: HybridRetrieverService | None = None
@@ -312,6 +311,13 @@ class RAGEngine:
             self._hybrid_retriever = HybridRetrieverService(
                 vectorstore=self._vectorstore
             )
+        candidate_k = max(1, int(fetch_k or cfg.candidate_k))
+        cfg = replace(
+            cfg,
+            candidate_k=candidate_k,
+            dense_k=max(cfg.dense_k, candidate_k),
+            sparse_k=max(cfg.sparse_k, candidate_k),
+        )
 
         return self._hybrid_retriever.retrieve_candidates(
             query, config=cfg, filter=filter_dict
@@ -333,28 +339,10 @@ class RAGEngine:
             )
             if not candidates:
                 return []
-            logger.info(f"正在对 {len(candidates)} 条候选文档进行重排...")
-            reranked = self.rerank_candidates(query, candidates, k=k)
-            return self.restore_parents(reranked, k=k)
+            return self.restore_parents(candidates, k=k)
         except Exception as e:
             logger.error(f"检索上下文错误: {e}")
             return []
-
-    def rerank_candidates(
-        self, query: str, candidates: list[Document], *, k: int
-    ) -> list[Document]:
-        if not candidates or k <= 0:
-            return []
-        candidate_texts = [doc.page_content for doc in candidates]
-        reranked_results = self.reranker.rerank(query, candidate_texts, top_k=k)
-        out: list[Document] = []
-        for _, score, idx in reranked_results:
-            doc = candidates[idx]
-            meta = dict(getattr(doc, "metadata", {}) or {})
-            meta["rerank_score"] = score
-            doc.metadata = meta
-            out.append(doc)
-        return out
 
     def restore_parents(self, docs: list[Document], *, k: int) -> list[Document]:
         if not docs:
@@ -369,7 +357,12 @@ class RAGEngine:
 
         for doc in docs:
             meta = dict(getattr(doc, "metadata", {}) or {})
-            score = float(meta.get("rerank_score") or 0.0)
+            score = float(
+                meta.get("rerank_score")
+                or meta.get("retrieval_rrf_score")
+                or meta.get("bm25_score")
+                or 0.0
+            )
             parent_id = meta.get("parent_chunk_id")
             if parent_id is None:
                 fallback_docs.append(doc)
@@ -402,14 +395,20 @@ class RAGEngine:
                                 "doc_id": int(p["doc_id"]),
                                 "parent_chunk_id": parent_id,
                                 "page_num": p.get("page_num"),
-                                "rerank_score": parent_scores.get(parent_id),
+                                "retrieval_rrf_score": parent_scores.get(parent_id),
                             },
                         )
                     )
             except Exception as e:
                 logger.error(f"获取父文档失败，降级返回原切片: {e}")
 
-        out.sort(key=lambda x: x.metadata.get("rerank_score", 0), reverse=True)
+        out.sort(
+            key=lambda x: x.metadata.get("rerank_score")
+            or x.metadata.get("retrieval_rrf_score")
+            or x.metadata.get("bm25_score")
+            or 0,
+            reverse=True,
+        )
         return out[:k]
 
 

@@ -192,7 +192,6 @@ class NodesConfig(BaseSettings):
     enabled: list[str] = [
         "router",
         "retrieve_docs",
-        "rerank_docs",
         "retrieve_memories",
         "assemble",
         "generate",

@@ -7,8 +7,8 @@ from typing import Any
 from langchain_core.documents import Document
 
 from app.infrastructure.database.stores import PgUserMemoryStore
+from app.infrastructure.utils.lightweight_ranker import rank_text_candidates
 from app.runtime.llm.embeddings import get_embeddings
-from app.runtime.llm.reranker import get_reranker
 
 
 def _sha256_hex(text: str) -> str:
@@ -19,7 +19,6 @@ class UserMemoryEngine:
     def __init__(self):
         self.store = PgUserMemoryStore()
         self.embeddings = get_embeddings()
-        self.reranker = get_reranker()
 
     def add_chat_summary(
         self,
@@ -86,12 +85,16 @@ class UserMemoryEngine:
         if not candidates:
             return []
         texts = [str(c.get("text") or "") for c in candidates]
-        reranked = self.reranker.rerank(q, texts, top_k=min(int(k), len(texts)))
+        reranked = rank_text_candidates(
+            q,
+            texts,
+            top_k=min(int(k), len(texts)),
+        )
         out: list[Document] = []
-        for _, score, idx in reranked:
+        for idx, score in reranked:
             c = candidates[idx]
             meta = dict(c.get("metadata_json") or {})
-            meta["rerank_score"] = score
+            meta["rank_score"] = score
             out.append(Document(page_content=str(c.get("text") or ""), metadata=meta))
         return out
 
@@ -149,14 +152,18 @@ class UserMemoryEngine:
         if not candidates:
             return []
         texts = [str(c.get("text") or "") for c in candidates]
-        reranked = self.reranker.rerank(q, texts, top_k=min(int(k), len(texts)))
+        reranked = rank_text_candidates(
+            q,
+            texts,
+            top_k=min(int(k), len(texts)),
+        )
         out: list[dict[str, Any]] = []
-        for _, score, idx in reranked:
+        for idx, score in reranked:
             c = dict(candidates[idx])
             meta = dict(c.get("metadata_json") or {})
-            meta["rerank_score"] = score
+            meta["rank_score"] = score
             c["metadata_json"] = meta
-            c["rerank_score"] = score
+            c["rank_score"] = score
             out.append(c)
         return out
 

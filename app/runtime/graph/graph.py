@@ -13,7 +13,6 @@ from app.skills.common.grader import grader_node
 from app.skills.common.router import router_node
 from app.skills.memory.retrieve_memories import retrieve_memories_node
 from app.skills.profile.retrieve_profile import retrieve_profile_node
-from app.skills.rag.rerank_docs import rerank_docs_node
 from app.skills.rag.retrieve_docs import retrieve_docs_node
 from app.skills.research.web_search import web_search_node
 
@@ -88,7 +87,6 @@ def run_app(checkpointer: Any | None = None):
 
     workflow.add_node("router", router_node)
     workflow.add_node("retrieve_docs", retrieve_docs_node)
-    workflow.add_node("rerank_docs", rerank_docs_node)
     workflow.add_node("retrieve_memories", retrieve_memories_node)
     workflow.add_node("retrieve_profile", retrieve_profile_node)
     workflow.add_node("assemble", assemble_prompt_node)
@@ -111,9 +109,8 @@ def run_app(checkpointer: Any | None = None):
             "none": "retrieve_profile",
         },
     )
-    workflow.add_edge("retrieve_docs", "rerank_docs")
     workflow.add_conditional_edges(
-        "rerank_docs",
+        "retrieve_docs",
         _after_docs_key,
         {"memories": "retrieve_memories", "profile": "retrieve_profile"},
     )

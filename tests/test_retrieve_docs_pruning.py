@@ -9,6 +9,7 @@ from app.skills.rag import retrieve_docs as retrieve_docs_module
 
 class _RagRetrieval:
     candidate_k = 5
+    final_k = 2
 
 
 class _ContextPruning:
@@ -27,6 +28,7 @@ class _ContextPruning:
 
 class _Prompt:
     context_pruning = _ContextPruning()
+    budget = type("_Budget", (), {"max_docs": 2})()
 
 
 class _Settings:
@@ -49,7 +51,18 @@ class _Engine:
                         "cleanup handler",
                     ]
                 ),
-                metadata={"doc_id": "doc-1"},
+                metadata={"doc_id": "doc-1", "parent_chunk_id": 42, "retrieval_rrf_score": 1.2},
+            )
+        ]
+
+    def restore_parents(self, docs: list[Document], *, k: int):
+        assert k == 2
+        assert len(docs) == 1
+        assert docs[0].metadata["parent_chunk_id"] == 42
+        return [
+            Document(
+                page_content="full parent chunk content",
+                metadata={"doc_id": "doc-1", "parent_chunk_id": 42, "retrieval_rrf_score": 1.2},
             )
         ]
 
@@ -84,3 +97,4 @@ async def test_retrieve_docs_node_prunes_candidates_with_focus_hint(monkeypatch)
     assert debug["scoring_source"] == "heuristic"
     assert result["trace"]["candidate_pruning"]["scoring_source"] == "heuristic"
     assert result["trace"]["candidate_pruning"]["char_savings"]["saved"] > 0
+    assert result["retrieved_docs"][0].page_content == "full parent chunk content"

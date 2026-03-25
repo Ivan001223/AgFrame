@@ -5,9 +5,9 @@ from typing import Any
 from langchain_core.documents import Document
 
 from app.infrastructure.database.stores import PgChatSummaryStore
+from app.infrastructure.utils.lightweight_ranker import rank_text_candidates
 from app.runtime.llm.embeddings import get_embeddings
 from app.runtime.llm.llm_factory import get_llm
-from app.runtime.llm.reranker import get_reranker
 
 
 def _format_chat_for_summary(messages: list[dict[str, Any]]) -> str:
@@ -54,7 +54,6 @@ class ChatSummaryIndex:
     """
     def __init__(self):
         self.embeddings = get_embeddings()
-        self.reranker = get_reranker()
         self._store = PgChatSummaryStore()
 
     def add_summary(
@@ -128,11 +127,15 @@ class ChatSummaryIndex:
         if not candidates:
             return []
         candidate_texts = [d.page_content for d in candidates]
-        reranked = self.reranker.rerank(query, candidate_texts, top_k=min(k, len(candidates)))
+        reranked = rank_text_candidates(
+            query,
+            candidate_texts,
+            top_k=min(k, len(candidates)),
+        )
         out: list[Document] = []
-        for _, score, idx in reranked:
+        for idx, score in reranked:
             d = candidates[idx]
-            d.metadata["rerank_score"] = score
+            d.metadata["rank_score"] = score
             out.append(d)
         return out
 

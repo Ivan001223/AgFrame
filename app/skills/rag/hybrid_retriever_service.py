@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -112,6 +113,7 @@ class HybridRetrieverService:
         self._vectorstore = vectorstore
         self._bm25 = None
         self._bm25_doc_count = -1
+        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="hybrid-retrieval")
 
     def _ensure_bm25(self) -> bool:
         docs = _iter_vectorstore_docs(self._vectorstore)
@@ -148,13 +150,15 @@ class HybridRetrieverService:
         candidate_k = max(1, int(cfg.candidate_k))
         rrf_k = max(1, int(cfg.rrf_k))
         w_sparse, w_dense = cfg.weights if cfg.weights else (0.5, 0.5)
-
-        # Pass filter to similarity_search (supported by PgVectorVectorStore)
-        dense_docs = list(
-            self._vectorstore.similarity_search(query, k=dense_k, filter=filter)
+        dense_future = self._executor.submit(
+            self._vectorstore.similarity_search,
+            query,
+            dense_k,
+            filter,
         )
 
         if mode == "dense":
+            dense_docs = list(dense_future.result())
             for i, d in enumerate(dense_docs, start=1):
                 meta = dict(getattr(d, "metadata", {}) or {})
                 meta["retrieval_dense_rank"] = i
@@ -169,19 +173,21 @@ class HybridRetrieverService:
         # we should ideally filter the sparse_docs.
 
         if hasattr(self._vectorstore, "sparse_search"):
-            # Assume sparse_search supports filter if it exists on PgVector store (custom implementation?)
-            # Standard PGVector doesn't have sparse_search.
-            # If it's custom, let's hope it supports filter.
-            # Checking PgVectorVectorStore later.
-            # For now passing filter as kwargs if supported.
             try:
-                sparse_docs = list(
-                    self._vectorstore.sparse_search(query, k=sparse_k, filter=filter)
-                )[:sparse_k]
+                sparse_future = self._executor.submit(
+                    self._vectorstore.sparse_search,
+                    query,
+                    sparse_k,
+                    filter,
+                )
             except TypeError:
-                sparse_docs = list(self._vectorstore.sparse_search(query, k=sparse_k))[
-                    :sparse_k
-                ]
+                sparse_future = self._executor.submit(
+                    self._vectorstore.sparse_search,
+                    query,
+                    sparse_k,
+                )
+            dense_docs = list(dense_future.result())
+            sparse_docs = list(sparse_future.result())[:sparse_k]
 
             return _rrf_fuse(
                 [
@@ -194,6 +200,7 @@ class HybridRetrieverService:
 
         has_bm25 = self._ensure_bm25()
         if not has_bm25:
+            dense_docs = list(dense_future.result())
             for i, d in enumerate(dense_docs, start=1):
                 meta = dict(getattr(d, "metadata", {}) or {})
                 meta["retrieval_dense_rank"] = i
@@ -204,7 +211,9 @@ class HybridRetrieverService:
         # This is suboptimal for multi-tenancy if BM25 index is shared.
         # Ideally, we shouldn't use shared in-memory BM25 for multi-tenant.
         # But for now, let's filter the results.
-        all_sparse_results = self._bm25.search(query, top_k=sparse_k * 2)
+        sparse_future = self._executor.submit(self._bm25.search, query, sparse_k * 2)
+        dense_docs = list(dense_future.result())
+        all_sparse_results = sparse_future.result()
         all_sparse_docs = [doc for doc, score in all_sparse_results]
 
         sparse_docs = []

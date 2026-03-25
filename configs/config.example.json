@@ -14,7 +14,7 @@
   "local_models": {
     "ocr_model": "",
     "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
-    "rerank_model": "Qwen/Qwen3-Reranker-0.6B"
+    "rerank_model": ""
   },
   "embeddings": {
     "provider": "modelscope",
@@ -35,7 +35,7 @@
   "reranker": {
     "provider": "modelscope",
     "backend": "sentence_transformers",
-    "model_name": "Qwen/Qwen3-Reranker-0.6B",
+    "model_name": "",
     "base_url": "",
     "api_key": "",
     "timeout_seconds": 30,
@@ -103,7 +103,7 @@
     },
     "context_pruning": {
       "enabled": true,
-      "method": "heuristic",
+      "method": "auto",
       "auto_reranker_min_lines": 40,
       "auto_reranker_min_chars": 2500,
       "min_keywords": 2,
@@ -119,7 +119,6 @@
     "enabled": [
       "router",
       "retrieve_docs",
-      "rerank_docs",
       "retrieve_memories",
       "assemble",
       "generate"

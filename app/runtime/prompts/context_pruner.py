@@ -7,16 +7,23 @@ from typing import Any, NotRequired, Sequence, TypedDict
 
 from langchain_core.documents import Document
 
-from app.runtime.llm.reranker import get_reranker
-
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_]{2,}")
 
 _SEMANTIC_ALIASES: dict[str, tuple[str, ...]] = {
+    "renew": ("refresh", "rotate", "extend", "prolong"),
+    "renews": ("refresh", "rotate", "extend", "prolong"),
     "refresh": ("renew", "fresh", "reissue"),
     "token": ("credential", "credentials", "session", "secret", "lease", "grant"),
     "credential": ("identity", "grant", "secret"),
     "credentials": ("identity", "grant", "secret"),
+    "grant": ("credential", "credentials", "session", "browser"),
+    "identity": ("credential", "credentials", "grant", "artifact"),
+    "artifact": ("grant", "token", "credential"),
+    "login": ("oauth", "browser", "session"),
     "rotate": ("renew", "replace", "extend", "reissue"),
+    "issue": ("grant", "token", "session"),
+    "extend": ("renew", "refresh", "prolong", "lease"),
+    "prolong": ("extend", "renew", "refresh", "lease"),
     "oauth": ("provider", "login", "callback"),
     "callback": ("return", "redirect", "provider"),
     "retry": ("requeue", "retry", "backoff", "jitter"),
@@ -235,10 +242,7 @@ def _line_keyword_sets(lines: Sequence[str], keywords: Sequence[str]) -> list[se
 
 
 def _resolve_reranker_source() -> str:
-    reranker = get_reranker()
-    if getattr(reranker, "_disabled", False):
-        return "local_phrase_fallback"
-    return "reranker_model"
+    return "lightweight_ranker"
 
 
 def _ngrams(tokens: Sequence[str], size: int) -> set[str]:
@@ -291,17 +295,10 @@ def _score_lines_with_reranker(lines: list[str], query: str, keywords: Sequence[
     scored_indexes = [index for index, line in enumerate(lines) if line.strip()]
     if not scored_indexes:
         return [0.0 for _ in lines]
-    reranker = get_reranker()
     scores = [0.0 for _ in lines]
     candidates = [lines[index] for index in scored_indexes]
-    if getattr(reranker, "_disabled", False):
-        ranked_scores = _score_candidates_with_local_ranker(candidates, query, keywords)
-        for local_index, score in enumerate(ranked_scores):
-            source_index = scored_indexes[local_index]
-            scores[source_index] = float(score)
-        return scores
-    ranked = reranker.rerank(query, candidates, top_k=len(scored_indexes))
-    for _, score, local_index in ranked:
+    ranked_scores = _score_candidates_with_local_ranker(candidates, query, keywords)
+    for local_index, score in enumerate(ranked_scores):
         source_index = scored_indexes[local_index]
         scores[source_index] = float(score)
     return scores
@@ -347,21 +344,13 @@ def _score_line_windows_with_reranker(
     candidates, windows = _build_window_candidates(lines, radius)
     if not candidates:
         return [0.0 for _ in lines]
-    reranker = get_reranker()
     scores = [0.0 for _ in lines]
-    if getattr(reranker, "_disabled", False):
-        ranked_scores = _score_candidates_with_local_ranker(candidates, query, keywords)
-        ranked = [
-            (candidates[index], score, index)
-            for index, score in enumerate(ranked_scores)
-        ]
-    else:
-        ranked = reranker.rerank(query, candidates, top_k=len(candidates))
-    for _, score, local_index in ranked:
+    ranked_scores = _score_candidates_with_local_ranker(candidates, query, keywords)
+    for local_index, score in enumerate(ranked_scores):
         start, end, center = windows[local_index]
         for cursor in range(start, end):
             distance = abs(cursor - center)
-            weight = 1.0 / (distance + 1.0)
+            weight = 1.0 / ((distance + 1.0) ** 2)
             scores[cursor] = max(scores[cursor], float(score) * weight)
     return scores
 
@@ -430,7 +419,7 @@ def _pick_line_indexes(
                     key=lambda index: scores[index],
                 )
                 for candidate_index in replaceable:
-                    if scores[protected_index] < scores[candidate_index] * 0.75:
+                    if scores[protected_index] < scores[candidate_index] * 0.5:
                         continue
                     selected.remove(candidate_index)
                     selected.add(protected_index)

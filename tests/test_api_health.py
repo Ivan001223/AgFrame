@@ -34,6 +34,8 @@ def test_health_endpoints():
     assert r2.json()["checks"]["vectorstore"] == "ready"
     assert r2.json()["components"]["llm"] == "ready"
     assert r2.json()["components"]["embeddings"] == "configured"
+    assert r2.json()["components"]["retrieval"] == "hybrid_rrf"
+    assert r2.json()["components"]["context_pruning"] == "lightweight_ranker"
     assert r2.json()["components"]["reranker"] == "configured"
 
     r3 = c.get("/health/live")
@@ -65,4 +67,6 @@ def test_health_ready_reports_dependency_failures():
     assert r.json()["checks"]["vectorstore"] == "not_ready"
     assert r.json()["components"]["llm"] == "not_ready"
     assert r.json()["components"]["embeddings"] == "not_configured"
+    assert r.json()["components"]["retrieval"] == "hybrid_rrf"
+    assert r.json()["components"]["context_pruning"] == "lightweight_ranker"
     assert r.json()["components"]["reranker"] == "not_configured"

@@ -101,7 +101,7 @@ def test_settings_admin_and_user(monkeypatch: pytest.MonkeyPatch):
     assert g.status_code == 200
     assert g.json()["server"]["port"] == 8000
     assert g.json()["runtime_status"]["reranker"]["configured"] is False
-    assert g.json()["runtime_status"]["reranker"]["pruning_scoring_source"] == "local_phrase_fallback"
+    assert g.json()["runtime_status"]["reranker"]["pruning_scoring_source"] == "lightweight_ranker"
 
     u = c.post("/settings", json={"server": {"port": 9000}})
     assert u.status_code == 200
@@ -154,4 +154,4 @@ def test_settings_runtime_status_uses_reranker_resolution(monkeypatch: pytest.Mo
     g = c.get("/settings")
     assert g.status_code == 200
     assert g.json()["runtime_status"]["reranker"]["configured"] is True
-    assert g.json()["runtime_status"]["reranker"]["pruning_scoring_source"] == "reranker_model"
+    assert g.json()["runtime_status"]["reranker"]["pruning_scoring_source"] == "lightweight_ranker"

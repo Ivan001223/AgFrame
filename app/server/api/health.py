@@ -53,6 +53,10 @@ def _check_reranker_config() -> bool:
     )
 
 
+def _context_pruning_source() -> str:
+    return "lightweight_ranker"
+
+
 @router.get("/health", status_code=status.HTTP_200_OK)
 async def health_check():
     """
@@ -94,6 +98,8 @@ async def readiness_check():
     components = {
         "llm": "ready" if llm_ready else "not_ready",
         "embeddings": "configured" if embeddings_ready else "not_configured",
+        "retrieval": "hybrid_rrf",
+        "context_pruning": _context_pruning_source(),
         "reranker": "configured" if reranker_ready else "not_configured",
     }
 

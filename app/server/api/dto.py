@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from typing_extensions import TypedDict
@@ -20,16 +21,18 @@ class SettingsPayload(TypedDict, total=False):
 
 
 def build_runtime_status(config: dict[str, Any]) -> RuntimeStatus:
-    from app.runtime.llm.reranker import ModelReranker
-
-    reranker = ModelReranker(config=config)
-    model_name = str(getattr(reranker, "model_name", "") or "").strip()
-    configured = not bool(getattr(reranker, "_disabled", True))
+    reranker_cfg = config.get("reranker") or {}
+    local_models = config.get("local_models") or {}
+    env_var = str(reranker_cfg.get("env_var") or "MODEL_PATH_RERANKER").strip()
+    explicit_model = str(reranker_cfg.get("model_name") or local_models.get("rerank_model") or "").strip()
+    env_model = str(os.getenv(env_var, "")).strip() if env_var else ""
+    model_name = explicit_model or env_model
+    configured = bool(model_name)
     return {
         "reranker": {
             "configured": configured,
             "model_name": model_name or None,
-            "pruning_scoring_source": "reranker_model" if configured else "local_phrase_fallback",
+            "pruning_scoring_source": "lightweight_ranker",
         },
     }
 

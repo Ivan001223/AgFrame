@@ -95,6 +95,7 @@ docs/plans/
 docs/generated/
 docs/tmp/
 docs/drafts/
+.worktrees/
 
 frontend/.next/
 frontend/node_modules/

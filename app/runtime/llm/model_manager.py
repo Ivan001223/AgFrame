@@ -9,10 +9,19 @@ from typing import Any
 logger = logging.getLogger(__name__)
 from app.runtime.llm.model_importer import resolve_pretrained_source
 
+try:
+    torch = importlib.import_module("torch")
+except ModuleNotFoundError:
+    torch = None
+
 
 def _require_torch() -> Any:
+    global torch
+    if torch is not None:
+        return torch
     try:
-        return importlib.import_module("torch")
+        torch = importlib.import_module("torch")
+        return torch
     except ModuleNotFoundError as exc:
         raise RuntimeError(
             "缺少可选依赖 'torch'。如需本地 embeddings/reranker/Qwen 模型，请执行 "

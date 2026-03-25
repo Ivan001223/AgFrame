@@ -165,6 +165,72 @@ def test_model_manager_device_selection(monkeypatch):
     assert model_manager.get_best_device() == "cpu"
 
 
+def test_model_manager_require_torch_lazy_import_success(monkeypatch):
+    model_manager = _load_model_manager(monkeypatch)
+    torch_stub = model_manager.torch
+
+    def _fake_import_module(name: str):
+        assert name == "torch"
+        return torch_stub
+
+    monkeypatch.setattr(model_manager, "torch", None)
+    monkeypatch.setattr(model_manager.importlib, "import_module", _fake_import_module)
+
+    assert model_manager._require_torch() is torch_stub
+    assert model_manager.torch is torch_stub
+
+
+def test_model_manager_require_torch_missing_dependency(monkeypatch):
+    model_manager = _load_model_manager(monkeypatch)
+
+    def _missing_import(name: str):
+        assert name == "torch"
+        raise ModuleNotFoundError(name)
+
+    monkeypatch.setattr(model_manager, "torch", None)
+    monkeypatch.setattr(model_manager.importlib, "import_module", _missing_import)
+
+    with pytest.raises(RuntimeError, match="缺少可选依赖 'torch'"):
+        model_manager._require_torch()
+
+
+def test_model_manager_require_transformers_missing_dependency(monkeypatch):
+    model_manager = _load_model_manager(monkeypatch)
+
+    def _missing_import(name: str):
+        assert name == "transformers"
+        raise ModuleNotFoundError(name)
+
+    monkeypatch.setattr(model_manager.importlib, "import_module", _missing_import)
+
+    with pytest.raises(RuntimeError, match="缺少可选依赖 'transformers'"):
+        model_manager._require_transformers()
+
+
+def test_model_manager_require_transformers_success(monkeypatch):
+    model_manager = _load_model_manager(monkeypatch)
+
+    class _AutoModel:
+        pass
+
+    class _AutoProcessor:
+        pass
+
+    transformers_stub = ModuleType("transformers")
+    transformers_stub.AutoModel = _AutoModel
+    transformers_stub.AutoProcessor = _AutoProcessor
+
+    def _fake_import_module(name: str):
+        assert name == "transformers"
+        return transformers_stub
+
+    monkeypatch.setattr(model_manager.importlib, "import_module", _fake_import_module)
+
+    model_cls, processor_cls = model_manager._require_transformers()
+    assert model_cls is _AutoModel
+    assert processor_cls is _AutoProcessor
+
+
 def test_model_manager_load_model_and_processor_success(monkeypatch):
     model_manager = _load_model_manager(monkeypatch)
 
@@ -225,6 +291,66 @@ def test_model_manager_load_model_and_processor_success(monkeypatch):
     assert processor["source"] == "/tmp/model"
     assert _ModelCls.calls[0][0] == "/tmp/model"
     assert _ModelCls.calls[0][1]["trust_remote_code"] is False
+
+
+def test_model_manager_load_model_and_processor_uses_default_transformer_classes(monkeypatch):
+    model_manager = _load_model_manager(monkeypatch)
+
+    class _Loaded:
+        def __init__(self):
+            self.device = None
+            self.eval_called = False
+
+        def to(self, device):
+            self.device = device
+            return self
+
+        def eval(self):
+            self.eval_called = True
+
+    loaded = _Loaded()
+
+    class _DefaultModelCls:
+        calls = []
+
+        @classmethod
+        def from_pretrained(cls, source, **kwargs):
+            cls.calls.append((source, kwargs))
+            return loaded
+
+    class _DefaultProcessorCls:
+        calls = []
+
+        @classmethod
+        def from_pretrained(cls, source, **kwargs):
+            cls.calls.append((source, kwargs))
+            return {"source": source, "kwargs": kwargs}
+
+    monkeypatch.setattr(
+        model_manager,
+        "resolve_pretrained_source",
+        lambda **kwargs: type("Imported", (), {"pretrained_source": "/tmp/default-model"})(),
+    )
+    monkeypatch.setattr(
+        model_manager,
+        "_require_transformers",
+        lambda: (_DefaultModelCls, _DefaultProcessorCls),
+    )
+
+    spec = model_manager.ModelSpec(provider="hf", model_ref="repo/default-model")
+    model, processor = model_manager.load_model_and_processor(
+        spec=spec,
+        device="cpu",
+        model_cls=None,
+        processor_cls=None,
+    )
+
+    assert model is loaded
+    assert loaded.device == "cpu"
+    assert loaded.eval_called is True
+    assert processor["source"] == "/tmp/default-model"
+    assert _DefaultModelCls.calls[0][0] == "/tmp/default-model"
+    assert _DefaultProcessorCls.calls[0][0] == "/tmp/default-model"
 
 
 def test_model_manager_load_model_and_processor_processor_failure(monkeypatch):

@@ -1,14 +1,15 @@
-# 部署最小文档
+# Deployment Guide
 
-## 1. 前置条件
+## Requirements
 
 - Python 3.11.15
-- 建议固定使用仓库声明的 Python 版本（见 `.python-version`）
-- uv
-- Docker 与 Docker Compose
-- PostgreSQL/Redis 端口可用（本地默认 `5432`、`6379`）
+- `uv`
+- Docker and Docker Compose
+- reachable PostgreSQL and Redis ports
 
-## 2. 初始化配置
+Using the Python version declared by the repository is recommended.
+
+## Install
 
 ```bash
 uv python install 3.11.15
@@ -16,44 +17,48 @@ uv sync --no-dev
 cp configs/config.example.json configs/config.json
 ```
 
-如果当前部署需要本地 embedding / reranker / OCR 模型，再补装：
+Optional groups:
 
-```bash
-uv sync --no-dev --group local-inference
-```
+- `uv sync --no-dev --group local-inference`
+  for local embeddings, OCR, or legacy reranker compatibility
+- `uv sync --no-dev --group document-ai`
+  for higher-accuracy PDF / Office parsing
 
-如果需要高精度 PDF/Office 文档解析，再补装：
+The default document RAG, memory retrieval, and context pruning paths do not require a model reranker.
 
-```bash
-uv sync --no-dev --group document-ai
-```
+## Required Configuration
 
-必须设置以下项：
+At minimum, set:
 
-- `auth.secret_key`：至少 32 位随机字符串
-- `database.url`：生产库连接串
-- `database.password`：强密码
-- `llm.api_key`：云模型调用凭证（若使用云模型）
+- `auth.secret_key`
+- `database.url` or equivalent database credentials
+- `database.password`
+- `llm.api_key` if using hosted models
 
-## 3. 启动依赖
+For the recommended lightweight path, keep:
+
+- `reranker.model_name=""`
+- `local_models.rerank_model=""`
+
+## Start Dependencies
 
 ```bash
 docker-compose up -d
 docker-compose ps
 ```
 
-## 4. 启动服务
+## Start Service
 
 ```bash
 uv run python -m app.server.main
 ```
 
-默认地址：
+Default address:
 
 - API: `http://localhost:8000`
 - Swagger: `http://localhost:8000/docs`
 
-## 5. 停止服务
+## Stop Service
 
 ```bash
 docker-compose down

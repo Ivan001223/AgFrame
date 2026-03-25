@@ -1,16 +1,17 @@
-#!/bin/zsh
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${0}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 OUT_DIR="$PROJECT_ROOT/reports/test_suite/$TIMESTAMP"
-PYTHON_BIN="${PYTHON_BIN:-python}"
+PYTHON_BIN=(uv run python)
 
 mkdir -p "$OUT_DIR"
 cd "$PROJECT_ROOT"
 
-"$PYTHON_BIN" -m pytest \
+"${PYTHON_BIN[@]}" -m pytest \
+  -s \
   --json-report \
   --json-report-file="$OUT_DIR/pytest.json" \
   --cov=app.runtime.prompts \
@@ -23,10 +24,10 @@ cd "$PROJECT_ROOT"
   --cov-report=xml:"$OUT_DIR/coverage.xml" \
   --cov-fail-under=80
 
-"$PYTHON_BIN" "$PROJECT_ROOT/scripts/perf_bench.py" --out "$OUT_DIR/perf.json"
-"$PYTHON_BIN" "$PROJECT_ROOT/scripts/eval_context_pruning.py" --out "$OUT_DIR/context_pruning_eval.json"
-"$PYTHON_BIN" "$PROJECT_ROOT/scripts/security_scan.py" --out "$OUT_DIR/security.json"
-"$PYTHON_BIN" "$PROJECT_ROOT/scripts/generate_test_report.py" \
+"${PYTHON_BIN[@]}" "$PROJECT_ROOT/scripts/perf_bench.py" --out "$OUT_DIR/perf.json"
+"${PYTHON_BIN[@]}" "$PROJECT_ROOT/scripts/eval_context_pruning.py" --out "$OUT_DIR/context_pruning_eval.json"
+"${PYTHON_BIN[@]}" "$PROJECT_ROOT/scripts/security_scan.py" --out "$OUT_DIR/security.json"
+"${PYTHON_BIN[@]}" "$PROJECT_ROOT/scripts/generate_test_report.py" \
   --pytest-json "$OUT_DIR/pytest.json" \
   --coverage-xml "$OUT_DIR/coverage.xml" \
   --perf-json "$OUT_DIR/perf.json" \
@@ -36,7 +37,7 @@ cd "$PROJECT_ROOT"
   --defects "$OUT_DIR/defects.md"
 
 if [[ -n "${LIVE_SMOKE_BASE_URL:-}" ]]; then
-  "$PROJECT_ROOT/scripts/live_workbench_smoke.sh" --base-url "$LIVE_SMOKE_BASE_URL" > "$OUT_DIR/live_smoke.log"
+  bash "$PROJECT_ROOT/scripts/live_workbench_smoke.sh" --base-url "$LIVE_SMOKE_BASE_URL" > "$OUT_DIR/live_smoke.log"
 fi
 
 echo "$OUT_DIR"

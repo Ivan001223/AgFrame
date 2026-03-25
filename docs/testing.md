@@ -1,58 +1,53 @@
-# 测试最小文档
+# Testing Guide
 
-## 1. 快速单测
+## Quick Unit Test Run
 
 ```bash
 uv python install 3.11.15
 uv run pytest -v --tb=short
 ```
 
-说明：
+Notes:
 
-- `ragas` 等评测依赖安装在开发环境中，不作为服务运行时必需依赖
-- 如需运行评测相关用例，请先执行 `uv sync --group evals`
-- 如需运行依赖本地模型或高级文档解析的链路，请额外执行 `uv sync --group local-inference --group document-ai`
-- 前端门禁建议使用 Node 22 LTS
+- evaluation dependencies are optional
+- install `uv sync --group evals` for evaluation-focused runs
+- install `uv sync --group local-inference --group document-ai` for local embeddings, OCR, or advanced document parsing
+- the default document RAG, memory retrieval, and pruning paths do not require a local reranker
+- Node 22 LTS is recommended for frontend verification
 
-## 2. 指定模块回归
+## Targeted Regression
 
 ```bash
 uv run pytest tests/test_settings_security.py tests/test_api_misc.py -v --tb=short
 ```
 
-## 3. 工作台主链路 Smoke
+## Workbench Smoke
 
 ```bash
 uv run ./scripts/smoke_workbench.sh
 ```
 
-或在已激活的 `.venv` 中直接执行：
+Or, inside an activated virtual environment:
 
 ```bash
 ./scripts/smoke_workbench.sh
 ```
 
-覆盖上传、任务、文档、会话、记忆的主接口流。
+This covers the main upload, task, document, conversation, and memory APIs.
 
-## 4. 运行中服务 Live Smoke
+## Live Smoke Against a Running Service
 
 ```bash
 uv run ./scripts/live_workbench_smoke.sh --base-url http://127.0.0.1:8000
 ```
 
-或：
+Prerequisites:
 
-```bash
-./scripts/live_workbench_smoke.sh --base-url http://127.0.0.1:8000
-```
+- service is running
+- PostgreSQL and Redis are reachable
+- current config allows upload and indexing
 
-前提：
-
-- 服务已启动
-- 数据库和 Redis 可用
-- 当前配置允许上传和索引
-
-## 5. 基础设施集成测试
+## Infrastructure Integration Tests
 
 ```bash
 export DATABASE_URL='postgresql+psycopg://<user>:<password>@<host>:<port>/<db>'
@@ -60,26 +55,20 @@ export REDIS_URL='redis://:<password>@<host>:6379/0'
 uv run pytest tests/test_integration_postgres_store.py tests/test_integration_queue_redis.py -v --tb=short
 ```
 
-说明：
-
-- `tests/test_integration_postgres_store.py` 需要可访问的 PostgreSQL
-- `tests/test_integration_queue_redis.py` 需要可访问的 Redis
-- 环境不可达时，相关测试会显式 `skip`
-
-## 6. 一键测试门禁
+## Full Test Gate
 
 ```bash
 uv run ./scripts/run_test_suite.sh
 ```
 
-如需把运行中服务的工作台 live smoke 一并纳入门禁：
+To include live smoke:
 
 ```bash
 export LIVE_SMOKE_BASE_URL='http://127.0.0.1:8000'
 uv run ./scripts/run_test_suite.sh
 ```
 
-前端单独验证：
+Frontend validation:
 
 ```bash
 cd frontend
@@ -89,13 +78,13 @@ npm run lint -- --max-warnings=0
 npx next build
 ```
 
-输出目录：
+Generated reports:
 
 - `./reports/test_suite/<timestamp>/pytest.json`
 - `./reports/test_suite/<timestamp>/coverage.xml`
-- `./reports/test_suite/<timestamp>/perf.json`（包含基础性能基准与 context pruning benchmark）
-- `./reports/test_suite/<timestamp>/context_pruning_eval.json`（包含关键行保留率与 pruning 质量评测）
+- `./reports/test_suite/<timestamp>/perf.json`
+- `./reports/test_suite/<timestamp>/context_pruning_eval.json`
 - `./reports/test_suite/<timestamp>/security.json`
-- `./reports/test_suite/<timestamp>/live_smoke.log`（仅当设置 `LIVE_SMOKE_BASE_URL` 时生成）
+- `./reports/test_suite/<timestamp>/live_smoke.log`
 - `./reports/test_suite/<timestamp>/report.md`
 - `./reports/test_suite/<timestamp>/defects.md`

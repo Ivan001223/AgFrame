@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "agframe"
 version = "0.1.1"
-description = "Production-grade Agent/RAG backend framework"
+description = "Production-grade lightweight hybrid RAG and agent backend framework"
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "addict",
@@ -38,7 +38,7 @@ dependencies = [
     "psycopg[binary]",
     "pydantic",
     "pydantic-settings",
-    "pypdf",
+    "pypdf>=6.9.1",
     "pyjwt",
     "python-dotenv",
     "python-multipart",
@@ -52,6 +52,10 @@ dependencies = [
 ]
 
 [dependency-groups]
+# Optional dependency groups:
+# - document-ai: high-accuracy PDF/Office parsing
+# - evals: offline evaluation and benchmarking
+# - local-inference: local embeddings / OCR / legacy reranker compatibility
 dev = [
     "bandit",
     "pip-audit",

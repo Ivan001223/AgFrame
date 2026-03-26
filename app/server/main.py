@@ -23,6 +23,7 @@ from app.runtime.graph.graph import run_app
 from app.server.api import (
     auth,
     documents,
+    harness,
     health,
     history,
     interrupt,
@@ -166,6 +167,7 @@ app.include_router(auth.router)
 app.include_router(interrupt.router, dependencies=[Depends(get_current_active_user)])
 app.include_router(upload.router)  # 移除 admin 限制，内部已根据 user 隔离
 app.include_router(tasks.router)
+app.include_router(harness.router, dependencies=[Depends(get_current_active_user)])
 app.include_router(api_settings.router)  # 内部已处理 Admin 限制
 app.include_router(history.router, dependencies=[Depends(get_current_active_user)])
 app.include_router(memory.router, dependencies=[Depends(get_current_active_user)])

@@ -5,7 +5,7 @@ from typing import Any
 
 from arq.connections import RedisSettings
 
-from app.infrastructure.queue.arq_jobs import ingest_pdf
+from app.infrastructure.queue.arq_jobs import ingest_pdf, resume_harness_task, run_harness_task
 
 
 def _redis_settings() -> RedisSettings:
@@ -14,7 +14,7 @@ def _redis_settings() -> RedisSettings:
 
 
 class WorkerSettings:
-    functions = [ingest_pdf]
+    functions = [ingest_pdf, run_harness_task, resume_harness_task]
     redis_settings = _redis_settings()
     keep_result = 0
     job_timeout = 60 * 60

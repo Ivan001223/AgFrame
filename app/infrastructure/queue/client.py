@@ -27,3 +27,15 @@ async def enqueue_ingest_pdf(task_id: str, file_path: str, user_id: str = None) 
     pool = await get_arq_pool()
     job = await pool.enqueue_job("ingest_pdf", task_id, file_path, user_id)
     return str(job.job_id)
+
+
+async def enqueue_harness_run(run_id: str) -> str:
+    pool = await get_arq_pool()
+    job = await pool.enqueue_job("run_harness_task", run_id)
+    return str(job.job_id)
+
+
+async def enqueue_harness_resume(run_id: str) -> str:
+    pool = await get_arq_pool()
+    job = await pool.enqueue_job("resume_harness_task", run_id)
+    return str(job.job_id)

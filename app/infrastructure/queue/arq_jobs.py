@@ -5,6 +5,8 @@ from typing import Any
 
 import anyio
 
+from app.harness.runtime.run_service import build_run_service
+from app.harness.runtime.verification_service import VerificationService
 from app.infrastructure.queue.redis_client import (
     append_task_incident,
     get_task,
@@ -147,3 +149,52 @@ async def ingest_pdf(
         logger.exception("task exception file_path=%s", file_path)
         await release_task_operation(operation_key, expected_task_id=task_id)
         return False
+
+
+async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
+    service = build_run_service()
+    run = service.get_run(run_id)
+    if not run:
+        return False
+
+    service.mark_running(run_id)
+
+    try:
+        if run.get("task_type") != "document_ingest":
+            verification = VerificationService().build_document_ingest_result(
+                ok=False,
+                stage="unsupported_task_type",
+                error_code="unsupported_task_type",
+                error_message="unsupported harness task type",
+            )
+            service.complete_with_verification(run_id, verification)
+            return False
+
+        input_json = run.get("input_json") or {}
+        file_path = str(input_json.get("file_path") or "")
+        user_id = str(run.get("user_id") or "") or None
+
+        result = await anyio.to_thread.run_sync(
+            lambda: _normalize_ingest_result(get_rag_engine().add_knowledge_base(file_path, user_id=user_id))
+        )
+        verification = VerificationService().build_document_ingest_result(
+            ok=bool(result.get("ok")),
+            stage=str(result.get("stage") or "") or None,
+            error_code=str(result.get("error_code") or "") or None,
+            error_message=str(result.get("error_message") or "") or None,
+        )
+        service.complete_with_verification(run_id, verification)
+        return bool(result.get("ok"))
+    except Exception as exc:
+        verification = VerificationService().build_document_ingest_result(
+            ok=False,
+            stage="exception",
+            error_code="task_exception",
+            error_message=str(exc),
+        )
+        service.complete_with_verification(run_id, verification)
+        return False
+
+
+async def resume_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
+    return await run_harness_task(ctx, run_id)

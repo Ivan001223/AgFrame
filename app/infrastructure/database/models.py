@@ -220,3 +220,71 @@ class DocEmbedding(Base):
     __table_args__ = (
         Index("idx_doc_embedding_doc", "doc_id"),
     )
+
+
+class HarnessRun(Base):
+    __tablename__ = "harness_run"
+
+    run_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    session_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    task_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    policy_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    input_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    current_step: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    resume_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    approval_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    verification_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    finished_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    __table_args__ = (
+        Index("idx_harness_run_user_created", "user_id", "created_at"),
+        Index("idx_harness_run_status_updated", "status", "updated_at"),
+    )
+
+
+class HarnessApproval(Base):
+    __tablename__ = "harness_approval"
+
+    approval_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    run_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("harness_run.run_id", ondelete="CASCADE"), nullable=False
+    )
+    action_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    requested_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    resolved_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    resolved_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    __table_args__ = (
+        Index("idx_harness_approval_run", "run_id"),
+        Index("idx_harness_approval_status_created", "status", "created_at"),
+    )
+
+
+class HarnessVerification(Base):
+    __tablename__ = "harness_verification"
+
+    verification_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    run_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("harness_run.run_id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    checks_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    artifacts_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    __table_args__ = (
+        Index("idx_harness_verification_run", "run_id"),
+        Index("idx_harness_verification_status_created", "status", "created_at"),
+    )

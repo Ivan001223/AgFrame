@@ -1,0 +1,9 @@
+from app.infrastructure.database.models import Base
+
+
+def test_harness_tables_are_registered():
+    tables = Base.metadata.tables
+
+    assert "harness_run" in tables
+    assert "harness_approval" in tables
+    assert "harness_verification" in tables

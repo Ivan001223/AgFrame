@@ -120,7 +120,7 @@ async def get_resume_command(
         "resume_payload": {
             "configurable": {
                 "thread_id": session_id,
-                "checkpoint_ns": "default",
+                "checkpoint_ns": checkpoint_data.get("checkpoint_ns", ""),
                 "checkpoint_id": checkpoint_data.get("checkpoint_id"),
             }
         },

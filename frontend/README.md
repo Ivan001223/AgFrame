@@ -1,40 +1,40 @@
-## AgFrame Frontend
+## AgFrame 前端 (Frontend)
 
-This Next.js app is the workbench UI for the AgFrame FastAPI backend.
+本 Next.js 应用是为 AgFrame FastAPI 后端配套的运维与交互工作台 UI。
 
-Implemented routes:
-- `/login`
-- `/chat`
-- `/knowledge`
-- `/conversations`
-- `/conversations/[conversationId]`
-- `/memory`
-- `/tasks`
-- `/settings`
-- `/admin/settings`
+目前已实现的路由：
+- `/login` (登录)
+- `/chat` (对话工作台)
+- `/knowledge` (知识库管理)
+- `/conversations` (会话中心)
+- `/conversations/[conversationId]` (会话详情)
+- `/memory` (记忆控制台)
+- `/tasks` (任务与事件观测)
+- `/settings` (个人设置)
+- `/admin/settings` (系统安全与配置)
 
-## Environment
+## 环境变量 (Environment)
 
-Set the backend base URL before starting the frontend:
+在启动前端之前，请先设置后端服务的 Base URL：
 
 ```bash
 export NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+启动后访问 [http://localhost:3000](http://localhost:3000)。
 
-## Auth Model
+## 鉴权模型 (Auth Model)
 
-- Login uses `POST /auth/token`
-- Current user bootstrap uses `GET /auth/users/me`
-- Workspace routes require a stored token and redirect back to `/login` on expiry
-- Admin navigation and `/admin/settings` depend on `role === "admin"`
+- 登录使用接口 `POST /auth/token` 获取凭证。
+- 当前用户信息初始化使用 `GET /auth/users/me`。
+- 工作台路由需要存储合法的 Token，若 Token 过期将自动重定向回 `/login`。
+- 管理员专属导航栏以及 `/admin/settings` 页面依赖当前用户的 `role === "admin"` 字段。
 
-## Notes
+## 开发须知 (Notes)
 
-- Chat uses `POST /chat/invoke` and persists turns through `/history/{user}/save`
-- User settings read/write `GET|POST /settings/user`
-- Admin settings read/write `GET|POST /settings`
-- Document upload targets `POST /upload` with multipart field name `files`
-- If `next build` or `npm run lint` fail after install, refresh `node_modules`; earlier local failures were caused by corrupted package artifacts, not by the current TypeScript contracts
+- 对话界面使用 `POST /chat/invoke`，并通过 `/history/{user}/save` 进行轮次持久化。
+- 用户个人设置读写对应 `GET|POST /settings/user`。
+- 管理员全局设置读写对应 `GET|POST /settings`。
+- 文档上传请求指向 `POST /upload`，其 multipart 字段名为 `files`。
+- 如果在 `npm install` 之后运行 `next build` 或 `npm run lint` 发生报错，请尝试删除并重新安装 `node_modules`。过去曾因本地包缓存损坏导致构建失败，并非当前的 TypeScript 接口定义有问题。

@@ -40,16 +40,51 @@ cp configs/config.example.json configs/config.json
 - `reranker.model_name=""`
 - `local_models.rerank_model=""`
 
-## 启动依赖服务 (Start Dependencies)
+## 使用 Docker Compose 启动整套项目 (Start The Full Stack)
 
 ```bash
-docker-compose up -d
-docker-compose ps
+cp .env.example .env
+docker compose up --build -d
+docker compose ps
 ```
+
+默认会启动：
+
+- `postgres`
+- `redis`（使用 Redis Stack，支持队列、限流与 LangGraph checkpoint）
+- `backend`
+- `worker`
+- `frontend`
+
+默认地址：
+
+- Frontend: `http://localhost:3000`
+- API: `http://localhost:8000`
+- Swagger: `http://localhost:8000/docs`
+
+说明：
+
+- 若要直接使用聊天能力，请在 `.env` 中填写 `LLM_API_KEY`
+- 若要启用文档摄取 / RAG，仍建议在 `configs/config.json` 中补充 embeddings 配置或远程 embeddings 服务地址
+
+如果需要额外的观测组件：
+
+```bash
+docker compose --profile observability up --build -d
+```
+
+这会额外启动：
+
+- `clickhouse`
+- `minio`
+- `langfuse-server`
+- `langfuse-worker`
+
+Langfuse 默认地址为 `http://localhost:3001`。
 
 ## 启动主服务 (Start Service)
 
-由于 `v0.2.1` 引入了 Harness 和 Agent 任务执行链路，需确保后端和 Worker 同时健康运行：
+如果你不使用 Docker Compose，也可以沿用原来的手动方式。由于 `v0.2.1` 引入了 Harness 和 Agent 任务执行链路，需确保后端和 Worker 同时健康运行：
 
 **启动后端 API 服务：**
 
@@ -64,11 +99,11 @@ uv run python -m app.server.main
 **启动异步 Worker（必须）：**
 
 ```bash
-uv run arq app.infrastructure.queue.worker_settings
+uv run arq app.infrastructure.queue.worker_settings.WorkerSettings
 ```
 
 ## 停止服务 (Stop Service)
 
 ```bash
-docker-compose down
+docker compose down
 ```

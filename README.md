@@ -186,27 +186,49 @@ cp configs/config.example.json configs/config.json
 }
 ```
 
-### 3. 启动依赖服务
+### 3. 使用 Docker Compose 启动整套项目
 
 ```bash
-docker-compose up -d
+cp .env.example .env
+docker compose up --build -d
 ```
 
-### 4. 启动 Backend API
+默认会启动：
+- `postgres`
+- `redis`（基于 Redis Stack，提供队列、限流与 LangGraph checkpoint 所需的 RediSearch 能力）
+- `backend`
+- `worker`
+- `frontend`
+
+默认访问地址：
+- Frontend: `http://127.0.0.1:3000`
+- API: `http://127.0.0.1:8000`
+- Swagger 文档: `http://127.0.0.1:8000/docs`
+
+说明：
+- 若要直接使用聊天能力，请在 `.env` 中填写 `LLM_API_KEY`
+- 若要启用文档摄取 / RAG，仍建议在 `configs/config.json` 中补充 embeddings 配置或远程 embeddings 服务地址
+
+可选观测组件：
+
+```bash
+docker compose --profile observability up --build -d
+```
+
+这会额外启动 `clickhouse`、`minio`、`langfuse-server`、`langfuse-worker`。
+Langfuse 默认暴露在 `http://127.0.0.1:3001`。
+
+### 4. 手动启动 Backend API
 
 ```bash
 uv run python -m app.server.main
 ```
 
-### 5. 启动异步 Worker
+### 5. 手动启动异步 Worker
 
 ```bash
 uv run arq app.infrastructure.queue.worker_settings
 ```
-
-默认后端服务地址：
-- API: `http://127.0.0.1:8000`
-- Swagger 文档: `http://127.0.0.1:8000/docs`
 
 ## 🩺 健康检查与运行时信号
 

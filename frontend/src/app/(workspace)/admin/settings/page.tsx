@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useMemo, useState } from 'react';
 import { Shield, ShieldAlert } from 'lucide-react';
 import { useCurrentUserQuery } from '@/domains/auth/hooks';
 import {
@@ -32,12 +32,16 @@ const INPUT_CLASSNAME =
   'w-full rounded-xl border border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-gray-700 dark:bg-gray-950 dark:text-white dark:focus:ring-indigo-900';
 
 export default function AdminSettingsPage() {
-  const { data: currentUser } = useCurrentUserQuery();
+  const { data: currentUser, isLoading: isCurrentUserLoading } = useCurrentUserQuery();
   const isAdmin = currentUser?.role === 'admin';
   const { data, isLoading, isError } = useAdminSettingsQuery(isAdmin);
   const updateMutation = useUpdateAdminSettingsMutation();
-  const [pruningDraft, setPruningDraft] = useState(() => getContextPruningConfig(undefined));
+  const basePruningDraft = useMemo(() => getContextPruningConfig(data), [data]);
+  const [pruningDraftOverride, setPruningDraftOverride] =
+    useState<ContextPruningAdminConfig | null>(null);
   const [draftOverride, setDraftOverride] = useState<string | null>(null);
+  const [lastSavedSection, setLastSavedSection] = useState<'json' | 'pruning' | null>(null);
+  const pruningDraft = pruningDraftOverride ?? basePruningDraft;
   const draft = useMemo(() => {
     if (draftOverride !== null) {
       return draftOverride;
@@ -49,13 +53,6 @@ export default function AdminSettingsPage() {
   }, [data, draftOverride]);
   const rerankerAvailability = useMemo(() => getRerankerAvailability(data), [data]);
 
-  useEffect(() => {
-    if (data) {
-      setPruningDraft(getContextPruningConfig(data));
-      setDraftOverride(null);
-    }
-  }, [data]);
-
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -64,6 +61,10 @@ export default function AdminSettingsPage() {
       updateMutation.mutate(parsed, {
         onSuccess: () => {
           setDraftOverride(null);
+          setLastSavedSection('json');
+        },
+        onError: () => {
+          setLastSavedSection(null);
         },
       });
     } catch {
@@ -81,10 +82,24 @@ export default function AdminSettingsPage() {
       },
     }, {
       onSuccess: () => {
-        setDraftOverride(null);
+        setPruningDraftOverride(null);
+        setLastSavedSection('pruning');
+      },
+      onError: () => {
+        setLastSavedSection(null);
       },
     });
   };
+
+  if (isCurrentUserLoading) {
+    return (
+      <div className="mx-auto max-w-3xl p-8">
+        <div className="rounded-2xl border border-gray-200 bg-white p-6 text-sm text-gray-500 shadow-sm dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400">
+          Loading admin access...
+        </div>
+      </div>
+    );
+  }
 
   if (!isAdmin) {
     return (
@@ -155,7 +170,10 @@ export default function AdminSettingsPage() {
                 <select
                   value={pruningDraft.method}
                   onChange={(event) =>
-                    setPruningDraft((current) => ({ ...current, method: event.target.value }))
+                    setPruningDraftOverride((current) => ({
+                      ...(current ?? basePruningDraft),
+                      method: event.target.value,
+                    }))
                   }
                   className={INPUT_CLASSNAME}
                 >
@@ -175,8 +193,8 @@ export default function AdminSettingsPage() {
                     step={field.step}
                     value={pruningDraft[field.key]}
                     onChange={(event) =>
-                      setPruningDraft((current) => ({
-                        ...current,
+                      setPruningDraftOverride((current) => ({
+                        ...(current ?? basePruningDraft),
                         [field.key]: Number(event.target.value),
                       }))
                     }
@@ -197,6 +215,11 @@ export default function AdminSettingsPage() {
                 {updateMutation.isPending ? 'Saving...' : 'Save pruning config'}
               </button>
             </div>
+            {updateMutation.isSuccess && lastSavedSection === 'pruning' && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200">
+                Context pruning settings saved.
+              </div>
+            )}
           </form>
         )}
       </div>
@@ -237,7 +260,7 @@ export default function AdminSettingsPage() {
                 {updateMutation.isPending ? 'Saving...' : 'Save admin settings'}
               </button>
             </div>
-            {updateMutation.isSuccess && (
+            {updateMutation.isSuccess && lastSavedSection === 'json' && (
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200">
                 Admin settings saved.
               </div>

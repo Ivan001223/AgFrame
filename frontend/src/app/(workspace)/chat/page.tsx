@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useMemo, useRef, useState } from 'react';
 import { Bot, LoaderCircle, RefreshCw, Send, ShieldAlert } from 'lucide-react';
 import { ContextPruningSummary, formatPruningBlock } from '@/domains/chat/pruning';
 import {
@@ -28,10 +28,13 @@ export default function ChatPage() {
   const [contextFocusHint, setContextFocusHint] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([STARTER_MESSAGE]);
   const [contextPruning, setContextPruning] = useState<ContextPruningSummary | null>(null);
+  const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
+  const requestTokenRef = useRef(0);
 
   const chatMutation = useChatInvokeMutation();
   const interruptQuery = useInterruptStatusQuery(sessionId);
   const approveMutation = useApproveInterruptMutation();
+  const isChatPending = pendingSessionId === sessionId;
 
   const timeline = useMemo(
     () => (messages.length === 1 && messages[0] === STARTER_MESSAGE ? [] : messages),
@@ -39,6 +42,8 @@ export default function ChatPage() {
   );
 
   const startNewSession = () => {
+    requestTokenRef.current += 1;
+    setPendingSessionId(null);
     setSessionId(createSessionId());
     setDraft('');
     setContextFocusHint('');
@@ -49,24 +54,33 @@ export default function ChatPage() {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const content = draft.trim();
-    if (!content || chatMutation.isPending) {
+    if (!content || isChatPending) {
       return;
     }
 
+    const requestSessionId = sessionId;
+    const requestToken = requestTokenRef.current + 1;
     const baseMessages = messages.length === 1 && messages[0] === STARTER_MESSAGE ? [] : messages;
     const nextMessages = [...baseMessages, { role: 'user' as const, content }];
 
+    requestTokenRef.current = requestToken;
+    setPendingSessionId(requestSessionId);
+    setContextPruning(null);
     setMessages(nextMessages);
     setDraft('');
 
     chatMutation.mutate(
       {
-        sessionId,
+        sessionId: requestSessionId,
         messages: nextMessages,
         contextFocusHint,
       },
       {
         onSuccess: ({ messages: persistedMessages, reply, contextPruning: pruningSummary }) => {
+          if (requestTokenRef.current !== requestToken) {
+            return;
+          }
+          setPendingSessionId(null);
           setMessages(
             reply
               ? persistedMessages
@@ -82,6 +96,11 @@ export default function ChatPage() {
           interruptQuery.refetch();
         },
         onError: (error) => {
+          if (requestTokenRef.current !== requestToken) {
+            return;
+          }
+          setPendingSessionId(null);
+          setContextPruning(null);
           setMessages([
             ...nextMessages,
             {
@@ -146,7 +165,7 @@ export default function ChatPage() {
             ))
           )}
 
-          {chatMutation.isPending && (
+          {isChatPending && (
             <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
               <LoaderCircle className="h-4 w-4 animate-spin" />
               Waiting for backend response...
@@ -179,7 +198,7 @@ export default function ChatPage() {
             />
             <button
               type="submit"
-              disabled={chatMutation.isPending || !draft.trim()}
+              disabled={isChatPending || !draft.trim()}
               className="inline-flex items-center gap-2 self-end rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Send className="h-4 w-4" />

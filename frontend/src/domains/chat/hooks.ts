@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/http/client';
 import { getStoredUsername } from '@/lib/auth/session';
-import { ContextPruningSummary, extractContextPruning } from '@/domains/chat/pruning';
+import { extractContextPruning } from '@/domains/chat/pruning';
 
 export type ChatMessage = {
   role: 'user' | 'assistant' | 'system';

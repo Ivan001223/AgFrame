@@ -18,7 +18,13 @@ def _sha256_hex(text: str) -> str:
 class UserMemoryEngine:
     def __init__(self):
         self.store = PgUserMemoryStore()
-        self.embeddings = get_embeddings()
+        self._embeddings: Any | None = None
+
+    @property
+    def embeddings(self):
+        if self._embeddings is None:
+            self._embeddings = get_embeddings()
+        return self._embeddings
 
     def add_chat_summary(
         self,

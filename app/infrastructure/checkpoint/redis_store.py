@@ -96,7 +96,9 @@ class AsyncRedisSaverWrapper(BaseCheckpointSaver):
             from langgraph.checkpoint.redis import AsyncRedisSaver
 
             self._saver = AsyncRedisSaver(redis_url=_get_redis_url())
-            await self._saver.setup()
+            setup = getattr(self._saver, "setup", None)
+            if callable(setup):
+                await setup()
         return self._saver
 
     async def aget_tuple(self, config):

@@ -248,6 +248,62 @@ class HarnessRun(Base):
     )
 
 
+class HarnessRunRuntimeState(Base):
+    __tablename__ = "harness_run_runtime_state"
+
+    run_id: Mapped[str] = mapped_column(
+        String(128),
+        ForeignKey("harness_run.run_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    review_state_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    continuation_state_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    research_state_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    __table_args__ = (
+        Index("idx_harness_runtime_state_updated", "updated_at"),
+    )
+
+
+class HarnessRunRuntimeStateHistory(Base):
+    __tablename__ = "harness_run_runtime_state_history"
+
+    history_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(
+        String(128),
+        ForeignKey("harness_run.run_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    transition_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    stage: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    runtime_state_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    __table_args__ = (
+        Index("idx_harness_runtime_history_run_version", "run_id", "version"),
+        Index("idx_harness_runtime_history_run_created", "run_id", "created_at"),
+    )
+
+
+class HarnessAgentProject(Base):
+    __tablename__ = "harness_agent_project"
+
+    project_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    graph_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    __table_args__ = (
+        Index("idx_harness_agent_project_user_updated", "user_id", "updated_at"),
+    )
+
+
 class HarnessApproval(Base):
     __tablename__ = "harness_approval"
 
@@ -310,4 +366,23 @@ class HarnessEvent(Base):
         Index("idx_harness_event_session_created", "session_id", "created_at"),
         Index("idx_harness_event_user_created", "user_id", "created_at"),
         Index("idx_harness_event_type_created", "event_type", "created_at"),
+    )
+
+
+class HarnessModelProvider(Base):
+    __tablename__ = "harness_model_provider"
+
+    provider_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    base_url: Mapped[str] = mapped_column(String(512), nullable=False)
+    api_key_encrypted: Mapped[str] = mapped_column(String(512), nullable=False)
+    models_json: Mapped[list] = mapped_column(JSON, nullable=False)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    __table_args__ = (
+        Index("idx_harness_model_provider_user_updated", "user_id", "updated_at"),
     )

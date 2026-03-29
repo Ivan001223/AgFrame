@@ -2,9 +2,18 @@ from __future__ import annotations
 
 import time
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 
-from app.infrastructure.database.models import HarnessApproval, HarnessEvent, HarnessRun, HarnessVerification
+from app.infrastructure.database.models import (
+    HarnessAgentProject,
+    HarnessApproval,
+    HarnessEvent,
+    HarnessModelProvider,
+    HarnessRun,
+    HarnessRunRuntimeState,
+    HarnessRunRuntimeStateHistory,
+    HarnessVerification,
+)
 from app.infrastructure.database.orm import get_session
 
 
@@ -189,6 +198,86 @@ class HarnessApprovalStore:
         }
 
 
+class HarnessAgentProjectStore:
+    def list_projects(self, *, user_id: str, limit: int = 20) -> list[dict[str, object]]:
+        with get_session() as session:
+            rows = session.execute(
+                select(HarnessAgentProject)
+                .where(HarnessAgentProject.user_id == user_id)
+                .order_by(HarnessAgentProject.updated_at.desc())
+                .limit(int(limit))
+            ).scalars().all()
+            return [self._to_dict(row) for row in rows]
+
+    def create_project(
+        self,
+        *,
+        project_id: str,
+        user_id: str,
+        name: str,
+        description: str | None,
+        graph_json: dict[str, object],
+    ) -> dict[str, object]:
+        now = int(time.time())
+        row = HarnessAgentProject(
+            project_id=project_id,
+            user_id=user_id,
+            name=name,
+            description=description,
+            graph_json=graph_json,
+            created_at=now,
+            updated_at=now,
+        )
+        with get_session() as session:
+            session.add(row)
+            session.flush()
+        return self._to_dict(row)
+
+    def get_project(self, project_id: str) -> dict[str, object] | None:
+        with get_session() as session:
+            row = session.execute(
+                select(HarnessAgentProject).where(HarnessAgentProject.project_id == project_id)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return self._to_dict(row)
+
+    def get_latest_project_for_user(self, user_id: str) -> dict[str, object] | None:
+        with get_session() as session:
+            row = session.execute(
+                select(HarnessAgentProject)
+                .where(HarnessAgentProject.user_id == user_id)
+                .order_by(HarnessAgentProject.updated_at.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return self._to_dict(row)
+
+    def update_project(self, project_id: str, **changes: object) -> dict[str, object] | None:
+        if not changes:
+            return self.get_project(project_id)
+        payload = dict(changes)
+        payload["updated_at"] = int(time.time())
+        with get_session() as session:
+            session.execute(
+                update(HarnessAgentProject).where(HarnessAgentProject.project_id == project_id).values(**payload)
+            )
+        return self.get_project(project_id)
+
+    @staticmethod
+    def _to_dict(row: HarnessAgentProject) -> dict[str, object]:
+        return {
+            "project_id": row.project_id,
+            "user_id": row.user_id,
+            "name": row.name,
+            "description": row.description,
+            "graph_json": row.graph_json,
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+        }
+
+
 class HarnessVerificationStore:
     def get_latest_by_run(self, run_id: str) -> dict[str, object] | None:
         with get_session() as session:
@@ -301,4 +390,214 @@ class HarnessEventStore:
             "actor": row.actor,
             "details_json": row.details_json,
             "created_at": row.created_at,
+        }
+
+
+class HarnessRuntimeStateStore:
+    def get_by_run(self, run_id: str) -> dict[str, object] | None:
+        with get_session() as session:
+            row = session.execute(
+                select(HarnessRunRuntimeState).where(HarnessRunRuntimeState.run_id == run_id)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return self._to_dict(row)
+
+    def list_by_run_ids(self, run_ids: list[str]) -> dict[str, dict[str, object]]:
+        normalized = [str(run_id).strip() for run_id in run_ids if str(run_id).strip()]
+        if not normalized:
+            return {}
+        with get_session() as session:
+            rows = session.execute(
+                select(HarnessRunRuntimeState).where(HarnessRunRuntimeState.run_id.in_(normalized))
+            ).scalars().all()
+            return {str(row.run_id): self._to_dict(row) for row in rows}
+
+    def upsert_state(
+        self,
+        *,
+        run_id: str,
+        review_state_json: dict[str, object],
+        continuation_state_json: dict[str, object],
+        research_state_json: dict[str, object],
+    ) -> dict[str, object]:
+        now = int(time.time())
+        with get_session() as session:
+            row = session.execute(
+                select(HarnessRunRuntimeState).where(HarnessRunRuntimeState.run_id == run_id)
+            ).scalar_one_or_none()
+            if row is None:
+                row = HarnessRunRuntimeState(
+                    run_id=run_id,
+                    review_state_json=review_state_json,
+                    continuation_state_json=continuation_state_json,
+                    research_state_json=research_state_json,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(row)
+                session.flush()
+                return self._to_dict(row)
+
+            row.review_state_json = review_state_json
+            row.continuation_state_json = continuation_state_json
+            row.research_state_json = research_state_json
+            row.updated_at = now
+            session.flush()
+            return self._to_dict(row)
+
+    @staticmethod
+    def _to_dict(row: HarnessRunRuntimeState) -> dict[str, object]:
+        return {
+            "run_id": row.run_id,
+            "review_state_json": dict(row.review_state_json or {}),
+            "continuation_state_json": dict(row.continuation_state_json or {}),
+            "research_state_json": dict(row.research_state_json or {}),
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+        }
+
+
+class HarnessRuntimeStateHistoryStore:
+    def list_for_run(self, *, run_id: str, limit: int = 100) -> list[dict[str, object]]:
+        with get_session() as session:
+            rows = session.execute(
+                select(HarnessRunRuntimeStateHistory)
+                .where(HarnessRunRuntimeStateHistory.run_id == run_id)
+                .order_by(HarnessRunRuntimeStateHistory.version.asc())
+                .limit(int(limit))
+            ).scalars().all()
+            return [self._to_dict(row) for row in rows]
+
+    def get_latest_for_run(self, run_id: str) -> dict[str, object] | None:
+        with get_session() as session:
+            row = session.execute(
+                select(HarnessRunRuntimeStateHistory)
+                .where(HarnessRunRuntimeStateHistory.run_id == run_id)
+                .order_by(HarnessRunRuntimeStateHistory.version.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return self._to_dict(row)
+
+    def append_history(
+        self,
+        *,
+        run_id: str,
+        version: int,
+        transition_type: str,
+        stage: str | None,
+        runtime_state_json: dict[str, object],
+    ) -> dict[str, object]:
+        now = int(time.time() * 1000)
+        row = HarnessRunRuntimeStateHistory(
+            run_id=run_id,
+            version=version,
+            transition_type=transition_type,
+            stage=stage,
+            runtime_state_json=runtime_state_json,
+            created_at=now,
+        )
+        with get_session() as session:
+            session.add(row)
+            session.flush()
+            return self._to_dict(row)
+
+    @staticmethod
+    def _to_dict(row: HarnessRunRuntimeStateHistory) -> dict[str, object]:
+        return {
+            "history_id": row.history_id,
+            "run_id": row.run_id,
+            "version": row.version,
+            "transition_type": row.transition_type,
+            "stage": row.stage,
+            "runtime_state_json": dict(row.runtime_state_json or {}),
+            "created_at": row.created_at,
+        }
+
+
+class HarnessModelProviderStore:
+    def list_providers(self, *, user_id: str | None = None, limit: int = 50) -> list[dict[str, object]]:
+        with get_session() as session:
+            stmt = (
+                select(HarnessModelProvider)
+                .order_by(HarnessModelProvider.updated_at.desc())
+                .limit(int(limit))
+            )
+            if user_id is not None:
+                stmt = stmt.where(HarnessModelProvider.user_id == user_id)
+            rows = session.execute(stmt).scalars().all()
+            return [self._to_dict(row) for row in rows]
+
+    def get_provider(self, provider_id: str) -> dict[str, object] | None:
+        with get_session() as session:
+            row = session.execute(
+                select(HarnessModelProvider).where(HarnessModelProvider.provider_id == provider_id)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return self._to_dict(row)
+
+    def create_provider(
+        self,
+        *,
+        provider_id: str,
+        user_id: str,
+        name: str,
+        base_url: str,
+        api_key_encrypted: str,
+        models_json: list[str],
+        is_default: bool = False,
+        enabled: bool = True,
+    ) -> dict[str, object]:
+        now = int(time.time())
+        row = HarnessModelProvider(
+            provider_id=provider_id,
+            user_id=user_id,
+            name=name,
+            base_url=base_url,
+            api_key_encrypted=api_key_encrypted,
+            models_json=models_json,
+            is_default=is_default,
+            enabled=enabled,
+            created_at=now,
+            updated_at=now,
+        )
+        with get_session() as session:
+            session.add(row)
+            session.flush()
+        return self._to_dict(row)
+
+    def update_provider(self, provider_id: str, **changes: object) -> dict[str, object] | None:
+        if not changes:
+            return self.get_provider(provider_id)
+        payload = dict(changes)
+        payload["updated_at"] = int(time.time())
+        with get_session() as session:
+            session.execute(
+                update(HarnessModelProvider).where(HarnessModelProvider.provider_id == provider_id).values(**payload)
+            )
+        return self.get_provider(provider_id)
+
+    def delete_provider(self, provider_id: str) -> bool:
+        with get_session() as session:
+            result = session.execute(
+                delete(HarnessModelProvider).where(HarnessModelProvider.provider_id == provider_id)
+            )
+            return result.rowcount > 0
+
+    @staticmethod
+    def _to_dict(row: HarnessModelProvider) -> dict[str, object]:
+        return {
+            "provider_id": row.provider_id,
+            "user_id": row.user_id,
+            "name": row.name,
+            "base_url": row.base_url,
+            "api_key_encrypted": row.api_key_encrypted,
+            "models_json": row.models_json,
+            "is_default": row.is_default,
+            "enabled": row.enabled,
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
         }

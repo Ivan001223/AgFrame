@@ -41,6 +41,7 @@ class ApprovalService:
         )
 
         run = self.run_service.get_run(run_id)
+        action_type = str(approval.get("action_type") or "resume")
         session_id = None if run is None else run.get("session_id")
         if session_id:
             checkpoint = await self.checkpoint_adapter.load(str(session_id))
@@ -53,7 +54,45 @@ class ApprovalService:
                 checkpoint_data["interrupted"] = not approved
                 await self.checkpoint_adapter.save(str(session_id), checkpoint_data)
 
-        if approved:
+        if action_type == "orchestration_review":
+            input_json = dict(run.get("input_json") or {}) if isinstance(run, dict) else {}
+            metadata_json = dict(run.get("metadata_json") or {}) if isinstance(run, dict) else {}
+            resume_state = dict(input_json.get("orchestration_resume") or {})
+            payload_json = dict(approval.get("payload_json") or {})
+            review_stage = str(payload_json.get("review_stage") or "").strip()
+            if approved:
+                if review_stage == "cluster_research":
+                    resume_state["continue_mode"] = "accept_research_evidence"
+                    metadata_json["review_recovery_mode"] = "continue_with_research"
+                elif review_stage == "agent_output_stream":
+                    resume_state["continue_mode"] = "accept_partial_stream_output"
+                    metadata_json["review_recovery_mode"] = "continue_with_partial_stream_output"
+                resume_state["review_decision"] = "approved"
+                input_json["orchestration_resume"] = resume_state
+                self.run_service.update_run_input_json(run_id, input_json)
+                if metadata_json:
+                    self.run_service.update_run_metadata_json(run_id, metadata_json)
+                self.run_service.mark_approved(run_id)
+                self.run_service.persist_approval_resolution(run_id, approved=True)
+                await enqueue_harness_resume(run_id)
+            else:
+                rollback_state = dict(resume_state.get("rollback_state") or {})
+                if rollback_state:
+                    resume_state["state"] = rollback_state
+                    if review_stage == "cluster_research":
+                        resume_state["next_step_index"] = int(resume_state.get("next_step_index") or 0)
+                        resume_state["continue_mode"] = "discard_research_evidence"
+                        metadata_json["review_recovery_mode"] = "continue_without_research"
+                    else:
+                        resume_state["next_step_index"] = int(resume_state.get("next_step_index") or 0)
+                resume_state["review_decision"] = "rejected"
+                input_json["orchestration_resume"] = resume_state
+                self.run_service.update_run_input_json(run_id, input_json)
+                if metadata_json:
+                    self.run_service.update_run_metadata_json(run_id, metadata_json)
+                self.run_service.mark_rejected(run_id)
+                self.run_service.persist_approval_resolution(run_id, approved=False)
+        elif approved:
             self.run_service.mark_approved(run_id)
             self.run_service.persist_approval_resolution(run_id, approved=True)
             await enqueue_harness_resume(run_id)

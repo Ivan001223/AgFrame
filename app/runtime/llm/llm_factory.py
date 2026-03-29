@@ -25,7 +25,7 @@ def get_local_qwen_provider():
     return _local_qwen_instance
 
 
-def get_llm(temperature: float = 0, streaming: bool = True, json_mode: bool = False):
+def get_llm(temperature: float = 0, streaming: bool = True, json_mode: bool = False, model: str | None = None):
     """
     统一获取配置好的 LLM 实例。
     根据配置文件选择使用 OpenAI 兼容接口或本地 Qwen 模型。
@@ -40,7 +40,7 @@ def get_llm(temperature: float = 0, streaming: bool = True, json_mode: bool = Fa
     """
     global _local_qwen_instance
     llm_config = settings.llm
-    model_name = llm_config.model
+    model_name = model or llm_config.model
 
     # 判断是否需要使用本地 Qwen
     if model_name == "local-qwen3-vl":
@@ -59,4 +59,50 @@ def get_llm(temperature: float = 0, streaming: bool = True, json_mode: bool = Fa
         api_key=llm_config.api_key,
         streaming=streaming,
         model_kwargs=model_kwargs,
+    )
+
+
+def get_llm_for_provider(
+    *,
+    model: str,
+    base_url: str,
+    api_key: str,
+    temperature: float = 0,
+    streaming: bool = True,
+    json_mode: bool = False,
+    timeout_seconds: int = 60,
+):
+    """
+    用指定 provider 参数创建 LLM 实例。
+    专用于 orchestration 场景，支持 per-agent model + provider + timeout。
+
+    Args:
+        model: 模型名
+        base_url: 提供商 base URL
+        api_key: 提供商 API key
+        temperature: 随机性参数 (0-1)
+        streaming: 是否开启流式输出
+        json_mode: 是否强制输出 JSON 格式
+        timeout_seconds: 超时秒数
+
+    Returns:
+        BaseChatModel: 配置好的 LangChain 聊天模型实例
+    """
+    if model in {"dev-stub", "dev_stub"}:
+        return DevStubChatModel(model_name="dev-stub", streaming=streaming)
+
+    model_kwargs = {}
+    if json_mode:
+        llm_config = settings.llm
+        if llm_config.json_mode_response_format:
+            model_kwargs["response_format"] = {"type": "json_object"}
+
+    return ChatOpenAI(
+        model=model,
+        temperature=temperature,
+        base_url=base_url,
+        api_key=api_key,
+        streaming=streaming,
+        model_kwargs=model_kwargs,
+        request_timeout=timeout_seconds,
     )

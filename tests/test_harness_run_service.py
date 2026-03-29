@@ -143,15 +143,15 @@ def test_get_run_detail_and_list_runs_include_latest_approval_and_verification()
         "run_id": "hr-1",
         "user_id": "u1",
         "session_id": "s1",
-        "task_type": "session_resume_approval",
+        "task_type": "agent_orchestration",
         "status": "approved",
-        "policy_id": "session_resume_approval:v1",
-        "input_json": {"session_id": "s1"},
-        "metadata_json": None,
+        "policy_id": "agent_orchestration:v1",
+        "input_json": {"task": "Run a reviewed orchestration"},
+        "metadata_json": {"review_recovery_mode": "continue_with_partial_stream_output"},
         "current_step": "resume_graph",
         "retry_count": 0,
         "resume_count": 0,
-        "approval_required": True,
+        "approval_required": False,
         "verification_status": None,
         "created_at": 1,
         "updated_at": 1,
@@ -170,17 +170,73 @@ def test_get_run_detail_and_list_runs_include_latest_approval_and_verification()
     class _ApprovalStore:
         def get_latest_by_run(self, run_id: str):
             assert run_id == "hr-1"
-            return {"approval_id": "ha-1", "run_id": run_id, "status": "approved"}
+            return {
+                "approval_id": "ha-1",
+                "run_id": run_id,
+                "status": "approved",
+                "action_type": "orchestration_review",
+                "payload_json": {
+                    "review_stage": "agent_output_stream",
+                    "agent_id": "agent-a",
+                    "agent_name": "Agent A",
+                    "review_output": "Safe to continue.",
+                    "segment_index": 1,
+                    "segment_count": 3,
+                    "segment_start_char": 0,
+                    "segment_end_char": 120,
+                    "step_index": 2,
+                    "partial_output": "Approved prefix",
+                },
+            }
 
     class _VerificationStore:
         def get_latest_by_run(self, run_id: str):
             assert run_id == "hr-1"
-            return {"verification_id": "hv-1", "run_id": run_id, "status": "pass"}
+            return {
+                "verification_id": "hv-1",
+                "run_id": run_id,
+                "status": "pass",
+                "artifacts_json": {
+                    "output_artifacts": {
+                        "cluster-1": {
+                            "research": {
+                                "research_mode": "paper_first",
+                                "papers": [{"title": "Paper 1"}, {"title": "Paper 2"}],
+                                "browser_previews": [{"url": "https://example.com"}],
+                                "sources": [{"url": "https://example.com"}, {"url": "https://arxiv.org/abs/1"}],
+                            }
+                        }
+                    }
+                },
+            }
 
     class _EventStore:
         def list_events(self, *, user_id: str | None = None, session_id: str | None = None, run_id: str | None = None, limit: int = 100):
             assert run_id == "hr-1"
-            return [{"event_id": "he-1", "run_id": run_id, "event_type": "run.created"}]
+            return [
+                {"event_id": "he-1", "run_id": run_id, "event_type": "run.created", "created_at": 1},
+                {
+                    "event_id": "he-2",
+                    "run_id": run_id,
+                    "event_type": "orchestration.stream_continuation_resumed",
+                    "created_at": 2,
+                    "details_json": {
+                        "agent_id": "agent-a",
+                        "agent_name": "Agent A",
+                        "next_step_index": 2,
+                        "partial_length": 15,
+                    },
+                },
+                {
+                    "event_id": "he-3",
+                    "run_id": run_id,
+                    "event_type": "orchestration.stream_continuation_completed",
+                    "created_at": 3,
+                    "details_json": {
+                        "agent_id": "agent-a",
+                    },
+                },
+            ]
 
     service = HarnessRunService(
         run_store=_RunStore(),
@@ -196,10 +252,226 @@ def test_get_run_detail_and_list_runs_include_latest_approval_and_verification()
     assert detail["latest_approval"]["status"] == "approved"
     assert detail["latest_verification"]["status"] == "pass"
     assert detail["events"][0]["event_type"] == "run.created"
-    assert detail["policy"]["retry_budget"] == 0
+    assert detail["policy"]["retry_budget"] == 1
     assert detail["can_retry"] is False
+    assert detail["runtime_state"]["review"]["stage"] == "agent_output_stream"
+    assert detail["runtime_state"]["review"]["agent_name"] == "Agent A"
+    assert detail["runtime_state"]["review"]["segment_count"] == 3
+    assert detail["runtime_state"]["continuation"]["enabled"] is True
+    assert detail["runtime_state"]["continuation"]["status"] == "completed"
+    assert detail["runtime_state"]["continuation"]["step_index"] == 2
+    assert detail["runtime_state"]["continuation"]["prefix_length"] == len("Approved prefix")
+    assert detail["runtime_state"]["continuation"]["resumed_at"] == 2
+    assert detail["runtime_state"]["continuation"]["completed_at"] == 3
+    assert detail["runtime_state"]["research"]["enabled"] is True
+    assert detail["runtime_state"]["research"]["mode"] == "paper_first"
+    assert detail["runtime_state"]["research"]["paper_count"] == 2
+    assert detail["runtime_state"]["research"]["browser_preview_count"] == 1
+    assert detail["runtime_state"]["research"]["source_count"] == 2
+    assert detail["runtime_state"]["research"]["cluster_ids"] == ["cluster-1"]
     assert listing[0]["latest_approval"]["approval_id"] == "ha-1"
     assert listing[0]["latest_verification"]["verification_id"] == "hv-1"
+    assert listing[0]["runtime_state"]["review"]["stage"] == "agent_output_stream"
+    assert listing[0]["runtime_state"]["continuation"]["enabled"] is True
+    assert listing[0]["runtime_state"]["continuation"]["status"] == "completed"
+    assert listing[0]["runtime_state"]["continuation"]["resumed_at"] == 2
+    assert listing[0]["runtime_state"]["research"]["paper_count"] == 2
+
+
+def test_sync_runtime_state_persists_first_class_runtime_model():
+    run = {
+        "run_id": "hr-1",
+        "user_id": "u1",
+        "session_id": None,
+        "task_type": "agent_orchestration",
+        "status": "approved",
+        "policy_id": "agent_orchestration:v1",
+        "input_json": {"task": "Coordinate work"},
+        "metadata_json": {"review_recovery_mode": "continue_with_partial_stream_output"},
+        "current_step": "executing_graph",
+        "retry_count": 0,
+        "resume_count": 0,
+        "approval_required": False,
+        "verification_status": None,
+        "created_at": 1,
+        "updated_at": 1,
+        "finished_at": None,
+    }
+    persisted = {}
+
+    class _RunStore:
+        def get_run(self, run_id: str):
+            return dict(run) if run_id == "hr-1" else None
+
+        def list_runs(self, *, user_id: str, limit: int = 50):
+            return [dict(run)]
+
+    class _ApprovalStore:
+        def get_latest_by_run(self, run_id: str):
+            return {
+                "approval_id": "ha-1",
+                "run_id": run_id,
+                "status": "approved",
+                "action_type": "orchestration_review",
+                "payload_json": {
+                    "review_stage": "agent_output_stream",
+                    "agent_id": "agent-a",
+                    "agent_name": "Agent A",
+                    "review_output": "safe",
+                    "check_count": 4,
+                    "segment_index": 3,
+                    "segment_count": 4,
+                    "segment_start_char": 24,
+                    "segment_end_char": 32,
+                    "last_reviewed_char": 32,
+                    "step_index": 1,
+                    "partial_output": "approved prefix",
+                },
+            }
+
+    class _VerificationStore:
+        def get_latest_by_run(self, run_id: str):
+            return {
+                "verification_id": "hv-1",
+                "run_id": run_id,
+                "status": "pass",
+                "artifacts_json": {
+                    "output_artifacts": {
+                        "cluster-1": {
+                            "research": {
+                                "research_mode": "paper_first",
+                                "papers": [{"title": "Paper 1"}],
+                                "browser_previews": [{"url": "https://example.com"}],
+                                "sources": [{"url": "https://example.com"}],
+                            }
+                        }
+                    }
+                },
+            }
+
+    class _EventStore:
+        def list_events(self, *, user_id: str | None = None, session_id: str | None = None, run_id: str | None = None, limit: int = 100):
+            return []
+
+    class _RuntimeStateStore:
+        def get_by_run(self, run_id: str):
+            return persisted.get(run_id)
+
+        def list_by_run_ids(self, run_ids: list[str]):
+            return {run_id: persisted[run_id] for run_id in run_ids if run_id in persisted}
+
+        def upsert_state(self, *, run_id: str, review_state_json: dict[str, object], continuation_state_json: dict[str, object], research_state_json: dict[str, object]):
+            payload = {
+                "run_id": run_id,
+                "review_state_json": review_state_json,
+                "continuation_state_json": continuation_state_json,
+                "research_state_json": research_state_json,
+                "created_at": 1,
+                "updated_at": 2,
+            }
+            persisted[run_id] = payload
+            return payload
+
+    service = HarnessRunService(
+        run_store=_RunStore(),
+        approval_store=_ApprovalStore(),
+        verification_store=_VerificationStore(),
+        event_store=_EventStore(),
+        runtime_state_store=_RuntimeStateStore(),
+    )
+
+    runtime_state = service.sync_runtime_state("hr-1")
+    listed = service.list_runs(user_id="u1")
+
+    assert runtime_state["review"]["check_count"] == 4
+    assert runtime_state["review"]["last_reviewed_char"] == 32
+    assert persisted["hr-1"]["continuation_state_json"]["enabled"] is True
+    assert persisted["hr-1"]["research_state_json"]["paper_count"] == 1
+    assert listed[0]["runtime_state"]["review"]["agent_name"] == "Agent A"
+
+
+def test_patch_runtime_state_appends_queryable_history_entries():
+    run = {
+        "run_id": "hr-1",
+        "user_id": "u1",
+        "session_id": None,
+        "task_type": "agent_orchestration",
+        "status": "running",
+        "policy_id": "agent_orchestration:v1",
+        "input_json": {"task": "Coordinate work"},
+        "metadata_json": None,
+        "current_step": "executing_graph",
+        "retry_count": 0,
+        "resume_count": 0,
+        "approval_required": False,
+        "verification_status": None,
+        "created_at": 1,
+        "updated_at": 1,
+        "finished_at": None,
+    }
+    persisted = {}
+    history = []
+
+    class _RunStore:
+        def get_run(self, run_id: str):
+            return dict(run) if run_id == "hr-1" else None
+
+    class _RuntimeStateStore:
+        def get_by_run(self, run_id: str):
+            return persisted.get(run_id)
+
+        def list_by_run_ids(self, run_ids: list[str]):
+            return {}
+
+        def upsert_state(self, *, run_id: str, review_state_json: dict[str, object], continuation_state_json: dict[str, object], research_state_json: dict[str, object]):
+            payload = {
+                "run_id": run_id,
+                "review_state_json": review_state_json,
+                "continuation_state_json": continuation_state_json,
+                "research_state_json": research_state_json,
+                "created_at": 1,
+                "updated_at": 2,
+            }
+            persisted[run_id] = payload
+            return payload
+
+    class _RuntimeStateHistoryStore:
+        def get_latest_for_run(self, run_id: str):
+            return history[-1] if history else None
+
+        def append_history(self, *, run_id: str, version: int, transition_type: str, stage: str | None, runtime_state_json: dict[str, object]):
+            entry = {
+                "history_id": len(history) + 1,
+                "run_id": run_id,
+                "version": version,
+                "transition_type": transition_type,
+                "stage": stage,
+                "runtime_state_json": runtime_state_json,
+                "created_at": 1000 + len(history),
+            }
+            history.append(entry)
+            return entry
+
+        def list_for_run(self, *, run_id: str, limit: int = 100):
+            return [entry for entry in history if entry["run_id"] == run_id][:limit]
+
+    service = HarnessRunService(
+        run_store=_RunStore(),
+        runtime_state_store=_RuntimeStateStore(),
+        runtime_state_history_store=_RuntimeStateHistoryStore(),
+    )
+
+    service.patch_runtime_state("hr-1", review={"stage": "agent_output_stream"}, transition_type="stream_event")
+    service.patch_runtime_state("hr-1", continuation={"enabled": True, "status": "pending"}, transition_type="stream_blocked")
+
+    entries = service.list_runtime_state_history(run_id="hr-1")
+
+    assert len(entries) == 2
+    assert entries[0]["version"] == 1
+    assert entries[0]["transition_type"] == "stream_event"
+    assert entries[0]["stage"] == "agent_output_stream"
+    assert entries[1]["version"] == 2
+    assert entries[1]["transition_type"] == "stream_blocked"
 
 
 def test_create_retry_run_respects_budget_and_records_event():
@@ -256,6 +528,211 @@ def test_create_retry_run_respects_budget_and_records_event():
     assert events[-1]["event_type"] == "run.retry_requested"
     assert service.can_retry_run("hr-1") is True
     assert service.can_retry_run(str(retried["run_id"])) is False
+
+
+def test_create_retry_run_allows_rejected_orchestration_review_resume():
+    runs: dict[str, dict[str, object]] = {
+        "hr-1": {
+            "run_id": "hr-1",
+            "user_id": "u1",
+            "session_id": None,
+            "task_type": "agent_orchestration",
+            "status": "rejected",
+            "policy_id": "agent_orchestration:v1",
+            "input_json": {
+                "task": "Initial task",
+                "orchestration_resume": {
+                    "next_step_index": 2,
+                    "state": {"task": "Initial task", "agent_outputs": {"agent_a": "done"}},
+                    "rollback_state": {"task": "Initial task", "agent_outputs": {"agent_a": "safe"}},
+                },
+            },
+            "metadata_json": {"source": "studio"},
+            "current_step": "executing_graph",
+            "retry_count": 0,
+            "resume_count": 0,
+            "approval_required": False,
+            "verification_status": None,
+            "created_at": 1,
+            "updated_at": 1,
+            "finished_at": 1,
+        }
+    }
+    created: list[dict[str, object]] = []
+
+    class _RunStore:
+        def get_run(self, run_id: str):
+            return dict(runs[run_id]) if run_id in runs else None
+
+        def create_run(self, **kwargs):
+            created.append(kwargs)
+            run = {**kwargs, "created_at": 2, "updated_at": 2, "finished_at": None}
+            runs[str(kwargs["run_id"])] = run
+            return run
+
+        def update_run(self, run_id: str, **changes):
+            runs[run_id].update(changes)
+            return dict(runs[run_id])
+
+    class _ApprovalStore:
+        def get_latest_by_run(self, run_id: str):
+            if run_id == "hr-1":
+                return {
+                    "approval_id": "ha-1",
+                    "run_id": run_id,
+                    "action_type": "orchestration_review",
+                    "status": "rejected",
+                    "comment": "Use a safer rollout path.",
+                }
+            return None
+
+    service = HarnessRunService(run_store=_RunStore(), approval_store=_ApprovalStore())
+
+    assert service.can_retry_run("hr-1") is True
+    retried = service.create_retry_run("hr-1", requested_by="u1")
+
+    assert retried["retry_count"] == 1
+    assert created[0]["input_json"]["orchestration_resume"]["next_step_index"] == 1
+    assert created[0]["input_json"]["orchestration_resume"]["state"]["agent_outputs"]["agent_a"] == "safe"
+    assert "Use a safer rollout path." in created[0]["input_json"]["task"]
+
+
+def test_create_retry_run_continues_without_research_for_rejected_cluster_research_review():
+    runs: dict[str, dict[str, object]] = {
+        "hr-1": {
+            "run_id": "hr-1",
+            "user_id": "u1",
+            "session_id": None,
+            "task_type": "agent_orchestration",
+            "status": "rejected",
+            "policy_id": "agent_orchestration:v1",
+            "input_json": {
+                "task": "Initial task",
+                "orchestration_resume": {
+                    "next_step_index": 2,
+                    "continue_mode": "discard_research_evidence",
+                    "state": {"task": "Initial task", "agent_outputs": {"cluster_a": "done with research"}},
+                    "rollback_state": {"task": "Initial task", "agent_outputs": {"cluster_a": "safe summary only"}},
+                },
+            },
+            "metadata_json": {"source": "studio"},
+            "current_step": "executing_graph",
+            "retry_count": 0,
+            "resume_count": 0,
+            "approval_required": False,
+            "verification_status": None,
+            "created_at": 1,
+            "updated_at": 1,
+            "finished_at": 1,
+        }
+    }
+    created: list[dict[str, object]] = []
+
+    class _RunStore:
+        def get_run(self, run_id: str):
+            return dict(runs[run_id]) if run_id in runs else None
+
+        def create_run(self, **kwargs):
+            created.append(kwargs)
+            run = {**kwargs, "created_at": 2, "updated_at": 2, "finished_at": None}
+            runs[str(kwargs["run_id"])] = run
+            return run
+
+        def update_run(self, run_id: str, **changes):
+            runs[run_id].update(changes)
+            return dict(runs[run_id])
+
+    class _ApprovalStore:
+        def get_latest_by_run(self, run_id: str):
+            if run_id == "hr-1":
+                return {
+                    "approval_id": "ha-1",
+                    "run_id": run_id,
+                    "action_type": "orchestration_review",
+                    "status": "rejected",
+                    "comment": "Skip external evidence and continue.",
+                    "payload_json": {"review_stage": "cluster_research"},
+                }
+            return None
+
+    service = HarnessRunService(run_store=_RunStore(), approval_store=_ApprovalStore())
+
+    retried = service.create_retry_run("hr-1", requested_by="u1")
+
+    assert retried["retry_count"] == 1
+    assert created[0]["input_json"]["orchestration_resume"]["next_step_index"] == 2
+    assert created[0]["input_json"]["orchestration_resume"]["state"]["agent_outputs"]["cluster_a"] == "safe summary only"
+    assert "Skip external evidence and continue." in created[0]["input_json"]["task"]
+    assert created[0]["metadata_json"]["review_recovery_mode"] == "continue_without_research"
+
+
+def test_create_retry_run_restarts_blocked_stream_step_from_safe_state():
+    runs: dict[str, dict[str, object]] = {
+        "hr-1": {
+            "run_id": "hr-1",
+            "user_id": "u1",
+            "session_id": None,
+            "task_type": "agent_orchestration",
+            "status": "rejected",
+            "policy_id": "agent_orchestration:v1",
+            "input_json": {
+                "task": "Initial task",
+                "orchestration_resume": {
+                    "next_step_index": 3,
+                    "state": {"task": "Initial task", "agent_outputs": {"agent_b": "partial"}},
+                    "rollback_state": {"task": "Initial task", "agent_outputs": {"agent_a": "safe"}},
+                    "continuation": {"agent_id": "agent_b", "partial_output": "safe partial"},
+                },
+            },
+            "metadata_json": {"source": "studio"},
+            "current_step": "executing_graph",
+            "retry_count": 0,
+            "resume_count": 0,
+            "approval_required": False,
+            "verification_status": None,
+            "created_at": 1,
+            "updated_at": 1,
+            "finished_at": 1,
+        }
+    }
+    created: list[dict[str, object]] = []
+
+    class _RunStore:
+        def get_run(self, run_id: str):
+            return dict(runs[run_id]) if run_id in runs else None
+
+        def create_run(self, **kwargs):
+            created.append(kwargs)
+            run = {**kwargs, "created_at": 2, "updated_at": 2, "finished_at": None}
+            runs[str(kwargs["run_id"])] = run
+            return run
+
+        def update_run(self, run_id: str, **changes):
+            runs[run_id].update(changes)
+            return dict(runs[run_id])
+
+    class _ApprovalStore:
+        def get_latest_by_run(self, run_id: str):
+            if run_id == "hr-1":
+                return {
+                    "approval_id": "ha-1",
+                    "run_id": run_id,
+                    "action_type": "orchestration_review",
+                    "status": "rejected",
+                    "comment": "Take a safer continuation.",
+                    "payload_json": {"review_stage": "agent_output_stream", "step_index": 2},
+                }
+            return None
+
+    service = HarnessRunService(run_store=_RunStore(), approval_store=_ApprovalStore())
+
+    retried = service.create_retry_run("hr-1", requested_by="u1")
+
+    assert retried["retry_count"] == 1
+    assert created[0]["input_json"]["orchestration_resume"]["next_step_index"] == 2
+    assert created[0]["input_json"]["orchestration_resume"]["state"]["agent_outputs"]["agent_a"] == "safe"
+    assert created[0]["metadata_json"]["review_recovery_mode"] == "continue_from_stream_block"
+    assert "Take a safer continuation." in created[0]["input_json"]["task"]
 
 
 def test_create_run_rejects_unknown_task_type():

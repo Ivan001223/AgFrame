@@ -25,6 +25,14 @@ _POLICIES: dict[str, HarnessPolicy] = {
         verification_profile="approval_checkpoint_basic",
         retry_budget=0,
     ),
+    HarnessTaskType.AGENT_ORCHESTRATION.value: HarnessPolicy(
+        policy_id="agent_orchestration:v1",
+        task_type=HarnessTaskType.AGENT_ORCHESTRATION.value,
+        approval_required=False,
+        allowed_tools=["agent_canvas", "skill_registry", "review_agent"],
+        verification_profile="agent_orchestration_basic",
+        retry_budget=1,
+    ),
 }
 
 

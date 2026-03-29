@@ -11,3 +11,13 @@ def test_document_ingest_policy_exists():
     assert policy.verification_profile == "document_ingest_basic"
     assert policy.retry_budget == 1
     assert HarnessRunStatus.QUEUED.value == "queued"
+
+
+def test_agent_orchestration_policy_exists():
+    policy = get_policy("agent_orchestration")
+
+    assert policy.policy_id == "agent_orchestration:v1"
+    assert policy.task_type == "agent_orchestration"
+    assert policy.approval_required is False
+    assert "agent_canvas" in policy.allowed_tools
+    assert policy.retry_budget == 1

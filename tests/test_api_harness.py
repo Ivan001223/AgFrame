@@ -216,6 +216,39 @@ def test_list_harness_run_events(monkeypatch):
     assert response.json()["events"][0]["event_type"] == "run.created"
 
 
+def test_list_harness_run_runtime_state_history(monkeypatch):
+    app = FastAPI()
+    app.include_router(harness_api.router)
+    app.dependency_overrides[harness_api.get_current_active_user] = lambda: _U()
+
+    class _Service(_ServiceListGet):
+        def list_runtime_state_history(self, *, run_id: str, limit: int = 100):
+            assert run_id == "hr-1"
+            return [
+                {
+                    "history_id": 1,
+                    "run_id": run_id,
+                    "version": 1,
+                    "transition_type": "run_created",
+                    "stage": None,
+                    "runtime_state_json": {
+                        "review": {},
+                        "continuation": {"enabled": False},
+                        "research": {"enabled": False},
+                    },
+                    "created_at": 1000,
+                }
+            ]
+
+    monkeypatch.setattr(harness_api, "get_run_service", lambda: _Service())
+    client = TestClient(app)
+
+    response = client.get("/harness/runs/hr-1/runtime-state/history")
+
+    assert response.status_code == 200
+    assert response.json()["history"][0]["transition_type"] == "run_created"
+
+
 def test_get_harness_run_forbidden(monkeypatch):
     app = FastAPI()
     app.include_router(harness_api.router)
@@ -372,3 +405,235 @@ def test_create_harness_run_rejects_unknown_task_type(monkeypatch):
     )
 
     assert response.status_code == 422
+
+
+def test_list_harness_studio_projects(monkeypatch):
+    app = FastAPI()
+    app.include_router(harness_api.router)
+    app.dependency_overrides[harness_api.get_current_active_user] = lambda: _U()
+
+    class _StudioService:
+        def list_projects(self, *, user_id: str):
+            assert user_id == "u1"
+            return [{"project_id": "hp-1", "name": "Studio", "agent_count": 2}]
+
+    monkeypatch.setattr(harness_api, "get_studio_service", lambda: _StudioService())
+    client = TestClient(app)
+
+    response = client.get("/harness/studio/projects")
+
+    assert response.status_code == 200
+    assert response.json()["projects"][0]["project_id"] == "hp-1"
+
+
+def test_get_current_harness_studio_project(monkeypatch):
+    app = FastAPI()
+    app.include_router(harness_api.router)
+    app.dependency_overrides[harness_api.get_current_active_user] = lambda: _U()
+
+    class _StudioService:
+        def get_current_project(self, *, user_id: str):
+            assert user_id == "u1"
+            return {"project_id": "hp-1", "name": "Studio", "graph_json": {"agents": []}}
+
+    monkeypatch.setattr(harness_api, "get_studio_service", lambda: _StudioService())
+    client = TestClient(app)
+
+    response = client.get("/harness/studio/projects/current")
+
+    assert response.status_code == 200
+    assert response.json()["project_id"] == "hp-1"
+
+
+def test_request_harness_studio_skill(monkeypatch):
+    app = FastAPI()
+    app.include_router(harness_api.router)
+    app.dependency_overrides[harness_api.get_current_active_user] = lambda: _U()
+
+    class _StudioService:
+        def request_skills(self, *, project_id: str, user_id: str, agent_id: str, requested_skills: list[str]):
+            assert project_id == "hp-1"
+            assert user_id == "u1"
+            assert agent_id == "agent_a"
+            assert requested_skills == ["research"]
+            return {"project_id": project_id, "skill_request_result": {"created_requests": [{"skill_id": "research"}]}}
+
+    monkeypatch.setattr(harness_api, "get_studio_service", lambda: _StudioService())
+    client = TestClient(app)
+
+    response = client.post(
+        "/harness/studio/projects/hp-1/skill-requests",
+        json={"agent_id": "agent_a", "requested_skills": ["research"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["skill_request_result"]["created_requests"][0]["skill_id"] == "research"
+
+
+def test_create_harness_studio_run(monkeypatch):
+    app = FastAPI()
+    app.include_router(harness_api.router)
+    app.dependency_overrides[harness_api.get_current_active_user] = lambda: _U()
+    queued = {}
+
+    class _StudioService:
+        def create_orchestration_run(
+            self,
+            *,
+            project_id: str,
+            user_id: str,
+            run_scope: str,
+            agent_ids: list[str],
+            loop_count: int,
+            task: str = "",
+            timeout_seconds: int | None = None,
+        ):
+            queued["created"] = {
+                "project_id": project_id,
+                "user_id": user_id,
+                "run_scope": run_scope,
+                "agent_ids": agent_ids,
+                "loop_count": loop_count,
+                "task": task,
+                "timeout_seconds": timeout_seconds,
+            }
+            return {
+                "run_id": "hr-9",
+                "task_type": "agent_orchestration",
+                "status": "created",
+                "approval_required": False,
+            }
+
+    class _RunService:
+        def mark_queued(self, run_id: str):
+            queued["marked"] = run_id
+            return {"run_id": run_id, "status": "queued"}
+
+        def get_run_detail(self, run_id: str):
+            return {"run_id": run_id, "status": "queued", "task_type": "agent_orchestration"}
+
+    async def _enqueue(run_id: str):
+        queued["enqueued"] = run_id
+        return "job-1"
+
+    monkeypatch.setattr(harness_api, "get_studio_service", lambda: _StudioService())
+    monkeypatch.setattr(harness_api, "get_run_service", lambda: _RunService())
+    monkeypatch.setattr(harness_api, "enqueue_harness_run", _enqueue)
+    client = TestClient(app)
+
+    response = client.post(
+        "/harness/studio/projects/hp-1/run",
+        json={"run_scope": "selected", "agent_ids": ["agent_a"], "loop_count": 2, "task": "Do it", "timeout_seconds": 45},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["run_id"] == "hr-9"
+    assert queued["created"]["agent_ids"] == ["agent_a"]
+    assert queued["created"]["task"] == "Do it"
+    assert queued["created"]["timeout_seconds"] == 45
+    assert queued["enqueued"] == "hr-9"
+    assert queued["marked"] == "hr-9"
+
+
+def test_list_harness_model_providers_serializes_models_and_hides_api_key(monkeypatch):
+    app = FastAPI()
+    app.include_router(harness_api.router)
+    app.dependency_overrides[harness_api.get_current_active_user] = lambda: _U()
+
+    class _ProviderStore:
+        def list_providers(self, *, user_id=None, limit: int = 50):
+            assert user_id == "u1"
+            return [
+                {
+                    "provider_id": "provider_1",
+                    "user_id": "u1",
+                    "name": "Primary",
+                    "base_url": "https://provider.test",
+                    "api_key_encrypted": "secret",
+                    "models_json": ["gpt-5.2", "gpt-5.1-codex-mini"],
+                    "is_default": True,
+                    "enabled": True,
+                }
+            ]
+
+    monkeypatch.setattr(harness_api, "get_provider_store", lambda: _ProviderStore())
+    client = TestClient(app)
+
+    response = client.get("/harness/model-providers")
+
+    assert response.status_code == 200
+    provider = response.json()["providers"][0]
+    assert provider["models"] == ["gpt-5.2", "gpt-5.1-codex-mini"]
+    assert "models_json" not in provider
+    assert "api_key_encrypted" not in provider
+
+
+def test_update_harness_model_provider_serializes_models(monkeypatch):
+    app = FastAPI()
+    app.include_router(harness_api.router)
+    app.dependency_overrides[harness_api.get_current_active_user] = lambda: _U()
+
+    class _ProviderStore:
+        def get_provider(self, provider_id: str):
+            return {
+                "provider_id": provider_id,
+                "user_id": "u1",
+                "name": "Primary",
+                "base_url": "https://provider.test",
+                "api_key_encrypted": "secret",
+                "models_json": ["gpt-5.2"],
+                "is_default": False,
+                "enabled": True,
+            }
+
+        def update_provider(self, provider_id: str, **changes):
+            return {
+                "provider_id": provider_id,
+                "user_id": "u1",
+                "name": changes.get("name", "Updated"),
+                "base_url": "https://provider.test",
+                "api_key_encrypted": "secret",
+                "models_json": changes.get("models_json", ["gpt-5.1-codex-mini"]),
+                "is_default": False,
+                "enabled": True,
+            }
+
+    monkeypatch.setattr(harness_api, "get_provider_store", lambda: _ProviderStore())
+    client = TestClient(app)
+
+    response = client.put(
+        "/harness/model-providers/provider_1",
+        json={"models": ["gpt-5.1-codex-mini"]},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["models"] == ["gpt-5.1-codex-mini"]
+    assert "models_json" not in body
+    assert "api_key_encrypted" not in body
+
+
+def test_delete_harness_model_provider_forbidden_for_other_user(monkeypatch):
+    app = FastAPI()
+    app.include_router(harness_api.router)
+    app.dependency_overrides[harness_api.get_current_active_user] = lambda: _U()
+
+    class _ProviderStore:
+        def get_provider(self, provider_id: str):
+            return {
+                "provider_id": provider_id,
+                "user_id": "u2",
+                "name": "Foreign",
+                "base_url": "https://provider.test",
+                "api_key_encrypted": "secret",
+                "models_json": ["gpt-5.2"],
+                "is_default": False,
+                "enabled": True,
+            }
+
+    monkeypatch.setattr(harness_api, "get_provider_store", lambda: _ProviderStore())
+    client = TestClient(app)
+
+    response = client.delete("/harness/model-providers/provider_1")
+
+    assert response.status_code == 403

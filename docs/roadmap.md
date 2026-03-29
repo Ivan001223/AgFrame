@@ -1,27 +1,54 @@
-# AgFrame 路线图 (Roadmap)
+# AgFrame Roadmap
 
-## P0 (核心闭环)
+<div align="center">
+  <a href="roadmap-cn.md">中文文档</a>
+</div>
 
-- [x] 知识库管理最小闭环第一步：补充文档列表、文档详情、删除文档接口
-- [x] 会话中心第一步：会话搜索、详情、标题重命名
-- [x] 记忆控制台第一步：查看画像、查看长期记忆、删除记忆项
-- [x] 记忆控制台第二步：手动更新画像、手动新增记忆项
-- [x] 上传链路增强第一步：重复文档提示
-- [x] 上传链路增强第二步：任务重试接口、进度状态细化
-- [x] 文档管理第二步：文件名搜索、内容预览、重建索引
-- [x] 健康检查第二步：向量库、LLM、Embedding、Hybrid RAG/裁剪策略探针
-- [x] 健康检查增强第一步：数据库、Redis 就绪检查
+## P0 (Core Closed Loop)
 
-## P1 (Agent & 运营增强)
+- [x] Knowledge base management minimal closed loop step 1: Supplement document list, document details, and delete document interfaces
+- [x] Conversation center step 1: Conversation search, details, title renaming
+- [x] Memory console step 1: View profile, view long-term memory, delete memory items
+- [x] Memory console step 2: Manually update profile, manually add new memory items
+- [x] Upload pipeline enhancement step 1: Duplicate document prompt
+- [x] Upload pipeline enhancement step 2: Task retry interface, refined progress status
+- [x] Document management step 2: File name search, content preview, rebuild index
+- [x] Health check step 2: Vector database, LLM, Embedding, Hybrid RAG/pruning strategy probes
+- [x] Health check enhancement step 1: Database, Redis readiness checks
 
-- [x] 人工审批闭环：审批后恢复执行的服务端封装接口 (v0.2.1 完成 Harness 与 Checkpoint 接入)
-- [ ] 检索运营面板：命中质量、引用质量、失败问题回放
-- [ ] 文档管理增强：重建索引、按标签/来源筛选、解析结果预览
-- [ ] 用户设置增强：模型偏好、回答风格、检索策略
-- [ ] Context pruning 评测：方法对比、节省量、耗时与质量回放
+## P1 (Agent & Operations Enhancement)
 
-## P2 (扩展与管理)
+- [x] Human approval closed loop: Server-side encapsulated interface for resuming execution after approval (v0.2.1 completed Harness and Checkpoint integration)
+- [ ] Retrieval operations panel: Hit quality, citation quality, failure case replay
+- [ ] Document management enhancement: Rebuild index, filter by tag/source, parsing result preview
+- [ ] User settings enhancement: Model preferences, answer style, retrieval strategy
+- [ ] Context pruning evaluation: Method comparison, savings, time consumption, and quality replay
 
-- [ ] Agent 工具扩展：结构化网页抓取、表格分析、受控代码执行
-- [ ] 管理后台：配额、审计日志、租户治理、配置面板
-- [ ] 端到端验收脚本：注册 -> 上传 -> 检索 -> 对话 -> 历史 -> 记忆
+## P2 (Extension & Management)
+
+- [ ] Agent tool extensions: Structured web scraping, table analysis, controlled code execution
+- [ ] Admin backend: Quotas, audit logs, tenant governance, configuration panels
+- [ ] End-to-end acceptance scripts: Registration -> Upload -> Retrieval -> Chat -> History -> Memory
+
+## Context Pruning TODO
+
+### Now
+- [x] Integrate candidate pruning in the retrieval phase
+- [x] Integrate prompt pruning in the prompt assembly phase
+- [x] Support three pruning methods: `heuristic` / `reranker` / `auto`
+- [x] The `reranker` mode has converged to a lightweight local ranker, achieving model independence
+- [x] Display candidate/prompt two-layer pruning statistics in the workbench
+- [x] Record `saved chars` and `saved %` for each layer
+
+### Next
+- [ ] Benchmark evaluation: compare the time consumption and savings of `heuristic` / `reranker(lightweight)` / `auto`
+- [ ] Telemetry persistence: include pruning telemetry in test reports or operation reports
+- [ ] Management portal: display the current pruning method and threshold on the settings page
+- [ ] Quality evaluation: sample and compare the impact of different pruning methods on answer quality
+- [ ] Terminology convergence: gradually migrate the `reranker` naming in UI/docs to `lightweight_ranker`
+- [ ] Dataset creation: prepare a batch of real knowledge base fragments for stable reproducible experiments
+
+### Later
+- [ ] Implement type-aware pruning for code blocks, log blocks, and table blocks
+- [ ] Upgrade automatic focus hint generation from heuristics to structured planner output
+- [ ] Introduce repo/file-level local context budget allocation

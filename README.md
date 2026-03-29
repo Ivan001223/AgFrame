@@ -33,11 +33,15 @@
 
 ## ✨ Core Features Quick Look
 
+<div align="center">
+
 | 🏗️ Workflow Orchestration | 🧠 Lightweight RAG | 💾 Hierarchical Memory | 🔮 LLM Factory | 📊 Observability | 🛠️ Infrastructure |
 |:---:|:---:|:---:|:---:|:---:|:---:|
 | LangGraph | Dual Retrieval (Dense+BM25) | Short-term Dialog Window | Multi-Model Support | Langfuse | Redis Worker |
 | Harness Runtime | RRF Rank Fusion | Long-term Profile Update | Embedding Models | Task Diagnostic Queue | PostgreSQL |
 | Human-in-Loop | Context Lightweight Pruning | pgvector Retrieval | Structured Output | Checkpoint Tracking | Docker Orchestration |
+
+</div>
 
 ---
 

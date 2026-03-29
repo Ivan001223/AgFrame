@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { FormEvent, useMemo, useRef, useState } from 'react';
 import { Bot, LoaderCircle, RefreshCw, Send, ShieldAlert } from 'lucide-react';
 import { ContextPruningSummary, formatPruningBlock } from '@/domains/chat/pruning';
@@ -8,6 +9,7 @@ import {
   useApproveInterruptMutation,
   useChatInvokeMutation,
   useInterruptStatusQuery,
+  useResumeInterruptMutation,
 } from '@/domains/chat/hooks';
 
 function createSessionId() {
@@ -34,7 +36,9 @@ export default function ChatPage() {
   const chatMutation = useChatInvokeMutation();
   const interruptQuery = useInterruptStatusQuery(sessionId);
   const approveMutation = useApproveInterruptMutation();
+  const resumeMutation = useResumeInterruptMutation();
   const isChatPending = pendingSessionId === sessionId;
+  const isApprovalPending = approveMutation.isPending || resumeMutation.isPending;
 
   const timeline = useMemo(
     () => (messages.length === 1 && messages[0] === STARTER_MESSAGE ? [] : messages),
@@ -121,6 +125,53 @@ export default function ChatPage() {
   const promptDocStats = formatPruningBlock(contextPruning?.promptPruning?.docs);
   const promptMemoryStats = formatPruningBlock(contextPruning?.promptPruning?.memories);
 
+  const appendAssistantMessage = (content: string) => {
+    setMessages((current) => {
+      const base =
+        current.length === 1 && current[0] === STARTER_MESSAGE ? [] : current;
+      return [...base, { role: 'assistant', content }];
+    });
+  };
+
+  const handleApprove = () => {
+    approveMutation.mutate(
+      { sessionId, approved: true },
+      {
+        onSuccess: () => {
+          resumeMutation.mutate(
+            { sessionId },
+            {
+              onSuccess: ({ messages: resumedMessages, contextPruning: pruningSummary, reply }) => {
+                if (resumedMessages.length > 0) {
+                  setMessages(resumedMessages);
+                } else if (reply) {
+                  appendAssistantMessage(reply);
+                }
+                if (pruningSummary) {
+                  setContextPruning(pruningSummary);
+                }
+                interruptQuery.refetch();
+              },
+              onError: (error) => {
+                appendAssistantMessage(
+                  error instanceof Error ? `Resume failed: ${error.message}` : 'Resume failed.'
+                );
+                interruptQuery.refetch();
+              },
+            }
+          );
+        },
+      }
+    );
+  };
+
+  const handleReject = () => {
+    approveMutation.mutate(
+      { sessionId, approved: false },
+      { onSuccess: () => interruptQuery.refetch() }
+    );
+  };
+
   return (
     <div className="mx-auto grid max-w-7xl gap-6 p-8 lg:grid-cols-[minmax(0,1fr)_320px]">
       <section className="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
@@ -133,13 +184,21 @@ export default function ChatPage() {
               Session ID: <code className="font-mono">{sessionId}</code>
             </p>
           </div>
-          <button
-            type="button"
-            onClick={startNewSession}
-            className="rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-          >
-            New session
-          </button>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/harness"
+              className="rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              Harness
+            </Link>
+            <button
+              type="button"
+              onClick={startNewSession}
+              className="rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              New session
+            </button>
+          </div>
         </div>
 
         <div className="space-y-4 px-6 py-6">
@@ -341,26 +400,16 @@ export default function ChatPage() {
               <div className="flex gap-2">
                 <button
                   type="button"
-                  disabled={approveMutation.isPending}
-                  onClick={() =>
-                    approveMutation.mutate(
-                      { sessionId, approved: true },
-                      { onSuccess: () => interruptQuery.refetch() }
-                    )
-                  }
+                  disabled={isApprovalPending}
+                  onClick={handleApprove}
                   className="flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
                 >
-                  Approve
+                  {resumeMutation.isPending ? 'Resuming...' : 'Approve'}
                 </button>
                 <button
                   type="button"
-                  disabled={approveMutation.isPending}
-                  onClick={() =>
-                    approveMutation.mutate(
-                      { sessionId, approved: false },
-                      { onSuccess: () => interruptQuery.refetch() }
-                    )
-                  }
+                  disabled={isApprovalPending}
+                  onClick={handleReject}
                   className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
                 >
                   Reject

@@ -1,6 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/http/client';
-import { getStoredUsername } from '@/lib/auth/session';
 import { extractContextPruning } from '@/domains/chat/pruning';
 
 export type ChatMessage = {
@@ -19,6 +18,29 @@ export type InterruptStatusDTO = {
     approved_at?: string | null;
   } | null;
   checkpoint_saved_at?: string | null;
+};
+
+export type ResumeInterruptDTO = {
+  session_id: string;
+  resumed: boolean;
+  interrupted?: boolean | null;
+  reply?: string | null;
+  messages?: Array<{
+    role?: string;
+    content?: unknown;
+  }>;
+  context?: Record<string, unknown> | null;
+};
+
+export type ChatInvokeDTO = {
+  session_id: string;
+  interrupted?: boolean | null;
+  reply?: string | null;
+  messages?: Array<{
+    role?: string;
+    content?: unknown;
+  }>;
+  context?: Record<string, unknown> | null;
 };
 
 type ChatInvokeParams = {
@@ -73,30 +95,23 @@ function extractAssistantReply(payload: unknown): string {
   return '';
 }
 
-async function persistConversation(sessionId: string, messages: ChatMessage[]) {
-  const username = getStoredUsername();
-  if (!username) {
-    return;
+function normalizeChatMessages(value: ResumeInterruptDTO['messages']): ChatMessage[] {
+  if (!Array.isArray(value)) {
+    return [];
   }
-
-  const title =
-    messages.find((message) => message.role === 'user')?.content.slice(0, 80) ||
-    'New chat';
-
-  await apiClient(`/history/${username}/save`, {
-    method: 'POST',
-    body: JSON.stringify({
-      session_id: sessionId,
-      title,
-      messages,
-    }),
+  return value.map((message) => {
+    const role = message?.role === 'user' || message?.role === 'system' ? message.role : 'assistant';
+    return {
+      role,
+      content: normalizeMessageContent(message?.content),
+    };
   });
 }
 
 export function useChatInvokeMutation() {
   return useMutation({
     mutationFn: async ({ sessionId, messages, contextFocusHint }: ChatInvokeParams) => {
-      const payload = await apiClient<Record<string, unknown>>('/chat/invoke', {
+      const payload = await apiClient<ChatInvokeDTO>('/chat/workbench-invoke', {
         method: 'POST',
         body: JSON.stringify({
           input: {
@@ -115,12 +130,13 @@ export function useChatInvokeMutation() {
         timeout: 60000,
       });
 
-      const reply = extractAssistantReply(payload).trim();
-      const nextMessages = reply
-        ? [...messages, { role: 'assistant' as const, content: reply }]
-        : messages;
-
-      await persistConversation(sessionId, nextMessages);
+      const persistedMessages = normalizeChatMessages(payload.messages);
+      const reply = (payload.reply || extractAssistantReply({ messages: persistedMessages })).trim();
+      const nextMessages = persistedMessages.length
+        ? persistedMessages
+        : reply
+          ? [...messages, { role: 'assistant' as const, content: reply }]
+          : messages;
 
       return {
         payload,
@@ -155,5 +171,23 @@ export function useApproveInterruptMutation() {
         method: 'POST',
         body: JSON.stringify({ approved }),
       }),
+  });
+}
+
+export function useResumeInterruptMutation() {
+  return useMutation({
+    mutationFn: async ({ sessionId }: { sessionId: string }) => {
+      const payload = await apiClient<ResumeInterruptDTO>(`/interrupt/${sessionId}/resume`, {
+        method: 'POST',
+        timeout: 60000,
+      });
+      const messages = normalizeChatMessages(payload.messages);
+      return {
+        payload,
+        reply: (payload.reply || extractAssistantReply({ messages })).trim(),
+        messages,
+        contextPruning: extractContextPruning({ context: payload.context }),
+      };
+    },
   });
 }

@@ -7,4 +7,4 @@ set -e
 cd "$(dirname "$0")/.."
 
 echo "启动 ARQ Worker..."
-arq app.infrastructure.queue.worker_settings
+arq app.infrastructure.queue.worker_settings.WorkerSettings

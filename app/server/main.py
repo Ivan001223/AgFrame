@@ -97,7 +97,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return response
 
 
-app = FastAPI(title="Agent Scaffold API", version="0.1.1", lifespan=lifespan)
+app = FastAPI(title="Agent Scaffold API", version="0.3.1", lifespan=lifespan)
 
 server_config = settings.server
 storage_config = settings.storage_local

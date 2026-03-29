@@ -35,7 +35,7 @@ wheels = [
 
 [[package]]
 name = "agframe"
-version = "0.1.1"
+version = "0.3.1"
 source = { editable = "." }
 dependencies = [
     { name = "addict" },

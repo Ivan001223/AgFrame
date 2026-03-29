@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- Standardized the technical documentation set so README, API, deployment, testing, security, frontend architecture, and frontend subsystem docs reflect the current chat runtime, harness control plane, and Agent Studio behavior.
+- Added bilingual documentation governance rules covering ownership, update triggers, review expectations, and traceability.
+
 ## [0.1.1] - 2026-03-14
 
 ### Added

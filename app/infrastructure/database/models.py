@@ -288,3 +288,26 @@ class HarnessVerification(Base):
         Index("idx_harness_verification_run", "run_id"),
         Index("idx_harness_verification_status_created", "status", "created_at"),
     )
+
+
+class HarnessEvent(Base):
+    __tablename__ = "harness_event"
+
+    event_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    event_source: Mapped[str] = mapped_column(String(32), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    session_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    run_id: Mapped[str | None] = mapped_column(
+        String(128), ForeignKey("harness_run.run_id", ondelete="CASCADE"), nullable=True
+    )
+    actor: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    details_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    __table_args__ = (
+        Index("idx_harness_event_run_created", "run_id", "created_at"),
+        Index("idx_harness_event_session_created", "session_id", "created_at"),
+        Index("idx_harness_event_user_created", "user_id", "created_at"),
+        Index("idx_harness_event_type_created", "event_type", "created_at"),
+    )

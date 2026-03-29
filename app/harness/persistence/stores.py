@@ -4,7 +4,7 @@ import time
 
 from sqlalchemy import select, update
 
-from app.infrastructure.database.models import HarnessApproval, HarnessRun, HarnessVerification
+from app.infrastructure.database.models import HarnessApproval, HarnessEvent, HarnessRun, HarnessVerification
 from app.infrastructure.database.orm import get_session
 
 
@@ -31,6 +31,7 @@ class HarnessRunStore:
         input_json: dict[str, object],
         metadata_json: dict[str, object] | None,
         approval_required: bool,
+        retry_count: int = 0,
     ) -> dict[str, object]:
         now = int(time.time())
         row = HarnessRun(
@@ -43,7 +44,7 @@ class HarnessRunStore:
             input_json=input_json,
             metadata_json=metadata_json,
             current_step=None,
-            retry_count=0,
+            retry_count=retry_count,
             resume_count=0,
             approval_required=approval_required,
             verification_status=None,
@@ -189,6 +190,18 @@ class HarnessApprovalStore:
 
 
 class HarnessVerificationStore:
+    def get_latest_by_run(self, run_id: str) -> dict[str, object] | None:
+        with get_session() as session:
+            row = session.execute(
+                select(HarnessVerification)
+                .where(HarnessVerification.run_id == run_id)
+                .order_by(HarnessVerification.created_at.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return self._to_dict(row)
+
     def create_verification(
         self,
         *,
@@ -223,5 +236,69 @@ class HarnessVerificationStore:
             "checks_json": row.checks_json,
             "artifacts_json": row.artifacts_json,
             "summary": row.summary,
+            "created_at": row.created_at,
+        }
+
+
+class HarnessEventStore:
+    def create_event(
+        self,
+        *,
+        event_id: str,
+        event_type: str,
+        event_source: str,
+        user_id: str,
+        session_id: str | None,
+        run_id: str | None,
+        actor: str | None,
+        details_json: dict[str, object] | None,
+    ) -> dict[str, object]:
+        now = int(time.time() * 1000)
+        row = HarnessEvent(
+            event_id=event_id,
+            event_type=event_type,
+            event_source=event_source,
+            user_id=user_id,
+            session_id=session_id,
+            run_id=run_id,
+            actor=actor,
+            details_json=details_json,
+            created_at=now,
+        )
+        with get_session() as session:
+            session.add(row)
+            session.flush()
+        return self._to_dict(row)
+
+    def list_events(
+        self,
+        *,
+        user_id: str | None = None,
+        session_id: str | None = None,
+        run_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, object]]:
+        with get_session() as session:
+            stmt = select(HarnessEvent).order_by(HarnessEvent.created_at.asc()).limit(int(limit))
+            if user_id is not None:
+                stmt = stmt.where(HarnessEvent.user_id == user_id)
+            if session_id is not None:
+                stmt = stmt.where(HarnessEvent.session_id == session_id)
+            if run_id is not None:
+                stmt = stmt.where(HarnessEvent.run_id == run_id)
+            rows = session.execute(stmt).scalars().all()
+            return [self._to_dict(row) for row in rows]
+
+    @staticmethod
+    def _to_dict(row: HarnessEvent) -> dict[str, object]:
+        return {
+            "event_id": row.event_id,
+            "event_type": row.event_type,
+            "event_source": row.event_source,
+            "user_id": row.user_id,
+            "session_id": row.session_id,
+            "run_id": row.run_id,
+            "actor": row.actor,
+            "details_json": row.details_json,
             "created_at": row.created_at,
         }

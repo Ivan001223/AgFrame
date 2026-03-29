@@ -1,15 +1,19 @@
-# 部署指南 (Deployment Guide)
+# Deployment Guide
 
-## 环境要求 (Requirements)
+<div align="center">
+  <a href="deployment-cn.md">中文文档</a>
+</div>
+
+## Requirements
 
 - Python 3.11.15
-- `uv` (包管理器)
-- Docker 和 Docker Compose
-- 可访问的 PostgreSQL 与 Redis 端口
+- `uv` (Package manager)
+- Docker and Docker Compose
+- Accessible PostgreSQL and Redis ports
 
-建议严格使用本仓库声明的 Python 版本。
+It is highly recommended to strictly use the Python version declared in this repository.
 
-## 安装步骤 (Install)
+## Install
 
 ```bash
 uv python install 3.11.15
@@ -17,30 +21,30 @@ uv sync --no-dev
 cp configs/config.example.json configs/config.json
 ```
 
-可选依赖组：
+Optional dependency groups:
 
 - `uv sync --no-dev --group document-ai`
-  用于支持更高精度的 PDF / Office 文档解析。
+  Used to support higher precision PDF / Office document parsing.
 
-默认安装已经包含本地 Embeddings、本地 OCR、Torch、Transformers 与遗留 Reranker 兼容所需依赖。
+The default installation already includes the dependencies required for local Embeddings, local OCR, Torch, Transformers, and legacy Reranker compatibility.
 
-默认的文档 RAG、记忆检索与上下文裁剪路径**不需要**加载本地大模型 Reranker。
+The default document RAG, memory retrieval, and context pruning paths **do not require** loading a local large model Reranker.
 
-## 必填配置 (Required Configuration)
+## Required Configuration
 
-至少需要在 `config.json` 中设置以下内容：
+At least the following must be set in `config.json`:
 
-- `auth.secret_key` (请生成长随机字符串)
-- `database.url` 或同等的数据库凭证
+- `auth.secret_key` (please generate a long random string)
+- `database.url` or equivalent database credentials
 - `database.password`
-- `llm.api_key` (若使用云端模型提供商)
+- `llm.api_key` (if using a cloud model provider)
 
-对于推荐的轻量级链路，请保持以下配置为空：
+For the recommended lightweight pipeline, please keep the following configurations empty:
 
 - `reranker.model_name=""`
 - `local_models.rerank_model=""`
 
-## 使用 Docker Compose 启动整套项目 (Start The Full Stack)
+## Start The Full Stack with Docker Compose
 
 ```bash
 cp .env.example .env
@@ -48,61 +52,61 @@ docker compose up --build -d
 docker compose ps
 ```
 
-默认会启动：
+By default, this will start:
 
 - `postgres`
-- `redis`（使用 Redis Stack，支持队列、限流与 LangGraph checkpoint）
+- `redis` (uses Redis Stack, supporting queues, rate limiting, and LangGraph checkpoints)
 - `backend`
 - `worker`
 - `frontend`
 
-默认地址：
+Default addresses:
 
 - Frontend: `http://localhost:3000`
 - API: `http://localhost:8000`
 - Swagger: `http://localhost:8000/docs`
 
-说明：
+Notes:
 
-- 若要直接使用聊天能力，请在 `.env` 中填写 `LLM_API_KEY`
-- 若要启用文档摄取 / RAG，仍建议在 `configs/config.json` 中补充 embeddings 配置或远程 embeddings 服务地址
+- If you want to use the chat capability directly, please fill in `LLM_API_KEY` in `.env`
+- If you want to enable document ingestion / RAG, it is still recommended to supplement the embeddings configuration or remote embeddings service address in `configs/config.json`
 
-如果需要额外的观测组件：
+If additional observability components are needed:
 
 ```bash
 docker compose --profile observability up --build -d
 ```
 
-这会额外启动：
+This will additionally start:
 
 - `clickhouse`
 - `minio`
 - `langfuse-server`
 - `langfuse-worker`
 
-Langfuse 默认地址为 `http://localhost:3001`。
+The default Langfuse address is `http://localhost:3001`.
 
-## 启动主服务 (Start Service)
+## Start Service
 
-如果你不使用 Docker Compose，也可以沿用原来的手动方式。由于 `v0.2.1` 引入了 Harness 和 Agent 任务执行链路，需确保后端和 Worker 同时健康运行：
+If you don't use Docker Compose, you can also continue using the original manual method. Since `v0.2.1` introduced Harness and the Agent task execution pipeline, you need to ensure both the backend and Worker are running healthily:
 
-**启动后端 API 服务：**
+**Start the backend API service:**
 
 ```bash
 uv run python -m app.server.main
 ```
 
-默认地址：
+Default addresses:
 - API: `http://localhost:8000`
 - Swagger: `http://localhost:8000/docs`
 
-**启动异步 Worker（必须）：**
+**Start the asynchronous Worker (Required):**
 
 ```bash
 uv run arq app.infrastructure.queue.worker_settings.WorkerSettings
 ```
 
-## 停止服务 (Stop Service)
+## Stop Service
 
 ```bash
 docker compose down

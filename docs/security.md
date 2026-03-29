@@ -1,28 +1,32 @@
-# 安全最小文档 (Security Notes)
+# Security Notes
 
-## 1. 配置基线 (Configuration Baseline)
+<div align="center">
+  <a href="security-cn.md">中文文档</a>
+</div>
 
-- `auth.secret_key` 必须为 32 位以上随机值。
-- `database.password` 必须为强密码。
-- 当 `server.cors_allow_credentials=true` 时，`server.cors_origins` 禁止包含 `"*"`。
-- **严禁**在仓库提交真实密钥与生产连接串。
+## 1. Configuration Baseline
 
-## 2. 启动前自检 (Pre-flight Checks)
+- `auth.secret_key` must be a random value of 32 characters or more.
+- `database.password` must be a strong password.
+- When `server.cors_allow_credentials=true`, `server.cors_origins` is prohibited from containing `"*"`.
+- **Strictly prohibited** to commit real keys and production connection strings in the repository.
+
+## 2. Pre-flight Checks
 
 ```bash
 uv run python -c "from app.infrastructure.config.settings import settings; settings.validate_security(); print('security-ok')"
 ```
 
-若存在高风险配置，服务会在启动阶段拒绝继续运行并报错退出。
+If there are high-risk configurations, the service will refuse to continue running during the startup phase and exit with an error.
 
-## 3. 安全扫描 (Security Scan)
+## 3. Security Scan
 
 ```bash
 uv run python scripts/security_scan.py --out reports/security.json
 ```
 
-判定规则：
+Judgment rules:
 
-- 任一安全工具缺失：门禁失败。
-- 高危问题或依赖漏洞存在：门禁失败。
-- 全部通过：门禁通过。
+- Any security tool missing: Gate failure.
+- High-risk issues or dependency vulnerabilities exist: Gate failure.
+- All passed: Gate passed.

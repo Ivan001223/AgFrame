@@ -4,43 +4,93 @@
   <a href="README-CN.md">中文文档</a>
 </div>
 
-This Next.js application is the operations and interactive workbench UI accompanying the AgFrame FastAPI backend.
+This Next.js application is the authenticated workbench for the AgFrame backend.
 
-Currently implemented routes:
-- `/login` (Login)
-- `/chat` (Chat Workbench)
-- `/harness` (Harness Control Plane: run, approval, verification, timeline, retry)
-- `/knowledge` (Knowledge Base Management)
-- `/conversations` (Conversation Center)
-- `/conversations/[conversationId]` (Conversation Details)
-- `/memory` (Memory Console)
-- `/tasks` (Task and Event Observation)
-- `/settings` (Personal Settings)
-- `/admin/settings` (System Security and Configuration)
+## Stack
+
+- Next.js `16.1.6`
+- React `19.2.3`
+- TanStack React Query
+- React Hook Form + Zod
+- Tailwind CSS `4`
+
+## Routes
+
+- `/login` — login page
+- `/chat` — chat workbench
+- `/harness` — Harness Agent Studio and control-plane surface
+- `/knowledge` — knowledge base management
+- `/conversations` — conversation list
+- `/conversations/[conversationId]` — conversation detail
+- `/memory` — memory console
+- `/tasks` — task and incident observation
+- `/settings` — personal settings
+- `/admin/settings` — admin-only global settings
 
 ## Environment
-
-Before starting the frontend, please set the Base URL for the backend service:
 
 ```bash
 export NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
 npm run dev
 ```
 
-Access [http://localhost:3000](http://localhost:3000) after starting.
+Open `http://127.0.0.1:3000` after startup.
 
 ## Auth Model
 
-- Login uses the `POST /auth/token` endpoint to get credentials.
-- Current user information initialization uses `GET /auth/users/me`.
-- Workbench routes need to store valid Tokens, if the Token expires it will automatically redirect back to `/login`.
-- Admin exclusive navigation bar and `/admin/settings` page depend on the `role === "admin"` field of the current user.
+- login uses `POST /auth/token`
+- current-user bootstrap uses `GET /auth/users/me`
+- authenticated workspace routes require a stored token
+- expired or invalid auth redirects back to `/login`
+- admin-only UI depends on `role === "admin"`
 
-## Notes
+## API Integration Notes
 
-- Chat interface uses `POST /chat/workbench-invoke`, the backend uniformly completes graph execution and turn persistence.
-- Harness control plane reads `GET /harness/runs`, `GET /harness/runs/{run_id}`, `GET /harness/policies`, and supports `POST /harness/runs`, `POST /harness/runs/{run_id}/approval`, `POST /harness/runs/{run_id}/retry`.
-- User personal settings read/write corresponds to `GET|POST /settings/user`.
-- Admin global settings read/write corresponds to `GET|POST /settings`.
-- Document upload request points to `POST /upload`, its multipart field name is `files`.
-- If you encounter errors running `next build` or `npm run lint` after `npm install`, please try deleting and reinstalling `node_modules`. In the past, build failures were caused by corrupted local package caches, not current TypeScript interface definition issues.
+### Chat
+
+- the main UI path is `POST /chat/workbench-invoke`
+- the backend owns graph execution, latest-state loading, persistence, and interrupt reporting
+
+### Harness
+
+Harness is no longer just a run dashboard. The page integrates:
+
+- run listing and run detail
+- approvals and retries
+- policy visibility
+- studio project loading and editing
+- skill request and skill approval workflows
+- studio run creation
+- model provider management
+
+Primary harness endpoints consumed by the frontend include:
+
+- `GET /harness/runs`
+- `GET /harness/runs/{run_id}`
+- `GET /harness/policies`
+- `GET /harness/studio/projects`
+- `GET /harness/studio/projects/current`
+- `GET /harness/model-providers`
+- `POST /harness/runs`
+- `POST /harness/runs/{run_id}/approval`
+- `POST /harness/runs/{run_id}/retry`
+- `POST /harness/studio/projects`
+- `PUT /harness/studio/projects/{project_id}`
+- `POST /harness/studio/projects/{project_id}/skill-requests`
+- `POST /harness/studio/projects/{project_id}/skill-requests/{request_id}`
+- `POST /harness/studio/projects/{project_id}/run`
+
+### Other modules
+
+- personal settings map to `GET|POST /settings/user`
+- admin settings map to `GET|POST /settings`
+- document uploads use `POST /upload` with multipart field `files`
+
+## Verification
+
+```bash
+npm run lint -- --max-warnings=0
+npm run build
+```
+
+If a local install becomes corrupted, remove `node_modules` and reinstall before treating the issue as an application bug.

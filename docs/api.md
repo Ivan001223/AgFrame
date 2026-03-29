@@ -1,100 +1,149 @@
-# AgFrame API Documentation
+# AgFrame API Reference
 
-This document provides an overview of the RESTful API endpoints available in the AgFrame project. The backend is built with FastAPI and is composed of several modular routing components.
+<div align="center">
+  <a href="api-cn.md">中文文档</a>
+</div>
 
-## Base Information
-- **Default Port**: 8000 (Local)
-- **Base Path**: `/`
-- **Authentication**: JWT Bearer Token (passed via `Authorization: Bearer <token>` header).
+## Scope
 
----
+- **Base URL**: `http://127.0.0.1:8000`
+- **Auth model**: JWT Bearer token in `Authorization: Bearer <token>`
+- **Backend version**: `0.3.1`
+- **Primary runtime entry**: `POST /chat/workbench-invoke`
 
-## 1. Authentication (`/auth`)
-Handles user authentication, token generation, and registration.
+## Access Model
 
-- `POST /auth/token`: Login to obtain a JWT access token.
-- `POST /auth/register`: Register a new user account.
-- `GET /auth/users/me`: Get the profile of the currently authenticated user.
+- **Public**: `/health/*`, `/auth/*`
+- **Authenticated user**: `/chat/*`, `/interrupt/*`, `/history/*`, `/documents/*`, `/upload/*`, `/tasks/*`, `/memory/*`, `/profile/*`, `/harness/*`
+- **Admin only**: `GET|POST /settings`, `POST /vectorstore/docs/clear`
 
-## 2. Platform Harness (`/harness`)
-Control-plane APIs for agent execution runs, approval workflows, and policies.
+## Authentication
 
-- `GET /harness/runs`: List agent harness runs.
-- `POST /harness/runs`: Create a new harness run.
-- `GET /harness/runs/{run_id}`: Retrieve details of a specific harness run.
-- `POST /harness/runs/{run_id}/retry`: Retry a failed execution run.
-- `GET /harness/runs/{run_id}/events`: Retrieve events associated with a run.
-- `GET /harness/runs/{run_id}/approval`: Get the approval workflow status for a run.
-- `POST /harness/runs/{run_id}/approval`: Submit an approval decision (Approve/Reject).
-- `GET /harness/runs/{run_id}/verification`: Read execution verification evidence.
-- `GET /harness/policies`: List runtime execution policies.
+- `POST /auth/token` — exchange username/password for an access token
+- `POST /auth/register` — create a new user account
+- `GET /auth/users/me` — retrieve the current authenticated user
 
-## 3. Human-In-The-Loop / Interrupts (`/interrupt`)
-Endpoints handling execution interruptions requiring user review or approval.
+## Chat
 
-- `GET /interrupt/{session_id}`: Get interrupt status for a session.
-- `GET /interrupt/{session_id}/events`: List queued events pending approval.
-- `POST /interrupt/{session_id}/approve`: Provide approval (or rejection) for a specific state.
-- `GET /interrupt/{session_id}/resume`: Get the resume payload requirements.
-- `POST /interrupt/{session_id}/resume`: Resume execution from an interrupted state.
+### Workbench flow
 
-## 4. Chat & Interactions (`/chat`)
-Real-time interaction and inference interfaces.
+- `POST /chat/workbench-invoke` — main workbench invocation endpoint; applies runtime config, invokes the graph, persists messages, and returns `reply`, `messages`, `context`, and interrupt state
 
-- `POST /chat/workbench-invoke`: Main invocation endpoint for the chat workbench interface.
+### LangServe runtime routes
 
-## 5. Session History (`/history`)
-APIs to manage conversations and event histories.
+The same graph is also exposed under `/chat` through LangServe. The explicitly verified runtime route is:
 
-- `GET /history/{user_id}`: Get a list of chat sessions for a user.
-- `GET /history/{user_id}/{session_id}`: Retrieve message history for a specific session.
-- `POST /history/{user_id}/save`: Persist current session state manually.
-- `PATCH /history/{user_id}/{session_id}`: Update session metadata (e.g., renaming the session).
-- `DELETE /history/{user_id}/{session_id}`: Delete a session entirely.
+- `POST /chat/invoke` — LangServe invoke endpoint for the graph runtime
 
-## 6. Document Management (`/documents` & `/upload`)
-Manage knowledge base files and media.
+Additional LangServe schema, stream, playground, and feedback routes are mounted automatically under the same `/chat` prefix. Feedback support is enabled in the application bootstrap.
 
-- `GET /documents`: List stored documents.
-- `GET /documents/{doc_id}`: Get metadata of a specific document.
-- `DELETE /documents/{doc_id}`: Remove a document from storage.
-- `POST /documents/{doc_id}/reindex`: Re-trigger parsing and vector store indexing.
-- `POST /upload`: Upload a standard document or file.
-- `POST /upload/image`: Upload an image file.
+## Interrupt
 
-## 7. Vector Store Administrative (`/vectorstore`)
-- `POST /vectorstore/docs/clear`: Clear documents in the vector store (Requires Admin rights).
+Session-level human approval and resume flow for interrupted chat execution:
 
-## 8. Agent Tasks (`/tasks`)
-Manage detached background tasks and review issues.
+- `GET /interrupt/{session_id}` — read whether the session is interrupted and whether action is required
+- `GET /interrupt/{session_id}/events` — list interrupt event records for the session
+- `POST /interrupt/{session_id}/approve` — approve or reject the pending action
+- `GET /interrupt/{session_id}/resume` — retrieve the resume payload structure
+- `POST /interrupt/{session_id}/resume` — resume graph execution and persist the resumed messages
 
-- `GET /tasks/summary`: Get a summary dashboard of active and completed tasks.
-- `GET /tasks/{task_id}`: View status and details of a background worker task.
-- `POST /tasks/{task_id}/retry`: Retry an uncompleted or failed task.
-- `GET /tasks/incidents`: List task execution incidents.
-- `PATCH /tasks/incidents/{incident_id}`: Acknowledge or mitigate an incident.
+## Harness
 
-## 9. Memory Storage (`/memory`)
-Endpoints to handle user-wide or context-wide persistent memories.
+### Runs
 
-- `GET /memory/profile`: View the current synthesized memory profile.
-- `PUT /memory/profile`: Manually update profile memories.
-- `GET /memory/items`: List atomic memory items.
-- `POST /memory/items`: Store a new memory item.
-- `DELETE /memory/items/{item_id}`: Remove a memory item.
+- `POST /harness/runs` — create a harness run
+- `GET /harness/runs` — list visible runs for the current user
+- `GET /harness/runs/{run_id}` — get run detail
+- `POST /harness/runs/{run_id}/retry` — create a retry run
+- `GET /harness/runs/{run_id}/events` — list run lifecycle events
+- `GET /harness/runs/{run_id}/runtime-state/history` — read persisted runtime-state history
+- `GET /harness/runs/{run_id}/approval` — read pending approval state
+- `POST /harness/runs/{run_id}/approval` — resolve a run approval
+- `GET /harness/runs/{run_id}/verification` — read the latest verification evidence
+- `GET /harness/policies` — list available harness policies
 
-## 10. User Profile & Settings (`/profile` & `/settings`)
-Manage platform configurations.
+### Studio projects
 
-- `GET /profile/{user_id}`: Retrieve user profile metadata.
-- `GET /settings`: Read global application settings (Admin).
-- `POST /settings`: Update global application settings (Admin).
-- `GET /settings/user`: Read user-specific preferences.
-- `POST /settings/user`: Save user-specific preferences.
+- `GET /harness/studio/projects` — list studio projects owned by the current user
+- `GET /harness/studio/projects/current` — read the current studio project
+- `POST /harness/studio/projects` — create a new studio project
+- `GET /harness/studio/projects/{project_id}` — read studio project detail
+- `PUT /harness/studio/projects/{project_id}` — update project metadata or `graph_json`
+- `POST /harness/studio/projects/{project_id}/skill-requests` — request additional skills for an agent
+- `POST /harness/studio/projects/{project_id}/skill-requests/{request_id}` — approve or reject a skill request
+- `POST /harness/studio/projects/{project_id}/run` — launch an orchestration run from a studio project
 
-## 11. System Health (`/health`)
-Observability and liveness checks (Publicly accessible).
+### Model providers
 
-- `GET /health`: Basic health endpoint.
-- `GET /health/ready`: Checks if dependencies (DB, Redis, etc.) are up.
-- `GET /health/live`: Lightweight ping for orchestration tools (e.g. K8s).
+- `GET /harness/model-providers` — list configured model providers visible to the current user
+- `POST /harness/model-providers` — create a provider entry
+- `PUT /harness/model-providers/{provider_id}` — update an existing provider
+- `DELETE /harness/model-providers/{provider_id}` — delete a provider
+
+## History
+
+- `GET /history/{user_id}` — list conversation sessions, optionally filtered with `q`
+- `GET /history/{user_id}/{session_id}` — read one session detail
+- `POST /history/{user_id}/save` — persist a session manually
+- `PATCH /history/{user_id}/{session_id}` — rename session metadata
+- `DELETE /history/{user_id}/{session_id}` — delete a session
+
+## Documents and Uploads
+
+### Documents
+
+- `GET /documents` — list uploaded documents
+- `GET /documents/{doc_id}` — read document detail and preview fragments
+- `DELETE /documents/{doc_id}` — remove the document record and stored file
+- `POST /documents/{doc_id}/reindex` — enqueue reindexing for a document
+
+### Uploads
+
+- `POST /upload` — upload document files and enqueue ingestion
+- `POST /upload/image` — upload an image and return a file URL
+
+## Tasks
+
+- `GET /tasks/summary` — aggregate background task status, incidents, and timeout signals
+- `GET /tasks/incidents` — list incidents, optionally filtered by handled or archived state
+- `PATCH /tasks/incidents/{incident_id}` — update incident handling state
+- `GET /tasks/{task_id}` — read task detail and diagnostics
+- `POST /tasks/{task_id}/retry` — retry a failed background task
+
+## Memory and Profile
+
+### Memory
+
+- `GET /memory/profile` — read the synthesized user profile
+- `PUT /memory/profile` — update the profile and sync semantic memory
+- `GET /memory/items` — list atomic memory items
+- `POST /memory/items` — create a memory item
+- `DELETE /memory/items/{item_id}` — delete a memory item
+
+### Profile
+
+- `GET /profile/{user_id}` — read profile information for a user
+
+## Settings
+
+- `GET /settings` — read global application settings
+- `POST /settings` — update global application settings
+- `GET /settings/user` — read user-level preferences
+- `POST /settings/user` — update user-level preferences
+
+## Vector Store
+
+- `POST /vectorstore/docs/clear` — clear the document vector store
+
+## Health
+
+- `GET /health` — basic health status
+- `GET /health/ready` — dependency and runtime readiness check
+- `GET /health/live` — lightweight liveness check
+
+## Notes
+
+- `/chat/workbench-invoke` is the UI-facing path used by the workbench frontend.
+- `/interrupt/*` is session-scoped and tied to LangGraph checkpoint recovery.
+- `/harness/*` is run-scoped and used by the harness control plane and Agent Studio.
+- Upload, document, task, and harness APIs are designed to form an operational loop: upload -> enqueue -> observe -> retry -> audit.

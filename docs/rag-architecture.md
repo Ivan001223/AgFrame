@@ -6,7 +6,9 @@
 
 ## Overview
 
-AgFrame's default RAG (Retrieval-Augmented Generation) pipeline is designed to be extremely lightweight and transparent:
+AgFrame's default RAG (Retrieval-Augmented Generation) pipeline remains intentionally lightweight and transparent. In the current system, this retrieval path is used by a backend-owned chat runtime and related document workflows rather than a frontend-owned demo pipeline.
+
+Default retrieval flow:
 
 ```text
 Dense Search + BM25 (Sparse Search)
@@ -16,7 +18,7 @@ Dense Search + BM25 (Sparse Search)
   -> Prompt Assembly
 ```
 
-Our goal is to maximize transparency, recall rate, and maintainability without introducing a Heavyweight Document Reranking stage.
+The goal is to maximize transparency, recall quality, and maintainability without introducing a heavyweight model-reranking stage.
 
 ## Design Principles
 
@@ -32,6 +34,17 @@ Our goal is to maximize transparency, recall rate, and maintainability without i
 - Vector and sparse retrieval adapters: `app/memory/vector_stores/pgvector_vectorstore.py`
 - Context Pruning: `app/runtime/prompts/context_pruner.py`
 - Local lightweight ranker: `app/infrastructure/utils/lightweight_ranker.py`
+- Chat runtime integration: `app/server/api/chat.py`
+- LangGraph orchestration entry: `app/runtime/graph/graph.py`
+
+## Runtime Context
+
+The current runtime uses the RAG pipeline in a broader execution environment:
+
+- the workbench UI calls `POST /chat/workbench-invoke`
+- the backend applies runtime config and invokes the LangGraph app
+- interrupt and resume can pause or continue the same retrieval-backed conversation flow
+- harness and studio features are adjacent control-plane capabilities, but they do not replace the core lightweight RAG retrieval path
 
 ## Current Defaults
 

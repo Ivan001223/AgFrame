@@ -1,8 +1,10 @@
-# RAG 架构设计 (RAG Architecture)
+# RAG 架构设计
 
-## 架构概览 (Overview)
+## 架构概览
 
-AgFrame 默认的 RAG (检索增强生成) 链路被设计为极致的轻量与透明：
+AgFrame 默认的 RAG（检索增强生成）链路仍然坚持轻量和透明。在当前系统中，这条检索路径服务于后端自管的聊天运行时和相关文档工作流，而不是前端自管的 Demo 式链路。
+
+默认检索流程：
 
 ```text
 Dense Search (密集检索) + BM25 (稀疏检索)
@@ -12,7 +14,7 @@ Dense Search (密集检索) + BM25 (稀疏检索)
   -> Prompt Assembly (组装 Prompt)
 ```
 
-我们的目标是在不引入沉重的大模型重排阶段 (Heavyweight Document Reranking) 的前提下，最大化透明度、召回率和可维护性。
+目标是在不引入沉重模型重排阶段的前提下，最大化透明度、召回质量和可维护性。
 
 ## 设计原则 (Design Principles)
 
@@ -21,13 +23,24 @@ Dense Search (密集检索) + BM25 (稀疏检索)
 - 保持子分块 (Chunk) 检索的细粒度，但在生成回答前还原完整的父上下文 (Parent context)。
 - 使用轻量级裁剪策略 (Lightweight pruning) 减少 Prompt 中的噪声。
 
-## 核心代码路径 (Main Code Paths)
+## 核心代码路径
 
 - 摄入与分块 (Ingestion and chunking): `app/skills/rag/rag_engine.py`
 - 混合检索与 RRF: `app/skills/rag/hybrid_retriever_service.py`
 - 向量与稀疏检索适配器: `app/memory/vector_stores/pgvector_vectorstore.py`
 - 上下文裁剪 (Pruning): `app/runtime/prompts/context_pruner.py`
 - 本地轻量级打分器: `app/infrastructure/utils/lightweight_ranker.py`
+- 聊天运行时接入: `app/server/api/chat.py`
+- LangGraph 编排入口: `app/runtime/graph/graph.py`
+
+## 运行时上下文
+
+当前运行时对 RAG 的使用方式如下：
+
+- 工作台前端通过 `POST /chat/workbench-invoke` 发起主对话调用
+- 后端统一注入运行时配置并调用 LangGraph 应用
+- interrupt 与 resume 可以在同一条检索支撑的对话链路上暂停和恢复
+- harness 与 studio 是相邻的控制平面能力，但不会替代核心轻量 RAG 检索路径
 
 ## 当前默认配置 (Current Defaults)
 

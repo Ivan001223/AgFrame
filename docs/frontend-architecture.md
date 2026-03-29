@@ -1,66 +1,154 @@
-# AgFrame Frontend Architecture Design
+# AgFrame Frontend Architecture
 
 <div align="center">
   <a href="frontend-architecture-cn.md">中文文档</a>
 </div>
 
-## 1. Architecture Overview
+## Scope
 
-The AgFrame frontend is dedicated to building a **high-performance, production-oriented AI operations and interactive workbench**. Unlike traditional conversational demos, this workbench adopts a highly cohesive, loosely coupled layered architecture design, integrating workflow scheduling, lightweight Hybrid RAG, long-term memory management, and operational observability into a unified modern interactive interface.
+- **Framework**: Next.js `16.1.6`
+- **React**: `19.2.3`
+- **Data layer**: TanStack React Query `5.x`
+- **Styling**: Tailwind CSS `4`
+- **Forms**: React Hook Form + Zod
 
-The frontend fully utilizes Server-Side Rendering (SSR) and the modern React ecosystem, deferring business rules and state validation to the server side. The frontend focuses on the ultimate experience of **Orchestration**, **Rendering**, and **Interaction State**.
+## Overview
 
-## 2. Core Technology Stack
+The frontend is a Next.js App Router workbench that sits on top of the FastAPI backend. Its primary role is not to own agent logic, but to provide operational and interactive views over backend-owned execution flows:
 
-Based on the current best engineering practices, the AgFrame frontend adopts the following modern technology stack:
+- chat workbench
+- knowledge ingestion
+- conversations
+- memory management
+- task observation
+- settings
+- Harness Agent Studio
 
-- **Core Framework**: [Next.js 15 (App Router)](https://nextjs.org/) provides routing orchestration and server-side rendering (SSR/RSC) support.
-- **Development Language**: [TypeScript](https://www.typescriptlang.org/) ensures type safety and the rigor of domain models.
-- **UI Library**: Based on React 19, combined with [Tailwind CSS](https://tailwindcss.com/) to implement an atomic and highly customizable styling engine, with underlying components built on the headless UI library [Radix UI](https://www.radix-ui.com/).
-- **Data Flow and Caching**: [TanStack Query (React Query)](https://tanstack.com/query/latest) is responsible for fetching, caching, and synchronizing server state.
-- **Client State**: [Zustand](https://github.com/pmndrs/zustand) handles lightweight temporary UI states (e.g., sidebar collapse, temporary queues).
-- **Forms and Validation**: Leveraging [React Hook Form](https://react-hook-form.com/) and [Zod](https://zod.dev/) to build complex, high-performance dynamic forms and strong client-side validation.
-- **Data Visualization**: Combined with [TanStack Table](https://tanstack.com/table/latest) to efficiently render massive data tables, and using [Recharts](https://recharts.org/) to present various data diagnostics and statistical reports.
+Most business behavior lives in backend APIs. The frontend focuses on route composition, authenticated API access, polling, and operational UI state.
 
-## 3. Layered Architecture Design
+## Layering
 
-From the perspective of logic and responsibility isolation, the frontend architecture is planned into four progressively overlaid layers:
+### App layer
 
-### 3.1 App Shell Layer
-Responsible for the skeleton of the entire frontend application, including route distribution, permission control (Auth Bootstrap), global navigation bar, and global Error Boundaries.
+- `src/app/layout.tsx` defines the root layout and wraps the app with the shared query provider
+- `src/app/(workspace)/layout.tsx` applies `AuthGuard` and `AppShell` to authenticated workspace routes
+- `src/app/(public)/login/page.tsx` handles the public login entry
 
-### 3.2 Feature Layer
-Vertically split by product business, each sub-module (e.g., knowledge base, task queue, chat panel) independently coalesces its own unique page container and user workflow composition logic.
+### Domain layer
 
-### 3.3 Domain Layer
-The core area docking with backend microservices/APIs. It is responsible for defining and outputting strictly typed API clients, abstracting View Models (to avoid pages directly handling backend response formats), and encapsulating custom Hooks for Queries/Mutations.
+Domain hooks under `src/domains/*/hooks.ts` define typed API access for:
 
-### 3.4 Shared Layer
-Contains the system's globally common atomic component system, such as responsive table components, task status badges, universal file drag-and-drop area support components, and highly consistent business-level error presentation placeholder layers.
+- auth
+- chat
+- conversations
+- documents
+- harness
+- memory
+- settings
+- tasks
 
-## 4. Product Domain Modules
+This is the main frontend abstraction boundary. Pages should consume domain hooks instead of calling `fetch` directly.
 
-To support huge backend management capabilities, the entire workbench is divided into the following core domain modules:
+### Shared infrastructure layer
 
-- 🧠 **Chat Workbench**: Integrates a streaming dialogue system based on the LangServe protocol, supporting interrupt approval and follow-up questions.
-- 📚 **Knowledge Base & RAG Control Center**: Responsible for asynchronous queue ingestion of documents, Hybrid RAG index management, document preview, and rebuild operations.
-- ⚡ **Task and Event Operations**: Oriented towards asynchronous task observation in high-concurrency systems, providing task failure diagnostics, event fallback flow scheduling, and active retry tracking.
-- 👥 **Memory Console**: Responsible for managing user preferences and permission control, able to modify the long-term conversational profile features built by the underlying LLM.
-- 💬 **Conversation Center**: Management of dialogue history fragments and audits.
-- ⚙️ **System and Security Settings**: Provides dynamic environment prompt allocation strategies and enterprise/personal level security risk control configuration panels.
+- `src/lib/http/client.ts` centralizes base URL resolution, bearer token injection, timeout handling, and `ApiError` normalization
+- `src/lib/auth/session.ts` manages client-side token persistence
+- `src/components/layout/*` contains the shared authenticated shell and guard
 
-## 5. State Management Philosophy
+## Current Technology Choices
 
-To prevent state chaos in frontend single-page applications, AgFrame adopts the best practice pattern of **"State Segregation"**:
+The current codebase uses:
 
-- **Server State**: Relies on TanStack Query to request and cache external data sources, implementing efficient automatic refresh based on Invalidation and Polling strategies for documents, task states, conversation history, etc.
-- **UI State**: Some independent states with extremely short lifecycles generated by the application itself (such as dropdown box opening, filter button activation, etc.) are delegated to Zustand for modular management, ensuring the global scope is not polluted.
-- **Form State**: Form values are not polluted into the global Store; they are uniformly and locally controlled in a closed loop by React Hook Form until submitted to the Domain Client layer.
+- Next.js App Router
+- React 19 client components
+- TanStack React Query for server state
+- React Hook Form and Zod for forms
+- Lucide React for icons
+- Tailwind CSS 4 for styling
 
-## 6. HTTP Specifications and Observability Pipeline
+The current frontend does **not** depend on:
 
-### 6.1 Unified Fetch Encapsulation
-Global control of security token injection operations through a set of custom underlying HTTP client instances. Intercepts unified network errors and abstracts them into strongly typed `ApiError`. This fundamentally eliminates the problem of distributed handling of `401 Unauthorized` authentication failures or network interruptions across various pages.
+- Zustand
+- Radix UI
+- TanStack Table
+- Recharts
 
-### 6.2 Full-Link Observability and Buried Point Reservation
-From the file upload task triggered by the frontend to the end of persistence scheduling, the frontend participates in tracking and tracing throughout the process. It not only passes through custom `X-Request-ID` but also throws complex event actions such as upload failures and storage delays into the underlying event analysis components, thereby forming a complete exception retrospective monitoring view from the client side to the server side.
+## Route Structure
+
+Current workspace routes:
+
+- `/chat`
+- `/harness`
+- `/knowledge`
+- `/conversations`
+- `/conversations/[conversationId]`
+- `/memory`
+- `/tasks`
+- `/settings`
+- `/admin/settings`
+
+Public route:
+
+- `/login`
+
+`AppShell` currently renders primary navigation for chat, knowledge, conversations, memory, tasks, settings, and conditionally admin settings for admin users. Harness is a dedicated workspace route with its own large surface area.
+
+## Data Flow
+
+### Authentication
+
+- login uses `POST /auth/token`
+- current-user bootstrap uses `GET /auth/users/me`
+- invalid or expired auth state redirects the user back to `/login`
+
+### Chat
+
+The main frontend chat path uses `POST /chat/workbench-invoke`, not a direct LangServe-only client flow. The backend owns:
+
+- runtime config injection
+- graph invocation
+- latest state retrieval
+- message persistence
+- interrupt state reporting
+
+### Harness
+
+The harness frontend is now an Agent Studio surface rather than a simple run dashboard. It includes:
+
+- run list and run detail
+- approval and retry actions
+- policy visibility
+- studio project list and current project loading
+- graph editing and persistence
+- skill request and skill approval workflows
+- studio run launching
+- model provider management
+
+### Knowledge and tasks
+
+Knowledge pages coordinate upload, document listing, preview, and reindexing. Task pages surface queue status, incidents, and retry flows for asynchronous backend work.
+
+## State Management
+
+- **Server state**: React Query handles fetching, caching, invalidation, and refresh
+- **Session state**: auth token and current-user bootstrap live in the auth utilities and auth hooks
+- **Local UI state**: page-local `useState`, refs, and component-level state manage transient interaction state
+- **Form state**: React Hook Form keeps submission state local to the relevant page or modal
+
+## HTTP and Error Handling
+
+The shared API client is responsible for:
+
+- reading `NEXT_PUBLIC_API_URL`
+- attaching bearer tokens
+- applying request timeouts
+- converting failed responses into normalized `ApiError` instances
+
+This keeps pages and domain hooks aligned on one HTTP contract.
+
+## Architectural Notes
+
+- the frontend is API-first and backend-owned for workflow logic
+- the chat experience is centered on workbench invoke plus interrupt recovery
+- the harness experience is centered on Agent Studio and control-plane operations
+- typed domain hooks are the preferred integration seam for future UI changes

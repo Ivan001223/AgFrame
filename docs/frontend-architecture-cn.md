@@ -1,62 +1,150 @@
-# AgFrame 前端架构设计 (Frontend Architecture)
+# AgFrame 前端架构
 
-## 1. 架构概览 (Architecture Overview)
+## 范围
 
-AgFrame 前端致力于构建一个**高性能、面向生产环境的 AI 运维与交互工作台**。有别于传统的对话演示 Demo，本工作台采用了高内聚、低耦合的分层架构设计，将工作流调度、轻量 Hybrid RAG、长期记忆管理与运维观测整合在统一的现代化交互界面中。
+- **框架**：Next.js `16.1.6`
+- **React**：`19.2.3`
+- **数据层**：TanStack React Query `5.x`
+- **样式体系**：Tailwind CSS `4`
+- **表单**：React Hook Form + Zod
 
-前端充分利用了服务端渲染 (SSR) 和现代 React 生态，将业务规则与状态校验后置于服务端，前端专注于 **界面编排 (Orchestration)**、**视图渲染 (Rendering)** 和 **交互状态 (Interaction State)** 的极致体验。
+## 概览
 
-## 2. 核心技术栈 (Technology Stack)
+前端是构建在 FastAPI 后端之上的 Next.js App Router 工作台。它的职责不是承载 Agent 业务逻辑本身，而是为后端自管执行流提供操作与交互界面，核心包括：
 
-基于当前最优的工程实践，AgFrame 前端采用了以下现代化技术栈：
+- chat workbench
+- knowledge ingestion
+- conversations
+- memory management
+- task observation
+- settings
+- Harness Agent Studio
 
-- **核心框架**: [Next.js 15 (App Router)](https://nextjs.org/) 提供路由编排与服务端渲染（SSR/RSC）支持。
-- **开发语言**: [TypeScript](https://www.typescriptlang.org/) 保障类型的安全与领域模型的严谨性。
-- **UI 库**: 基于 React 19，结合 [Tailwind CSS](https://tailwindcss.com/) 实现原子化和高度定制化的样式引擎，底层组件构建于无头 UI 库 [Radix UI](https://www.radix-ui.com/)。
-- **数据流与缓存**: [TanStack Query (React Query)](https://tanstack.com/query/latest) 负责服务端状态的获取、缓存与同步。
-- **客户端状态**: [Zustand](https://github.com/pmndrs/zustand) 处理轻量级的 UI 临时状态（如侧边栏收拢、临时队列等）。
-- **表单与校验**: 借助 [React Hook Form](https://react-hook-form.com/) 与 [Zod](https://zod.dev/) 构建复杂、高性能的动态表单和客户端强校验。
-- **数据可视化**: 结合 [TanStack Table](https://tanstack.com/table/latest) 高效渲染海量数据表格，并通过 [Recharts](https://recharts.org/) 呈现各类数据诊断和统计报表。
+主要业务逻辑由后端 API 承担，前端重点负责路由组织、鉴权访问、轮询刷新和运维级交互状态。
 
-## 3. 分层架构设计 (Layered Design)
+## 分层结构
 
-前端架构从逻辑与职责隔离的角度，规划为了四个渐进叠加的层次：
+### App 层
 
-### 3.1 应用壳层 (App Shell Layer)
-负责整个前端应用的骨架，包括路由分发、权限控制 (Auth Bootstrap)、全局导航栏与全局的错误边界捕捉 (Error Boundaries)。
+- `src/app/layout.tsx` 定义根布局并注入共享 query provider
+- `src/app/(workspace)/layout.tsx` 为已登录工作区路由统一套用 `AuthGuard` 与 `AppShell`
+- `src/app/(public)/login/page.tsx` 提供公开登录入口
 
-### 3.2 功能模块层 (Feature Layer)
-按产品业务垂直拆分，每个子模块（如：知识库、任务队列、对话面板）独立内聚自己独有的页面容器、用户工作流组合逻辑。
+### Domain 层
 
-### 3.3 领域层 (Domain Layer)
-与后端微服务/API对接的核心地带。负责定义并输出带有严格类型的 API 客户端、抽象出 View Model（视图模型，避免页面直接裸处理后端返回格式）、以及封装 Query/Mutation 的自定义 Hooks。
+`src/domains/*/hooks.ts` 负责定义带类型的 API 访问，当前覆盖：
 
-### 3.4 共享层 (Shared Layer)
-包含系统全局通用的原子组件体系，诸如响应式表格组件、任务状态徽章、通用的文件拖拽区域支持组件，以及高度一致的业务级错误展现占位层。
+- auth
+- chat
+- conversations
+- documents
+- harness
+- memory
+- settings
+- tasks
 
-## 4. 产品领域模块 (Domain Modules)
+这是当前前端最重要的抽象边界。页面应优先消费 domain hooks，而不是直接手写 `fetch`。
 
-为支持庞大的后台管理能力，整个工作台划分为以下核心领域模块：
+### Shared Infrastructure 层
 
-- 🧠 **对话工作台 (Chat Workbench)**：集成 LangServe 协议的流式对话系统，支持中断审批与追问。
-- 📚 **知识库与 RAG 控制中心 (Knowledge Base)**：负责文档异步队列入库、Hybrid RAG 索引管理、文档预览与重建操作。
-- ⚡ **任务与事件运维 (Task Operations)**：面向高并发系统中的异步任务观测，提供任务失败诊断、事件降级流调度与主动重试追踪。
-- 👥 **记忆控制台 (Memory Console)**：负责用户偏好的管理与权限控制，可修改底层 LLM 构建出的长期对话画像特征。
-- 💬 **会话中心 (Conversation Center)**：对话历史片段和审计的管理。
-- ⚙️ **系统与安全配置 (Settings)**：提供动态的环境提示词分配策略和企业/个人级的安全风控配置面板。
+- `src/lib/http/client.ts` 统一处理 base URL、Bearer Token 注入、超时和 `ApiError` 归一化
+- `src/lib/auth/session.ts` 管理客户端 token 持久化
+- `src/components/layout/*` 提供通用登录保护与工作台壳层
 
-## 5. 状态管理理念 (State Management Philosophy)
+## 当前技术选型
 
-为了防止前端单页应用中状态的混乱，AgFrame 采用了 **"状态分离" (State Segregation)** 的最佳实践模式：
+当前代码实际使用：
 
-- **Server State (服务端状态)**：靠 TanStack Query 请求并缓存外部数据源，实现了文档、任务状态、会话历史等基于失效 (Invalidation) 和轮询 (Polling) 策略的高效自动刷新。
-- **UI State (视图交互状态)**：应用自身产生的一些生命周期极短的独立状态（如下拉框打开、筛选按钮激活等），下放至 Zustand 中按模块管理，确保不污染全局域。
-- **Form State (表单临时状态)**：不把表单值污染进全局 Store，统一在局部的 React Hook Form 进行闭环控制，直至提交给 Domain Client 层。
+- Next.js App Router
+- React 19 client components
+- TanStack React Query 管理服务端状态
+- React Hook Form 与 Zod 处理表单
+- Lucide React 提供图标
+- Tailwind CSS 4 处理样式
 
-## 6. HTTP 规范与观测链路 (HTTP & Observability)
+当前前端 **没有** 使用：
 
-### 6.1 统一 Fetch 封装
-通过一套自定义的基础 HTTP 客户端实例全局管控安全令牌的注入操作。拦截统一的网络报错并抽象为 `ApiError` 强类型错误。这从根源上杜绝了各页面分散处理 `401 Unauthorized` 认证失效或者网络中断的问题。
+- Zustand
+- Radix UI
+- TanStack Table
+- Recharts
 
-### 6.2 全链路观测与埋点预留
-从前端触发的文件上传任务开始一直到持久化调度结束，前端全程参与埋点和溯源。不仅透传自定义的 `X-Request-ID`，并将上传失败、入库延迟等复杂事件动作抛送至底层的事件分析组件内，从而形成跨端端侧到服务端的完整异常回溯监控视图。
+## 路由结构
+
+当前工作区路由：
+
+- `/chat`
+- `/harness`
+- `/knowledge`
+- `/conversations`
+- `/conversations/[conversationId]`
+- `/memory`
+- `/tasks`
+- `/settings`
+- `/admin/settings`
+
+公开路由：
+
+- `/login`
+
+`AppShell` 当前默认展示 chat、knowledge、conversations、memory、tasks、settings，以及管理员可见的 admin settings。Harness 是独立工作区页面，页面本身承担较大的 Agent Studio 功能面。
+
+## 数据流
+
+### 鉴权
+
+- 登录使用 `POST /auth/token`
+- 当前用户初始化使用 `GET /auth/users/me`
+- Token 失效或缺失时会回跳 `/login`
+
+### Chat
+
+前端聊天主链路使用 `POST /chat/workbench-invoke`，而不是纯前端直连 LangServe。后端统一负责：
+
+- 注入运行时配置
+- 调用 graph 执行
+- 读取最新 state
+- 持久化消息
+- 返回 interrupt 状态
+
+### Harness
+
+Harness 前端已经不是简单的 run 看板，而是 Agent Studio 工作台，当前覆盖：
+
+- run 列表与详情
+- approval 与 retry 操作
+- policy 可见性
+- studio project 列表与 current project 加载
+- graph 编辑与保存
+- skill request / skill approval 工作流
+- studio run 启动
+- model provider 管理
+
+### Knowledge 与 Tasks
+
+Knowledge 页面负责上传、文档列表、预览与 reindex。Tasks 页面负责异步任务状态、incident 和 retry 流程的可视化。
+
+## 状态管理
+
+- **服务端状态**：由 React Query 负责获取、缓存、失效与刷新
+- **会话状态**：token 与当前用户引导由 auth 工具与 hooks 负责
+- **本地 UI 状态**：依赖页面级 `useState`、refs 与组件内部状态
+- **表单状态**：由 React Hook Form 在局部页面或弹层中闭环管理
+
+## HTTP 与错误处理
+
+共享 API Client 负责：
+
+- 读取 `NEXT_PUBLIC_API_URL`
+- 自动附带 Bearer Token
+- 统一设置请求超时
+- 将失败响应转换成统一的 `ApiError`
+
+这样可以保证页面与 domain hooks 使用统一的 HTTP 合约。
+
+## 架构备注
+
+- 前端采用 API-first 模式，工作流逻辑归后端所有
+- 聊天体验围绕 workbench invoke 与 interrupt 恢复构建
+- Harness 体验围绕 Agent Studio 和控制平面操作构建
+- 未来新增 UI 功能，优先延续 typed domain hooks 的接入方式

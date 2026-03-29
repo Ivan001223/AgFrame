@@ -4,110 +4,148 @@
   <a href="deployment-cn.md">中文文档</a>
 </div>
 
+## Scope
+
+- **Backend version**: `0.3.1`
+- **Frontend version**: `0.3.1`
+- **Python constraint**: `>=3.11,<3.12`
+- **Primary local stack**: Postgres + Redis + FastAPI + ARQ Worker + Next.js
+
 ## Requirements
 
-- Python 3.11.15
-- `uv` (Package manager)
+- Python 3.11
+- `uv`
+- Node.js 22 LTS recommended for frontend validation
 - Docker and Docker Compose
-- Accessible PostgreSQL and Redis ports
-
-It is highly recommended to strictly use the Python version declared in this repository.
+- Reachable PostgreSQL and Redis ports
 
 ## Install
 
+Backend:
+
 ```bash
-uv python install 3.11.15
-uv sync --no-dev
-cp configs/config.example.json configs/config.json
+uv sync
 ```
 
-Optional dependency groups:
+Frontend:
 
-- `uv sync --no-dev --group document-ai`
-  Used to support higher precision PDF / Office document parsing.
+```bash
+cd frontend
+npm install
+```
 
-The default installation already includes the dependencies required for local Embeddings, local OCR, Torch, Transformers, and legacy Reranker compatibility.
+Optional backend groups:
 
-The default document RAG, memory retrieval, and context pruning paths **do not require** loading a local large model Reranker.
+- `uv sync --group document-ai`
+- `uv sync --group evals`
 
 ## Required Configuration
 
-At least the following must be set in `config.json`:
+Prepare local files:
 
-- `auth.secret_key` (please generate a long random string)
-- `database.url` or equivalent database credentials
-- `database.password`
-- `llm.api_key` (if using a cloud model provider)
+```bash
+cp .env.example .env
+cp configs/config.example.json configs/config.json
+```
 
-For the recommended lightweight pipeline, please keep the following configurations empty:
+At minimum, set secure values for:
+
+- `AUTH_SECRET_KEY`
+- `DATABASE_URL` or `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME`
+- `DB_PASSWORD`
+- `LLM_API_KEY` when using a cloud model
+
+Security-sensitive behavior:
+
+- startup validation rejects insecure `auth.secret_key`
+- startup validation rejects insecure `database.password`
+- `server.cors_allow_credentials=true` cannot be paired with `server.cors_origins=["*"]`
+
+Recommended compatibility settings for the lightweight retrieval path:
 
 - `reranker.model_name=""`
 - `local_models.rerank_model=""`
 
-## Start The Full Stack with Docker Compose
+## Docker Compose
+
+Start the full stack:
 
 ```bash
-cp .env.example .env
 docker compose up --build -d
 docker compose ps
 ```
 
-By default, this will start:
+Default services:
 
 - `postgres`
-- `redis` (uses Redis Stack, supporting queues, rate limiting, and LangGraph checkpoints)
+- `redis`
 - `backend`
 - `worker`
 - `frontend`
 
-Default addresses:
+Default local addresses:
 
-- Frontend: `http://localhost:3000`
-- API: `http://localhost:8000`
-- Swagger: `http://localhost:8000/docs`
+- Frontend: `http://127.0.0.1:3000`
+- API: `http://127.0.0.1:8000`
+- Swagger: `http://127.0.0.1:8000/docs`
 
-Notes:
+Environment behavior to know:
 
-- If you want to use the chat capability directly, please fill in `LLM_API_KEY` in `.env`
-- If you want to enable document ingestion / RAG, it is still recommended to supplement the embeddings configuration or remote embeddings service address in `configs/config.json`
+- `docker-compose.yml` falls back to `LLM_MODEL=dev-stub` and `MODEL_PATH_EMBEDDING=dev-stub` only when `.env` does not override them
+- `.env.example` currently sets `LLM_MODEL=gpt-4o-mini`, so copying it as-is means chat still expects a real cloud path unless you edit `.env`
+- `ENABLE_HUMAN_APPROVAL` defaults to `true` in Docker Compose
 
-If additional observability components are needed:
+Optional observability profile:
 
 ```bash
 docker compose --profile observability up --build -d
 ```
 
-This will additionally start:
+This additionally starts:
 
 - `clickhouse`
 - `minio`
 - `langfuse-server`
 - `langfuse-worker`
 
-The default Langfuse address is `http://localhost:3001`.
+Langfuse is exposed at `http://127.0.0.1:3001`.
 
-## Start Service
+## Manual Startup
 
-If you don't use Docker Compose, you can also continue using the original manual method. Since `v0.2.1` introduced Harness and the Agent task execution pipeline, you need to ensure both the backend and Worker are running healthily:
+Use manual startup when running services outside Docker Compose.
 
-**Start the backend API service:**
-
-```bash
-uv run python -m app.server.main
-```
-
-Default addresses:
-- API: `http://localhost:8000`
-- Swagger: `http://localhost:8000/docs`
-
-**Start the asynchronous Worker (Required):**
+Backend:
 
 ```bash
-uv run arq app.infrastructure.queue.worker_settings.WorkerSettings
+./.venv/bin/python -m app.server.main
 ```
 
-## Stop Service
+Worker:
+
+```bash
+./.venv/bin/arq app.infrastructure.queue.worker_settings.WorkerSettings
+```
+
+Frontend:
+
+```bash
+cd frontend
+export NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
+npm run dev
+```
+
+Manual startup requires both backend and worker to be healthy for harness runs, document ingestion, and resume flows.
+
+## Shutdown
 
 ```bash
 docker compose down
 ```
+
+## Post-Deployment Checks
+
+- `GET /health`
+- `GET /health/ready`
+- `GET /health/live`
+- open `http://127.0.0.1:3000/login`
+- confirm worker logs show no startup import or Redis connectivity failures

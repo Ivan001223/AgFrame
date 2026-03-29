@@ -1,42 +1,92 @@
-## AgFrame 前端 (Frontend)
+## AgFrame 前端
 
-本 Next.js 应用是为 AgFrame FastAPI 后端配套的运维与交互工作台 UI。
+本 Next.js 应用是 AgFrame 后端配套的认证工作台。
 
-目前已实现的路由：
-- `/login` (登录)
-- `/chat` (对话工作台)
-- `/harness` (Harness 控制面：run、approval、verification、timeline、retry)
-- `/knowledge` (知识库管理)
-- `/conversations` (会话中心)
-- `/conversations/[conversationId]` (会话详情)
-- `/memory` (记忆控制台)
-- `/tasks` (任务与事件观测)
-- `/settings` (个人设置)
-- `/admin/settings` (系统安全与配置)
+## 技术栈
 
-## 环境变量 (Environment)
+- Next.js `16.1.6`
+- React `19.2.3`
+- TanStack React Query
+- React Hook Form + Zod
+- Tailwind CSS `4`
 
-在启动前端之前，请先设置后端服务的 Base URL：
+## 路由
+
+- `/login` — 登录页
+- `/chat` — 对话工作台
+- `/harness` — Harness Agent Studio 与控制平面
+- `/knowledge` — 知识库管理
+- `/conversations` — 会话列表
+- `/conversations/[conversationId]` — 会话详情
+- `/memory` — 记忆控制台
+- `/tasks` — 任务与 incident 观测
+- `/settings` — 个人设置
+- `/admin/settings` — 管理员全局设置
+
+## 环境变量
 
 ```bash
 export NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
 npm run dev
 ```
 
-启动后访问 [http://localhost:3000](http://localhost:3000)。
+启动后访问 `http://127.0.0.1:3000`。
 
-## 鉴权模型 (Auth Model)
+## 鉴权模型
 
-- 登录使用接口 `POST /auth/token` 获取凭证。
-- 当前用户信息初始化使用 `GET /auth/users/me`。
-- 工作台路由需要存储合法的 Token，若 Token 过期将自动重定向回 `/login`。
-- 管理员专属导航栏以及 `/admin/settings` 页面依赖当前用户的 `role === "admin"` 字段。
+- 登录使用 `POST /auth/token`
+- 当前用户初始化使用 `GET /auth/users/me`
+- 工作区路由依赖本地 token
+- token 失效或缺失时会跳回 `/login`
+- 管理员界面依赖 `role === "admin"`
 
-## 开发须知 (Notes)
+## API 接入说明
 
-- 对话界面使用 `POST /chat/workbench-invoke`，由后端统一完成 graph 执行与轮次持久化。
-- Harness 控制面读取 `GET /harness/runs`、`GET /harness/runs/{run_id}`、`GET /harness/policies`，并支持 `POST /harness/runs`、`POST /harness/runs/{run_id}/approval`、`POST /harness/runs/{run_id}/retry`。
-- 用户个人设置读写对应 `GET|POST /settings/user`。
-- 管理员全局设置读写对应 `GET|POST /settings`。
-- 文档上传请求指向 `POST /upload`，其 multipart 字段名为 `files`。
-- 如果在 `npm install` 之后运行 `next build` 或 `npm run lint` 发生报错，请尝试删除并重新安装 `node_modules`。过去曾因本地包缓存损坏导致构建失败，并非当前的 TypeScript 接口定义有问题。
+### Chat
+
+- 主 UI 链路使用 `POST /chat/workbench-invoke`
+- 后端统一负责 graph 执行、最新 state 读取、消息持久化与 interrupt 状态返回
+
+### Harness
+
+Harness 已经不是简单的 run 看板，当前页面整合了：
+
+- run 列表与详情
+- approval 与 retry
+- policy 可见性
+- studio project 加载与编辑
+- skill request / skill approval 工作流
+- studio run 创建
+- model provider 管理
+
+前端实际消费的核心 harness 接口包括：
+
+- `GET /harness/runs`
+- `GET /harness/runs/{run_id}`
+- `GET /harness/policies`
+- `GET /harness/studio/projects`
+- `GET /harness/studio/projects/current`
+- `GET /harness/model-providers`
+- `POST /harness/runs`
+- `POST /harness/runs/{run_id}/approval`
+- `POST /harness/runs/{run_id}/retry`
+- `POST /harness/studio/projects`
+- `PUT /harness/studio/projects/{project_id}`
+- `POST /harness/studio/projects/{project_id}/skill-requests`
+- `POST /harness/studio/projects/{project_id}/skill-requests/{request_id}`
+- `POST /harness/studio/projects/{project_id}/run`
+
+### 其他模块
+
+- 用户个人设置对应 `GET|POST /settings/user`
+- 管理员设置对应 `GET|POST /settings`
+- 文档上传使用 `POST /upload`，multipart 字段名为 `files`
+
+## 校验命令
+
+```bash
+npm run lint -- --max-warnings=0
+npm run build
+```
+
+如果本地安装损坏，先删除 `node_modules` 并重新安装，再判断是否为应用代码问题。

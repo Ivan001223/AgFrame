@@ -1,192 +1,130 @@
 <div align="center">
-  <h1>🚀 AgFrame (Agent Framework)</h1>
+  <h1>🚀 AgFrame</h1>
 </div>
 
 <div align="center">
-  <img src="https://img.shields.io/badge/Python-3.11+-blue?style=flat-square&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/Python-3.11-blue?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/FastAPI-0.115+-cyan?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI">
   <img src="https://img.shields.io/badge/LangGraph-0.3+-FF6B6B?style=flat-square&logoColor=white" alt="LangGraph">
-  <img src="https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square" alt="License">
+  <img src="https://img.shields.io/badge/Version-0.3.1-blue?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/Docker-Ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
 </div>
 
 <div align="center">
-  <b>⚡ 生产级 Agent/RAG 后端框架 | 基于 FastAPI + LangGraph 构建</b><br>
-  专注于复杂工作流编排、轻量级混合检索、分层记忆与可观测性
+  <b>后端自管聊天运行时、Harness 控制平面与 Agent Studio 工作台</b>
 </div>
 
 ---
 
 ![AgFrame Banner](data/assets/banner.png)
 
----
+## 项目定位
 
-## ✨ 核心特性速览
+AgFrame 当前由三层核心能力构成：
 
-<div align="center">
+- **聊天运行时**：基于 FastAPI + LangGraph，主链路通过后端自管的 workbench invoke 完成调用与消息持久化。
+- **Harness 控制平面**：统一管理 run、审批、验证、重试、事件证据、运行时状态历史与模型提供方。
+- **工作台前端**：基于 Next.js 的操作台，覆盖 chat、knowledge、conversations、memory、tasks、settings，以及独立的 Harness Agent Studio。
 
-| 🏗️ 工作流编排 | 🧠 轻量级 RAG | 💾 分层记忆 | 🔮 LLM 工厂 | 📊 可观测性 | 🛠️ 基础设施 |
-|:---:|:---:|:---:|:---:|:---:|:---:|
-| LangGraph | 双路检索 (Dense+BM25) | 短期对话窗口 | 多模型支持 | Langfuse | Redis Worker |
-| Harness 运行态 | RRF 排序融合 | 长期画像更新 | 嵌入模型 | 任务诊断队列 | PostgreSQL |
-| Human-in-Loop | 上下文轻量裁剪 | pgvector 检索 | 结构化输出 | Checkpoint 追踪 | Docker 编排 |
+当前仓库的重点已经不是单一的 RAG Demo，而是可审计、可恢复、可扩展的 Agent Runtime 平台。
 
-</div>
-
----
-
-## 📐 架构总览
+## 架构快照
 
 ![AgFrame 架构总览](data/assets/framework.png)
 
-## 📂 目录结构
+### 运行时形态
 
-```
-╭────────────────────────────────────────────────────────────────────────────╮
-│                              AgFrame /                                     │
-╰────────────────────────────────────────────────────────────────────────────╯
-│
-├── app/
-│   ├── server/              # 🚀 FastAPI 入口
-│   │   ├── api/             #   路由层
-│   │   └── main.py          #   应用启动
-│   ├── runtime/             # ⚙️ 运行时核心
-│   │   ├── graph/           #   LangGraph 工作流
-│   │   │   ├── graph.py     #   图定义
-│   │   │   ├── state.py     #   State Schema
-│   │   │   ├── orchestrator.py # 编排器
-│   │   │   ├── registry.py  #   节点注册表
-│   │   │   └── nodes/       #   节点实现
-│   │   ├── llm/             #   LLM 工厂
-│   │   └── prompts/         #   Prompt 模板与裁剪策略
-│   ├── skills/              # 🛠️ 原子能力层
-│   │   ├── rag/             #   混合检索
-│   │   ├── memory/          #   记忆检索技能
-│   │   ├── profile/         #   用户画像
-│   │   ├── research/        #   网络搜索
-│   │   ├── ocr/             #   图片 OCR
-│   │   ├── common/          #   公共技能
-│   │   └── tools/           #   代码执行
-│   ├── infrastructure/      # 🏗️ 基础设施
-│   │   ├── config/          #   配置管理
-│   │   ├── database/        #   SQLAlchemy ORM
-│   │   ├── checkpoint/      #   Redis Checkpoint
-│   │   ├── queue/           #   ARQ 异步任务
-│   │   ├── sandbox/         #   代码沙箱
-│   │   ├── observability/   #   可观测性
-│   │   └── utils/           #   工具函数
-│   ├── agents/              # 🤖 Agent 节点工厂
-│   ├── memory/              # 🧠 记忆模块
-│   │   ├── long_term/       #   长期记忆引擎
-│   │   └── vector_stores/   #   向量存储 (pgvector)
-│   └── examples/            # 🔬 调试脚本与示例
-│
-├── configs/                 # ⚙️ 配置文件
-├── docker/                 # 🐳 Docker 初始化脚本
-├── docs/                   # 📖 部署/架构/安全/测试文档
-├── frontend/               # 💻 Next.js 工作台前端
-├── scripts/                # 🧰 工具与冒烟测试脚本
-├── data/                   # 📁 运行时数据
-├── tests/                  # 🧪 单元测试与评测
-│
-├── docker-compose.yml      # 🐳 基础设施编排
-├── pyproject.toml         # 🐍 Python 项目配置
-└── uv.lock                 # 🔒 依赖锁文件
-```
+- **后端 API**：`app/server/main.py` 负责挂载 FastAPI 路由、LangServe `/chat`、静态文件、认证和限流。
+- **聊天链路**：`POST /chat/workbench-invoke` 是工作台主入口，由后端统一注入运行时配置、调用图执行并持久化消息。
+- **Harness 链路**：`app/server/api/harness.py` 覆盖 runs、studio projects、skill requests、approvals、verification、runtime-state history 和 model providers。
+- **异步执行**：ARQ Worker 负责文档入库、harness run 执行和 harness resume。
+- **前端结构**：`frontend/` 使用 Next.js App Router、React Query、共享 HTTP Client 和领域化 hooks。
 
-## 默认检索链路
+### 默认检索链路
 
 ```text
 Query
   -> Dense Search + BM25 Search
   -> RRF Fusion
-  -> Candidate Pruning (轻量级候选裁剪)
-  -> Parent Restore (父文档还原)
-  -> Prompt Assembly (组装 Prompt)
+  -> Candidate Pruning
+  -> Parent Restore
+  -> Prompt Assembly
 ```
 
-当前推荐最佳实践：
-- 在主文档检索路径中仅保留 `Dense + BM25 + RRF`
-- 在组装 Prompt 之前使用轻量级裁剪策略
-- 将基于大模型的重排器 (Reranker) 视为遗留兼容组件，而非默认必选项
+当前推荐默认值：
 
-## 🚀 快速开始
+- 主路径保留 `Dense + BM25 + RRF`
+- 在组装 Prompt 前执行轻量裁剪
+- `reranker.*` 仅作为兼容配置保留，不是默认链路
 
-### 1. 环境安装
+## 仓库结构
+
+```text
+app/
+  server/           FastAPI 入口、REST API、聊天运行时集成
+  runtime/          LangGraph 图、状态、Prompt、恢复服务
+  harness/          Harness 协议、持久化、运行时服务
+  infrastructure/   配置、数据库、队列、checkpoint、通用工具
+  memory/           长期记忆引擎与 pgvector 集成
+frontend/           Next.js 工作台与 Agent Studio
+docs/               正式技术文档
+scripts/            冒烟测试、安全扫描、报告生成脚本
+tests/              API、Harness、Runtime 与 Smoke 回归测试
+```
+
+## 快速开始
+
+### 1. 安装依赖
 
 ```bash
-uv python install 3.11
 uv sync
+cd frontend && npm install
 ```
 
 可选依赖组：
-- `uv sync --group document-ai`: 高精度 PDF / Office 文档解析能力
-- `uv sync --group evals`: 离线评估与 Benchmark 工具
 
-默认安装现在已经包含本地 Embedding / OCR / Transformers / Torch 运行时依赖，因此 `uv sync` 后即可直接使用本地推理链路。
+- `uv sync --group document-ai`
+- `uv sync --group evals`
 
-### 2. 配置说明
-
-```bash
-cp configs/config.example.json configs/config.json
-```
-
-至少需要更新以下配置项：
-- `auth.secret_key`
-- `database.url` 或数据库凭证
-- `llm.api_key` (若使用云端模型)
-
-轻量级推荐配置参考：
-
-```json
-{
-  "embeddings": {
-    "model_name": "Qwen/Qwen3-Embedding-0.6B"
-  },
-  "rag": {
-    "retrieval": {
-      "mode": "hybrid",
-      "dense_k": 20,
-      "sparse_k": 20,
-      "candidate_k": 20,
-      "final_k": 3,
-      "rrf_k": 60
-    }
-  },
-  "prompt": {
-    "context_pruning": {
-      "enabled": true,
-      "method": "auto"
-    }
-  },
-  "reranker": {
-    "model_name": ""
-  }
-}
-```
-
-### 3. 使用 Docker Compose 启动整套项目
+### 2. 准备本地配置
 
 ```bash
 cp .env.example .env
-docker compose up --build -d
+cp configs/config.example.json configs/config.json
 ```
 
-默认会启动：
+启动前至少完成以下安全配置：
+
+- `AUTH_SECRET_KEY`
+- `DATABASE_URL` 或 `DB_*`
+- `DB_PASSWORD`
+- 使用云端模型时配置 `LLM_API_KEY`
+
+说明：
+
+- `docker-compose.yml` 只有在 `.env` 未覆盖时才会回退到 `LLM_MODEL=dev-stub`
+- `.env.example` 当前默认写的是 `LLM_MODEL=gpt-4o-mini`，如果要在无云端 Key 的情况下跑本地 live smoke，需要自行调整 `.env`
+
+### 3. 使用 Docker Compose 启动整套服务
+
+```bash
+docker compose up --build -d
+docker compose ps
+```
+
+默认服务：
+
 - `postgres`
-- `redis`（基于 Redis Stack，提供队列、限流与 LangGraph checkpoint 所需的 RediSearch 能力）
+- `redis`
 - `backend`
 - `worker`
 - `frontend`
 
 默认访问地址：
+
 - Frontend: `http://127.0.0.1:3000`
 - API: `http://127.0.0.1:8000`
-- Swagger 文档: `http://127.0.0.1:8000/docs`
-
-说明：
-- 若要直接使用聊天能力，请在 `.env` 中填写 `LLM_API_KEY`
-- 若要启用文档摄取 / RAG，仍建议在 `configs/config.json` 中补充 embeddings 配置或远程 embeddings 服务地址
+- Swagger: `http://127.0.0.1:8000/docs`
 
 可选观测组件：
 
@@ -194,43 +132,61 @@ docker compose up --build -d
 docker compose --profile observability up --build -d
 ```
 
-这会额外启动 `clickhouse`、`minio`、`langfuse-server`、`langfuse-worker`。
-Langfuse 默认暴露在 `http://127.0.0.1:3001`。
+### 4. 手动启动服务
 
-### 4. 手动启动 Backend API
-
-```bash
-uv run python -m app.server.main
-```
-
-### 5. 手动启动异步 Worker
+Backend：
 
 ```bash
-uv run arq app.infrastructure.queue.worker_settings
+./.venv/bin/python -m app.server.main
 ```
 
-## 🩺 健康检查与运行时信号
+Worker：
 
-`readiness` 端点 (Endpoint) 会暴露当前轻量级检索状态与 Harness 引擎状态：
-- `components.retrieval == "hybrid_rrf"`
-- `components.context_pruning == "lightweight_ranker"`
+```bash
+./.venv/bin/arq app.infrastructure.queue.worker_settings.WorkerSettings
+```
 
-`reranker` 组件为向后兼容保留，但默认检索路径不再强依赖。
+Frontend：
 
-## 📖 文档指引
+```bash
+cd frontend
+export NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
+npm run dev
+```
 
-- [部署指南 (Deployment Guide)](./docs/deployment-cn.md)
-- [RAG 架构设计与迁移指南 (RAG Architecture & Migration)](./docs/rag-architecture-cn.md)
-- [测试指南 (Testing Guide)](./docs/testing-cn.md)
-- [前端架构 (Frontend Architecture)](./docs/frontend-architecture-cn.md)
-- [安全规范 (Security Notes)](./docs/security-cn.md)
-- [路线图 (Roadmap)](./docs/roadmap-cn.md)
+## 主要能力
 
-## 📌 当前状态
+- **对话工作台**：后端自管 invoke 流程，支持会话持久化与 interrupt 恢复
+- **Harness Runs**：创建执行、查看事件、读取验证证据、处理审批、发起重试
+- **Harness Agent Studio**：管理项目、维护 graph JSON、发起技能申请、处理技能审批、启动编排运行
+- **知识入库**：上传文件、排队解析建索引、重建文档、跟踪任务状态
+- **记忆与历史**：维护长期画像、原子记忆条目和会话历史
+- **模型提供方管理**：增删改查 harness model providers
 
-当前代码库反映了最新的轻量级 RAG 与 Agent 编排设计：
-- 文档检索已彻底移除对模型重排器 (Model Reranker) 的硬依赖
-- 记忆检索采用轻量级本地打分排序
-- 上下文裁剪采用轻量级排序 / 启发式评分
-- **(v0.2.1)** 引入 Harness 执行引擎，支持 LangGraph 任务中断 (Interrupt) 与 Checkpoint 审批恢复
-- 基础配置项和健康度报告均与该轻量化、高可控链路保持一致
+## 健康检查与运行时信号
+
+关键健康接口：
+
+- `GET /health`
+- `GET /health/ready`
+- `GET /health/live`
+
+`/health/ready` 会报告检索链路和依赖项的就绪情况，包括 DB、Redis 与当前轻量检索路径状态。
+
+## 文档导航
+
+- [部署指南](./docs/deployment-cn.md)
+- [API 文档](./docs/api-cn.md)
+- [测试指南](./docs/testing-cn.md)
+- [安全说明](./docs/security-cn.md)
+- [前端架构](./docs/frontend-architecture-cn.md)
+- [RAG 架构](./docs/rag-architecture-cn.md)
+- [文档治理规范](./docs/documentation-governance-cn.md)
+- [路线图](./docs/roadmap-cn.md)
+
+## 版本范围
+
+- 后端版本：`0.3.1`
+- 前端版本：`0.3.1`
+- Python 约束：`>=3.11,<3.12`
+- 本 README 已按 2026-03-30 的仓库状态校准

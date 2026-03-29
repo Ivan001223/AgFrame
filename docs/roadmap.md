@@ -18,7 +18,7 @@
 
 ## P1 (Agent & Operations Enhancement)
 
-- [x] Human approval closed loop: Server-side encapsulated interface for resuming execution after approval (v0.2.1 completed Harness and Checkpoint integration)
+- [x] Human approval closed loop: Server-side encapsulated interface for resuming execution after approval, now backed by the current Harness and checkpoint integration
 - [ ] Retrieval operations panel: Hit quality, citation quality, failure case replay
 - [ ] Document management enhancement: Rebuild index, filter by tag/source, parsing result preview
 - [ ] User settings enhancement: Model preferences, answer style, retrieval strategy

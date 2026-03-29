@@ -4,29 +4,43 @@
   <a href="security-cn.md">中文文档</a>
 </div>
 
-## 1. Configuration Baseline
+## Configuration Baseline
 
-- `auth.secret_key` must be a random value of 32 characters or more.
-- `database.password` must be a strong password.
-- When `server.cors_allow_credentials=true`, `server.cors_origins` is prohibited from containing `"*"`.
-- **Strictly prohibited** to commit real keys and production connection strings in the repository.
+- `auth.secret_key` must be a random value with length >= 32
+- `database.password` must not use insecure defaults and should be at least 8 characters when set
+- `server.cors_allow_credentials=true` cannot be used with `server.cors_origins=["*"]`
+- never commit real API keys, database passwords, or production connection strings
 
-## 2. Pre-flight Checks
+## Startup Validation
 
-```bash
-uv run python -c "from app.infrastructure.config.settings import settings; settings.validate_security(); print('security-ok')"
-```
-
-If there are high-risk configurations, the service will refuse to continue running during the startup phase and exit with an error.
-
-## 3. Security Scan
+Run the same validation used by application startup:
 
 ```bash
-uv run python scripts/security_scan.py --out reports/security.json
+./.venv/bin/python -c "from app.infrastructure.config.settings import settings; settings.validate_security(); print('security-ok')"
 ```
 
-Judgment rules:
+Validation behavior:
 
-- Any security tool missing: Gate failure.
-- High-risk issues or dependency vulnerabilities exist: Gate failure.
-- All passed: Gate passed.
+- rejects insecure JWT secrets
+- rejects insecure database passwords
+- warns when `llm.api_key` is empty
+- rejects invalid CORS credential configuration
+
+## Security Scan
+
+```bash
+./.venv/bin/python scripts/security_scan.py --out reports/security.json
+```
+
+Gate rules:
+
+- missing required security tools -> fail
+- high-severity findings or dependency vulnerabilities -> fail
+- otherwise -> pass
+
+## Release Checklist
+
+- verify startup validation passes
+- verify `.env` and `configs/config.json` do not contain production secrets committed to git
+- verify Docker Compose overrides do not reintroduce weak defaults
+- verify documentation and changelog reflect any security-sensitive config changes

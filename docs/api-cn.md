@@ -1,100 +1,145 @@
 # AgFrame API 文档
 
-本文档提供了 AgFrame 项目中可用的 RESTful API 端点概述。后端基于 FastAPI 构建，由多个模块化的路由组件组成。
+## 范围
 
-## 基础信息
-- **默认端口**: 8000 (本地)
-- **基础路径**: `/`
-- **认证方式**: JWT Bearer Token (通过请求头 `Authorization: Bearer <token>` 传递)。
+- **Base URL**：`http://127.0.0.1:8000`
+- **认证方式**：JWT Bearer Token，请通过 `Authorization: Bearer <token>` 传递
+- **后端版本**：`0.3.1`
+- **主运行时入口**：`POST /chat/workbench-invoke`
 
----
+## 访问模型
 
-## 1. 认证鉴权 (`/auth`)
-处理用户认证、令牌生成以及注册。
+- **开放接口**：`/health/*`、`/auth/*`
+- **登录后可用**：`/chat/*`、`/interrupt/*`、`/history/*`、`/documents/*`、`/upload/*`、`/tasks/*`、`/memory/*`、`/profile/*`、`/harness/*`
+- **仅管理员**：`GET|POST /settings`、`POST /vectorstore/docs/clear`
 
-- `POST /auth/token`: 登录获取 JWT Access Token。
-- `POST /auth/register`: 注册新用户账号。
-- `GET /auth/users/me`: 获取当前认证用户的基本信息。
+## 认证鉴权
 
-## 2. 调度执行 (`/harness`)
-用于管理 Agent 运行、审批工作流及其策略的控制平面 API。
+- `POST /auth/token` — 使用用户名和密码换取访问令牌
+- `POST /auth/register` — 注册新用户
+- `GET /auth/users/me` — 获取当前登录用户信息
 
-- `GET /harness/runs`: 列出所有的 Harness 运行记录。
-- `POST /harness/runs`: 创建一个新的 Harness 运行。
-- `GET /harness/runs/{run_id}`: 获取指定 Harness 运行的详细信息。
-- `POST /harness/runs/{run_id}/retry`: 重试失败的执行。
-- `GET /harness/runs/{run_id}/events`: 获取与某次运行相关的事件流。
-- `GET /harness/runs/{run_id}/approval`: 获取某次运行的审批工作流状态。
-- `POST /harness/runs/{run_id}/approval`: 提交审批决策 (通过/拒绝)。
-- `GET /harness/runs/{run_id}/verification`: 查看执行验证及证据信息。
-- `GET /harness/policies`: 列出所有运行时执行策略。
+## 聊天接口
 
-## 3. 循环中人为介入 / 中断 (`/interrupt`)
-处理处于中断状态的执行，以便用户进行审查或授权。
+### Workbench 主链路
 
-- `GET /interrupt/{session_id}`: 获取会话的中断状态。
-- `GET /interrupt/{session_id}/events`: 列出队列中等待审批的事件。
-- `POST /interrupt/{session_id}/approve`: 针对特定的状态变更提供审批决策。
-- `GET /interrupt/{session_id}/resume`: 获取恢复执行的请求参数结构。
-- `POST /interrupt/{session_id}/resume`: 从中断状态恢复代码及流程继续执行。
+- `POST /chat/workbench-invoke` — 工作台主调用入口；负责注入运行时配置、执行图、持久化消息，并返回 `reply`、`messages`、`context` 与 interrupt 状态
 
-## 4. 聊天与交互 (`/chat`)
-实时交互和推理接口。
+### LangServe 运行时接口
 
-- `POST /chat/workbench-invoke`: 供工作台界面调用的主推理端点。
+同一个 graph 还会通过 LangServe 暴露在 `/chat` 前缀下。当前已明确校验的标准入口为：
 
-## 5. 会话历史 (`/history`)
-管理聊天会话及历史事件的接口。
+- `POST /chat/invoke` — LangServe 标准 invoke 接口
 
-- `GET /history/{user_id}`: 获取指定用户的聊天会话列表。
-- `GET /history/{user_id}/{session_id}`: 抓取某一特定会话的历史消息。
-- `POST /history/{user_id}/save`: 手动将当前会话状态持久化。
-- `PATCH /history/{user_id}/{session_id}`: 更新会话元数据（例如重命名对话）。
-- `DELETE /history/{user_id}/{session_id}`: 彻底删除指定的会话历史。
+此外，LangServe 还会在同一 `/chat` 前缀下自动挂载 schema、stream、playground 与 feedback 等标准子路由，且应用启动时已启用 feedback 能力。
 
-## 6. 文档与上传管理 (`/documents` & `/upload`)
-管理知识库文件和媒体资源。
+## Interrupt 中断与恢复
 
-- `GET /documents`: 列出用户已存入存储体系的文档。
-- `GET /documents/{doc_id}`: 获取指定文档详情及元数据。
-- `DELETE /documents/{doc_id}`: 从存储与向量库中移除指定文档。
-- `POST /documents/{doc_id}/reindex`: 重新启动对文档的解析和向量库索引映射。
-- `POST /upload`: 上传标准文档或数据文件。
-- `POST /upload/image`: 上传图片文件。
+面向会话级的人审与恢复链路：
 
-## 7. 向量库管理 (`/vectorstore`)
-- `POST /vectorstore/docs/clear`: 清空向量库中的历史文档节点数据（通常需 Admin 权限）。
+- `GET /interrupt/{session_id}` — 查询会话是否处于中断状态，以及是否需要人工动作
+- `GET /interrupt/{session_id}/events` — 查看该会话的 interrupt 事件流
+- `POST /interrupt/{session_id}/approve` — 对待审批动作进行通过或拒绝
+- `GET /interrupt/{session_id}/resume` — 获取恢复执行所需的 payload 结构
+- `POST /interrupt/{session_id}/resume` — 恢复图执行并持久化恢复后的消息
 
-## 8. 后台任务 (`/tasks`)
-管理脱离主干流程的后台任务及其执行异常监控。
+## Harness 控制平面
 
-- `GET /tasks/summary`: 获取活动和完成状态下的全盘任务汇总看板数据。
-- `GET /tasks/{task_id}`: 监控和查看单一 Worker 任务状态。
-- `POST /tasks/{task_id}/retry`: 重新触发未完成或失败的任务。
-- `GET /tasks/incidents`: 列出由于任务执行导致的突发事件/错误。
-- `PATCH /tasks/incidents/{incident_id}`: 标记接收、确认或者缓解指定的报警事件。
+### Runs
 
-## 9. 记忆节点管理 (`/memory`)
-管理用户全局或者上下文相关的持续记忆知识。
+- `POST /harness/runs` — 创建 harness run
+- `GET /harness/runs` — 列出当前用户可见的 run
+- `GET /harness/runs/{run_id}` — 获取 run 详情
+- `POST /harness/runs/{run_id}/retry` — 基于已有 run 创建重试 run
+- `GET /harness/runs/{run_id}/events` — 查看 run 生命周期事件
+- `GET /harness/runs/{run_id}/runtime-state/history` — 读取运行时状态历史
+- `GET /harness/runs/{run_id}/approval` — 读取待审批状态
+- `POST /harness/runs/{run_id}/approval` — 提交 run 审批决策
+- `GET /harness/runs/{run_id}/verification` — 读取最近一次验证证据
+- `GET /harness/policies` — 列出可用的 harness policies
 
-- `GET /memory/profile`: 查看目前的合成用户偏好与身份记忆文件。
-- `PUT /memory/profile`: 手工修正及更新偏好记忆档案内容。
-- `GET /memory/items`: 呈现离散式的记忆知识片段。
-- `POST /memory/items`: 手动登记一条新的记忆条目。
-- `DELETE /memory/items/{item_id}`: 删除指定的记忆条目。
+### Studio Projects
 
-## 10. 用户配置与偏好 (`/profile` & `/settings`)
-管理平台及个人层级的配置设定项。
+- `GET /harness/studio/projects` — 列出当前用户的 studio 项目
+- `GET /harness/studio/projects/current` — 获取当前 studio 项目
+- `POST /harness/studio/projects` — 创建 studio 项目
+- `GET /harness/studio/projects/{project_id}` — 读取项目详情
+- `PUT /harness/studio/projects/{project_id}` — 更新项目元数据或 `graph_json`
+- `POST /harness/studio/projects/{project_id}/skill-requests` — 为某个 agent 发起技能申请
+- `POST /harness/studio/projects/{project_id}/skill-requests/{request_id}` — 对技能申请做通过或拒绝
+- `POST /harness/studio/projects/{project_id}/run` — 基于 studio 项目发起编排运行
 
-- `GET /profile/{user_id}`: 获取用户自己的个人档案数据详情。
-- `GET /settings`: 读取全站范围内的全局应用配置 (需要 Admin 权限)。
-- `POST /settings`: 对当前全局应用配置下发更新 (需要 Admin 权限)。
-- `GET /settings/user`: 读取用户私人层级的参数设定。
-- `POST /settings/user`: 持久化及修改当前调用用户的私人配置参数。
+### Model Providers
 
-## 11. 系统健康监控 (`/health`)
-用于监控报警以及容灾节点的生命周期校验（开放访问）。
+- `GET /harness/model-providers` — 列出当前用户可见的模型提供方配置
+- `POST /harness/model-providers` — 创建模型提供方
+- `PUT /harness/model-providers/{provider_id}` — 更新模型提供方
+- `DELETE /harness/model-providers/{provider_id}` — 删除模型提供方
 
-- `GET /health`: 基础存活性探测回执节点。
-- `GET /health/ready`: 测试与下游数据设施集群（如数据库、Redis）的联通就绪状况。
-- `GET /health/live`: 用于 Kubernetes 等编排工具的轻量级轮询探活接口。
+## 会话历史
+
+- `GET /history/{user_id}` — 列出会话，可通过 `q` 搜索
+- `GET /history/{user_id}/{session_id}` — 读取单个会话详情
+- `POST /history/{user_id}/save` — 手动持久化当前会话
+- `PATCH /history/{user_id}/{session_id}` — 更新会话元数据，例如重命名标题
+- `DELETE /history/{user_id}/{session_id}` — 删除指定会话
+
+## 文档与上传
+
+### Documents
+
+- `GET /documents` — 列出已上传文档
+- `GET /documents/{doc_id}` — 读取文档详情与预览片段
+- `DELETE /documents/{doc_id}` — 删除文档记录与源文件
+- `POST /documents/{doc_id}/reindex` — 重新入队文档索引任务
+
+### Upload
+
+- `POST /upload` — 上传文档文件并触发入库
+- `POST /upload/image` — 上传图片并返回文件访问地址
+
+## 后台任务
+
+- `GET /tasks/summary` — 汇总后台任务状态、incident 与超时信号
+- `GET /tasks/incidents` — 列出 incident，可按 handled / archived 过滤
+- `PATCH /tasks/incidents/{incident_id}` — 更新 incident 的处理状态
+- `GET /tasks/{task_id}` — 查看单个任务的详情与诊断信息
+- `POST /tasks/{task_id}/retry` — 重试失败任务
+
+## 记忆与画像
+
+### Memory
+
+- `GET /memory/profile` — 读取合成后的用户画像
+- `PUT /memory/profile` — 更新画像并同步语义记忆
+- `GET /memory/items` — 列出原子记忆条目
+- `POST /memory/items` — 创建记忆条目
+- `DELETE /memory/items/{item_id}` — 删除记忆条目
+
+### Profile
+
+- `GET /profile/{user_id}` — 读取指定用户画像信息
+
+## 设置
+
+- `GET /settings` — 读取全局应用设置
+- `POST /settings` — 更新全局应用设置
+- `GET /settings/user` — 读取用户级偏好
+- `POST /settings/user` — 更新用户级偏好
+
+## 向量库
+
+- `POST /vectorstore/docs/clear` — 清空文档向量库
+
+## 健康检查
+
+- `GET /health` — 基础健康状态
+- `GET /health/ready` — 依赖项与运行时就绪检查
+- `GET /health/live` — 轻量级存活检查
+
+## 说明
+
+- `/chat/workbench-invoke` 是工作台前端使用的 UI 主链路
+- `/interrupt/*` 是会话级恢复链路，与 LangGraph checkpoint 恢复直接相关
+- `/harness/*` 是 run 级控制平面，也是 Agent Studio 的后端接口集合
+- 上传、文档、任务与 harness 接口共同组成“上传 -> 入队 -> 观察 -> 重试 -> 审计”的操作闭环

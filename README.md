@@ -1,240 +1,196 @@
 <div align="center">
-  <h1>🚀 AgFrame (Agent Framework)</h1>
+  <h1>🚀 AgFrame</h1>
 </div>
 
 <div align="center">
-  <img src="https://img.shields.io/badge/Python-3.11+-blue?style=flat-square&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/Python-3.11-blue?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/FastAPI-0.115+-cyan?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI">
   <img src="https://img.shields.io/badge/LangGraph-0.3+-FF6B6B?style=flat-square&logoColor=white" alt="LangGraph">
-  <img src="https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square" alt="License">
+  <img src="https://img.shields.io/badge/Version-0.3.1-blue?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/Docker-Ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
 </div>
 
 <div align="center">
-  <a href="README-CN.md">中文文档</a>
+  <a href="./README-CN.md">中文文档</a>
 </div>
 
 <div align="center">
-  <b>⚡ Production-Grade Agent/RAG Backend Framework | Built on FastAPI + LangGraph</b><br>
-  Focuses on complex workflow orchestration, lightweight hybrid retrieval, hierarchical memory, and observability
+  <b>Backend-owned chat runtime, harness control plane, and Agent Studio workbench</b>
 </div>
 
 ---
 
 ![AgFrame Banner](data/assets/banner.png)
 
----
+## What AgFrame Is
 
-## ✨ Core Features Quick Look
+AgFrame is a full-stack agent platform built around three coordinated layers:
 
-<div align="center">
+- **Chat runtime**: FastAPI + LangGraph powers the main conversation path and persists turns through a backend-owned workbench invoke flow.
+- **Harness control plane**: run creation, approval, verification, retry, event evidence, runtime-state history, and model-provider management live under `/harness`.
+- **Workbench frontend**: a Next.js application provides chat, knowledge, conversations, memory, tasks, settings, and a dedicated Harness Agent Studio.
 
-| 🏗️ Workflow Orchestration | 🧠 Lightweight RAG | 💾 Hierarchical Memory | 🔮 LLM Factory | 📊 Observability | 🛠️ Infrastructure |
-|:---:|:---:|:---:|:---:|:---:|:---:|
-| LangGraph | Dual Retrieval (Dense+BM25) | Short-term Dialog Window | Multi-Model Support | Langfuse | Redis Worker |
-| Harness Runtime | RRF Rank Fusion | Long-term Profile Update | Embedding Models | Task Diagnostic Queue | PostgreSQL |
-| Human-in-Loop | Context Lightweight Pruning | pgvector Retrieval | Structured Output | Checkpoint Tracking | Docker Orchestration |
+The current repository state is centered on a controllable agent runtime rather than a demo-only RAG chatbot.
 
-</div>
-
----
-
-## 📐 Architecture Overview
+## Architecture Snapshot
 
 ![AgFrame Architecture Overview](data/assets/framework.png)
 
-## 📂 Directory Structure
+### Runtime shape
 
-```
-╭────────────────────────────────────────────────────────────────────────────╮
-│                              AgFrame /                                     │
-╰────────────────────────────────────────────────────────────────────────────╯
-│
-├── app/
-│   ├── server/              # 🚀 FastAPI Entry
-│   │   ├── api/             #   Routing Layer
-│   │   └── main.py          #   Application Start
-│   ├── runtime/             # ⚙️ Runtime Core
-│   │   ├── graph/           #   LangGraph Workflow
-│   │   │   ├── graph.py     #   Graph Definition
-│   │   │   ├── state.py     #   State Schema
-│   │   │   ├── orchestrator.py # Orchestrator
-│   │   │   ├── registry.py  #   Node Registry
-│   │   │   └── nodes/       #   Node Implementation
-│   │   ├── llm/             #   LLM Factory
-│   │   └── prompts/         #   Prompt Templates and Pruning Strategy
-│   ├── skills/              # 🛠️ Atomic Skills Layer
-│   │   ├── rag/             #   Hybrid Retrieval
-│   │   ├── memory/          #   Memory Retrieval Skills
-│   │   ├── profile/         #   User Profile
-│   │   ├── research/        #   Web Search
-│   │   ├── ocr/             #   Image OCR
-│   │   ├── common/          #   Common Skills
-│   │   └── tools/           #   Code Execution
-│   ├── infrastructure/      # 🏗️ Infrastructure
-│   │   ├── config/          #   Configuration Management
-│   │   ├── database/        #   SQLAlchemy ORM
-│   │   ├── checkpoint/      #   Redis Checkpoint
-│   │   ├── queue/           #   ARQ Async Tasks
-│   │   ├── sandbox/         #   Code Sandbox
-│   │   ├── observability/   #   Observability
-│   │   └── utils/           #   Utility Functions
-│   ├── agents/              # 🤖 Agent Node Factory
-│   ├── memory/              # 🧠 Memory Module
-│   │   ├── long_term/       #   Long-term Memory Engine
-│   │   └── vector_stores/   #   Vector Stores (pgvector)
-│   └── examples/            # 🔬 Debug Scripts and Examples
-│
-├── configs/                 # ⚙️ Configuration Files
-├── docker/                 # 🐳 Docker Initialization Scripts
-├── docs/                   # 📖 Deployment/Architecture/Security/Testing Docs
-├── frontend/               # 💻 Next.js Workbench Frontend
-├── scripts/                # 🧰 Tools and Smoke Test Scripts
-├── data/                   # 📁 Runtime Data
-├── tests/                  # 🧪 Unit Tests and Evaluations
-│
-├── docker-compose.yml      # 🐳 Infrastructure Orchestration
-├── pyproject.toml         # 🐍 Python Project Configuration
-└── uv.lock                 # 🔒 Dependency Lock File
-```
+- **Backend API**: `app/server/main.py` mounts FastAPI routers, LangServe `/chat` routes, static file serving, auth, and rate limiting.
+- **Chat flow**: `POST /chat/workbench-invoke` is the main workbench entry. The backend applies runtime config, invokes the graph, reads the latest state, and persists messages.
+- **Harness flow**: `app/server/api/harness.py` exposes runs, studio projects, skill requests, approvals, verification, runtime-state history, and model providers.
+- **Queue execution**: ARQ workers execute document ingestion, harness runs, and harness resume jobs.
+- **Frontend**: `frontend/` uses Next.js App Router, React Query, shared HTTP utilities, and domain-specific hooks.
 
-## Default Retrieval Pipeline
+### Retrieval defaults
 
 ```text
 Query
   -> Dense Search + BM25 Search
   -> RRF Fusion
-  -> Candidate Pruning (Lightweight Candidate Pruning)
-  -> Parent Restore (Parent Document Restoration)
-  -> Prompt Assembly (Assemble Prompt)
+  -> Candidate Pruning
+  -> Parent Restore
+  -> Prompt Assembly
 ```
 
-Current recommended best practices:
-- Only retain `Dense + BM25 + RRF` in the main document retrieval path
-- Use a lightweight pruning strategy before assembling the Prompt
-- Treat the LLM-based Reranker as a legacy compatibility component, not a default requirement
+Recommended defaults:
 
-## 🚀 Quick Start
+- Keep `Dense + BM25 + RRF` on the main retrieval path
+- Use lightweight pruning before prompt assembly
+- Treat `reranker.*` as compatibility-only configuration, not the default path
 
-### 1. Environment Installation
+## Repository Map
+
+```text
+app/
+  server/           FastAPI entry, REST APIs, chat runtime integration
+  runtime/          LangGraph graph, state, prompts, resume service
+  harness/          Harness contracts, persistence, runtime services
+  infrastructure/   config, database, queue, checkpoint, utilities
+  memory/           long-term memory engines and pgvector integration
+frontend/           Next.js workbench and Agent Studio
+docs/               formal product and engineering documentation
+scripts/            smoke tests, security checks, report generation
+tests/              API, harness, runtime, and smoke regression tests
+```
+
+## Quick Start
+
+### 1. Install dependencies
 
 ```bash
-uv python install 3.11
 uv sync
+cd frontend && npm install
 ```
 
 Optional dependency groups:
-- `uv sync --group document-ai`: High-precision PDF / Office document parsing capabilities
-- `uv sync --group evals`: Offline evaluation and Benchmark tools
 
-The default installation now includes local Embedding / OCR / Transformers / Torch runtime dependencies, so you can directly use the local inference pipeline after `uv sync`.
+- `uv sync --group document-ai`
+- `uv sync --group evals`
 
-### 2. Configuration Instructions
-
-```bash
-cp configs/config.example.json configs/config.json
-```
-
-At least the following configurations need to be updated:
-- `auth.secret_key`
-- `database.url` or database credentials
-- `llm.api_key` (if using cloud models)
-
-Lightweight recommended configuration reference:
-
-```json
-{
-  "embeddings": {
-    "model_name": "Qwen/Qwen3-Embedding-0.6B"
-  },
-  "rag": {
-    "retrieval": {
-      "mode": "hybrid",
-      "dense_k": 20,
-      "sparse_k": 20,
-      "candidate_k": 20,
-      "final_k": 3,
-      "rrf_k": 60
-    }
-  },
-  "prompt": {
-    "context_pruning": {
-      "enabled": true,
-      "method": "auto"
-    }
-  },
-  "reranker": {
-    "model_name": ""
-  }
-}
-```
-
-### 3. Start the Full Stack with Docker Compose
+### 2. Prepare local configuration
 
 ```bash
 cp .env.example .env
-docker compose up --build -d
+cp configs/config.example.json configs/config.json
 ```
 
-By default, it will start:
+Minimum secure changes before startup:
+
+- `AUTH_SECRET_KEY`
+- `DATABASE_URL` or `DB_*`
+- `DB_PASSWORD`
+- `LLM_API_KEY` when using a cloud model
+
+Notes:
+
+- `docker-compose.yml` falls back to `LLM_MODEL=dev-stub` only when `.env` does not override it.
+- `.env.example` currently sets `LLM_MODEL=gpt-4o-mini`, so local live smoke without a cloud key requires adjusting `.env`.
+
+### 3. Start the full stack with Docker Compose
+
+```bash
+docker compose up --build -d
+docker compose ps
+```
+
+Default services:
+
 - `postgres`
-- `redis` (based on Redis Stack, providing queues, rate limiting, and RediSearch capabilities required for LangGraph checkpoint)
+- `redis`
 - `backend`
 - `worker`
 - `frontend`
 
-Default access addresses:
+Default local addresses:
+
 - Frontend: `http://127.0.0.1:3000`
 - API: `http://127.0.0.1:8000`
-- Swagger Docs: `http://127.0.0.1:8000/docs`
+- Swagger: `http://127.0.0.1:8000/docs`
 
-Instructions:
-- If you want to use the chat capability directly, please fill in `LLM_API_KEY` in `.env`
-- If you want to enable document ingestion / RAG, it is still recommended to supplement the embeddings configuration or remote embeddings service address in `configs/config.json`
-
-Optional observability components:
+Optional observability profile:
 
 ```bash
 docker compose --profile observability up --build -d
 ```
 
-This will additionally start `clickhouse`, `minio`, `langfuse-server`, `langfuse-worker`.
-Langfuse is exposed by default at `http://127.0.0.1:3001`.
+### 4. Start services manually
 
-### 4. Start Backend API Manually
-
-```bash
-uv run python -m app.server.main
-```
-
-### 5. Start Async Worker Manually
+Backend:
 
 ```bash
-uv run arq app.infrastructure.queue.worker_settings
+./.venv/bin/python -m app.server.main
 ```
 
-## 🩺 Health Check & Runtime Signals
+Worker:
 
-The `readiness` endpoint will expose the current lightweight retrieval status and Harness engine status:
-- `components.retrieval == "hybrid_rrf"`
-- `components.context_pruning == "lightweight_ranker"`
+```bash
+./.venv/bin/arq app.infrastructure.queue.worker_settings.WorkerSettings
+```
 
-The `reranker` component is retained for backward compatibility, but the default retrieval path no longer strongly depends on it.
+Frontend:
 
-## 📖 Documentation Guide
+```bash
+cd frontend
+export NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
+npm run dev
+```
+
+## Main Capabilities
+
+- **Chat workbench**: backend-owned invoke flow with session persistence and interrupt-aware resume support
+- **Harness runs**: create runs, inspect events, review verification evidence, resolve approvals, and retry
+- **Harness Agent Studio**: manage projects, edit graph JSON, request skills, resolve skill approvals, and launch orchestration runs
+- **Knowledge ingestion**: upload files, queue parsing/indexing, reindex documents, and inspect task status
+- **Memory and history**: maintain long-term profile memory, atomic memory items, and conversation history
+- **Model provider management**: create, update, list, and delete harness model providers
+
+## Health and Runtime Signals
+
+Key health endpoints:
+
+- `GET /health`
+- `GET /health/ready`
+- `GET /health/live`
+
+The ready check reports retrieval and runtime component readiness, including the lightweight retrieval path and dependencies such as DB and Redis.
+
+## Documentation Map
 
 - [Deployment Guide](./docs/deployment.md)
-- [RAG Architecture & Migration](./docs/rag-architecture.md)
+- [API Reference](./docs/api.md)
 - [Testing Guide](./docs/testing.md)
-- [Frontend Architecture](./docs/frontend-architecture.md)
 - [Security Notes](./docs/security.md)
+- [Frontend Architecture](./docs/frontend-architecture.md)
+- [RAG Architecture](./docs/rag-architecture.md)
+- [Documentation Governance](./docs/documentation-governance.md)
 - [Roadmap](./docs/roadmap.md)
 
-## 📌 Current Status
+## Version Scope
 
-The current codebase reflects the latest lightweight RAG and Agent orchestration design:
-- Document retrieval has completely removed the hard dependency on Model Reranker
-- Memory retrieval uses lightweight local scoring and ranking
-- Context pruning uses lightweight ranking / heuristic scoring
-- **(v0.2.1)** Introduced Harness execution engine, supporting LangGraph task Interrupt and Checkpoint approval resumption
-- Basic configuration items and health reports are all consistent with this lightweight, highly controllable pipeline
+- Backend version: `0.3.1`
+- Frontend version: `0.3.1`
+- Python constraint: `>=3.11,<3.12`
+- This README is aligned with the current repository state on 2026-03-30

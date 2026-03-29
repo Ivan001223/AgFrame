@@ -29,11 +29,15 @@
 
 ## ✨ 核心特性速览
 
+<div align="center">
+
 | 🏗️ 工作流编排 | 🧠 轻量级 RAG | 💾 分层记忆 | 🔮 LLM 工厂 | 📊 可观测性 | 🛠️ 基础设施 |
 |:---:|:---:|:---:|:---:|:---:|:---:|
 | LangGraph | 双路检索 (Dense+BM25) | 短期对话窗口 | 多模型支持 | Langfuse | Redis Worker |
 | Harness 运行态 | RRF 排序融合 | 长期画像更新 | 嵌入模型 | 任务诊断队列 | PostgreSQL |
 | Human-in-Loop | 上下文轻量裁剪 | pgvector 检索 | 结构化输出 | Checkpoint 追踪 | Docker 编排 |
+
+</div>
 
 ---
 

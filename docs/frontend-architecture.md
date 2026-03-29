@@ -1,62 +1,66 @@
-# AgFrame 前端架构设计 (Frontend Architecture)
+# AgFrame Frontend Architecture Design
 
-## 1. 架构概览 (Architecture Overview)
+<div align="center">
+  <a href="frontend-architecture-cn.md">中文文档</a>
+</div>
 
-AgFrame 前端致力于构建一个**高性能、面向生产环境的 AI 运维与交互工作台**。有别于传统的对话演示 Demo，本工作台采用了高内聚、低耦合的分层架构设计，将工作流调度、轻量 Hybrid RAG、长期记忆管理与运维观测整合在统一的现代化交互界面中。
+## 1. Architecture Overview
 
-前端充分利用了服务端渲染 (SSR) 和现代 React 生态，将业务规则与状态校验后置于服务端，前端专注于 **界面编排 (Orchestration)**、**视图渲染 (Rendering)** 和 **交互状态 (Interaction State)** 的极致体验。
+The AgFrame frontend is dedicated to building a **high-performance, production-oriented AI operations and interactive workbench**. Unlike traditional conversational demos, this workbench adopts a highly cohesive, loosely coupled layered architecture design, integrating workflow scheduling, lightweight Hybrid RAG, long-term memory management, and operational observability into a unified modern interactive interface.
 
-## 2. 核心技术栈 (Technology Stack)
+The frontend fully utilizes Server-Side Rendering (SSR) and the modern React ecosystem, deferring business rules and state validation to the server side. The frontend focuses on the ultimate experience of **Orchestration**, **Rendering**, and **Interaction State**.
 
-基于当前最优的工程实践，AgFrame 前端采用了以下现代化技术栈：
+## 2. Core Technology Stack
 
-- **核心框架**: [Next.js 15 (App Router)](https://nextjs.org/) 提供路由编排与服务端渲染（SSR/RSC）支持。
-- **开发语言**: [TypeScript](https://www.typescriptlang.org/) 保障类型的安全与领域模型的严谨性。
-- **UI 库**: 基于 React 19，结合 [Tailwind CSS](https://tailwindcss.com/) 实现原子化和高度定制化的样式引擎，底层组件构建于无头 UI 库 [Radix UI](https://www.radix-ui.com/)。
-- **数据流与缓存**: [TanStack Query (React Query)](https://tanstack.com/query/latest) 负责服务端状态的获取、缓存与同步。
-- **客户端状态**: [Zustand](https://github.com/pmndrs/zustand) 处理轻量级的 UI 临时状态（如侧边栏收拢、临时队列等）。
-- **表单与校验**: 借助 [React Hook Form](https://react-hook-form.com/) 与 [Zod](https://zod.dev/) 构建复杂、高性能的动态表单和客户端强校验。
-- **数据可视化**: 结合 [TanStack Table](https://tanstack.com/table/latest) 高效渲染海量数据表格，并通过 [Recharts](https://recharts.org/) 呈现各类数据诊断和统计报表。
+Based on the current best engineering practices, the AgFrame frontend adopts the following modern technology stack:
 
-## 3. 分层架构设计 (Layered Design)
+- **Core Framework**: [Next.js 15 (App Router)](https://nextjs.org/) provides routing orchestration and server-side rendering (SSR/RSC) support.
+- **Development Language**: [TypeScript](https://www.typescriptlang.org/) ensures type safety and the rigor of domain models.
+- **UI Library**: Based on React 19, combined with [Tailwind CSS](https://tailwindcss.com/) to implement an atomic and highly customizable styling engine, with underlying components built on the headless UI library [Radix UI](https://www.radix-ui.com/).
+- **Data Flow and Caching**: [TanStack Query (React Query)](https://tanstack.com/query/latest) is responsible for fetching, caching, and synchronizing server state.
+- **Client State**: [Zustand](https://github.com/pmndrs/zustand) handles lightweight temporary UI states (e.g., sidebar collapse, temporary queues).
+- **Forms and Validation**: Leveraging [React Hook Form](https://react-hook-form.com/) and [Zod](https://zod.dev/) to build complex, high-performance dynamic forms and strong client-side validation.
+- **Data Visualization**: Combined with [TanStack Table](https://tanstack.com/table/latest) to efficiently render massive data tables, and using [Recharts](https://recharts.org/) to present various data diagnostics and statistical reports.
 
-前端架构从逻辑与职责隔离的角度，规划为了四个渐进叠加的层次：
+## 3. Layered Architecture Design
 
-### 3.1 应用壳层 (App Shell Layer)
-负责整个前端应用的骨架，包括路由分发、权限控制 (Auth Bootstrap)、全局导航栏与全局的错误边界捕捉 (Error Boundaries)。
+From the perspective of logic and responsibility isolation, the frontend architecture is planned into four progressively overlaid layers:
 
-### 3.2 功能模块层 (Feature Layer)
-按产品业务垂直拆分，每个子模块（如：知识库、任务队列、对话面板）独立内聚自己独有的页面容器、用户工作流组合逻辑。
+### 3.1 App Shell Layer
+Responsible for the skeleton of the entire frontend application, including route distribution, permission control (Auth Bootstrap), global navigation bar, and global Error Boundaries.
 
-### 3.3 领域层 (Domain Layer)
-与后端微服务/API对接的核心地带。负责定义并输出带有严格类型的 API 客户端、抽象出 View Model（视图模型，避免页面直接裸处理后端返回格式）、以及封装 Query/Mutation 的自定义 Hooks。
+### 3.2 Feature Layer
+Vertically split by product business, each sub-module (e.g., knowledge base, task queue, chat panel) independently coalesces its own unique page container and user workflow composition logic.
 
-### 3.4 共享层 (Shared Layer)
-包含系统全局通用的原子组件体系，诸如响应式表格组件、任务状态徽章、通用的文件拖拽区域支持组件，以及高度一致的业务级错误展现占位层。
+### 3.3 Domain Layer
+The core area docking with backend microservices/APIs. It is responsible for defining and outputting strictly typed API clients, abstracting View Models (to avoid pages directly handling backend response formats), and encapsulating custom Hooks for Queries/Mutations.
 
-## 4. 产品领域模块 (Domain Modules)
+### 3.4 Shared Layer
+Contains the system's globally common atomic component system, such as responsive table components, task status badges, universal file drag-and-drop area support components, and highly consistent business-level error presentation placeholder layers.
 
-为支持庞大的后台管理能力，整个工作台划分为以下核心领域模块：
+## 4. Product Domain Modules
 
-- 🧠 **对话工作台 (Chat Workbench)**：集成 LangServe 协议的流式对话系统，支持中断审批与追问。
-- 📚 **知识库与 RAG 控制中心 (Knowledge Base)**：负责文档异步队列入库、Hybrid RAG 索引管理、文档预览与重建操作。
-- ⚡ **任务与事件运维 (Task Operations)**：面向高并发系统中的异步任务观测，提供任务失败诊断、事件降级流调度与主动重试追踪。
-- 👥 **记忆控制台 (Memory Console)**：负责用户偏好的管理与权限控制，可修改底层 LLM 构建出的长期对话画像特征。
-- 💬 **会话中心 (Conversation Center)**：对话历史片段和审计的管理。
-- ⚙️ **系统与安全配置 (Settings)**：提供动态的环境提示词分配策略和企业/个人级的安全风控配置面板。
+To support huge backend management capabilities, the entire workbench is divided into the following core domain modules:
 
-## 5. 状态管理理念 (State Management Philosophy)
+- 🧠 **Chat Workbench**: Integrates a streaming dialogue system based on the LangServe protocol, supporting interrupt approval and follow-up questions.
+- 📚 **Knowledge Base & RAG Control Center**: Responsible for asynchronous queue ingestion of documents, Hybrid RAG index management, document preview, and rebuild operations.
+- ⚡ **Task and Event Operations**: Oriented towards asynchronous task observation in high-concurrency systems, providing task failure diagnostics, event fallback flow scheduling, and active retry tracking.
+- 👥 **Memory Console**: Responsible for managing user preferences and permission control, able to modify the long-term conversational profile features built by the underlying LLM.
+- 💬 **Conversation Center**: Management of dialogue history fragments and audits.
+- ⚙️ **System and Security Settings**: Provides dynamic environment prompt allocation strategies and enterprise/personal level security risk control configuration panels.
 
-为了防止前端单页应用中状态的混乱，AgFrame 采用了 **"状态分离" (State Segregation)** 的最佳实践模式：
+## 5. State Management Philosophy
 
-- **Server State (服务端状态)**：靠 TanStack Query 请求并缓存外部数据源，实现了文档、任务状态、会话历史等基于失效 (Invalidation) 和轮询 (Polling) 策略的高效自动刷新。
-- **UI State (视图交互状态)**：应用自身产生的一些生命周期极短的独立状态（如下拉框打开、筛选按钮激活等），下放至 Zustand 中按模块管理，确保不污染全局域。
-- **Form State (表单临时状态)**：不把表单值污染进全局 Store，统一在局部的 React Hook Form 进行闭环控制，直至提交给 Domain Client 层。
+To prevent state chaos in frontend single-page applications, AgFrame adopts the best practice pattern of **"State Segregation"**:
 
-## 6. HTTP 规范与观测链路 (HTTP & Observability)
+- **Server State**: Relies on TanStack Query to request and cache external data sources, implementing efficient automatic refresh based on Invalidation and Polling strategies for documents, task states, conversation history, etc.
+- **UI State**: Some independent states with extremely short lifecycles generated by the application itself (such as dropdown box opening, filter button activation, etc.) are delegated to Zustand for modular management, ensuring the global scope is not polluted.
+- **Form State**: Form values are not polluted into the global Store; they are uniformly and locally controlled in a closed loop by React Hook Form until submitted to the Domain Client layer.
 
-### 6.1 统一 Fetch 封装
-通过一套自定义的基础 HTTP 客户端实例全局管控安全令牌的注入操作。拦截统一的网络报错并抽象为 `ApiError` 强类型错误。这从根源上杜绝了各页面分散处理 `401 Unauthorized` 认证失效或者网络中断的问题。
+## 6. HTTP Specifications and Observability Pipeline
 
-### 6.2 全链路观测与埋点预留
-从前端触发的文件上传任务开始一直到持久化调度结束，前端全程参与埋点和溯源。不仅透传自定义的 `X-Request-ID`，并将上传失败、入库延迟等复杂事件动作抛送至底层的事件分析组件内，从而形成跨端端侧到服务端的完整异常回溯监控视图。
+### 6.1 Unified Fetch Encapsulation
+Global control of security token injection operations through a set of custom underlying HTTP client instances. Intercepts unified network errors and abstracts them into strongly typed `ApiError`. This fundamentally eliminates the problem of distributed handling of `401 Unauthorized` authentication failures or network interruptions across various pages.
+
+### 6.2 Full-Link Observability and Buried Point Reservation
+From the file upload task triggered by the frontend to the end of persistence scheduling, the frontend participates in tracking and tracing throughout the process. It not only passes through custom `X-Request-ID` but also throws complex event actions such as upload failures and storage delays into the underlying event analysis components, thereby forming a complete exception retrospective monitoring view from the client side to the server side.

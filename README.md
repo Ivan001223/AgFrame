@@ -3,15 +3,15 @@
 </div>
 
 <div align="center">
-  <a href="README-CN.md">中文文档</a>
-</div>
-
-<div align="center">
   <img src="https://img.shields.io/badge/Python-3.11+-blue?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/FastAPI-0.115+-cyan?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI">
   <img src="https://img.shields.io/badge/LangGraph-0.3+-FF6B6B?style=flat-square&logoColor=white" alt="LangGraph">
   <img src="https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Docker-Ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
+</div>
+
+<div align="center">
+  <a href="README-CN.md">中文文档</a>
 </div>
 
 <div align="center">

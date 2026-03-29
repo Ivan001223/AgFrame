@@ -7,8 +7,6 @@ import uvicorn
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi_limiter import FastAPILimiter
-from fastapi_limiter.depends import RateLimiter
 from langserve import add_routes
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -16,12 +14,11 @@ from starlette.requests import Request
 from app.infrastructure.checkpoint.redis_store import checkpoint_store
 from app.infrastructure.config.settings import settings
 from app.infrastructure.database.schema import ensure_schema_if_possible
-from app.infrastructure.observability import get_langfuse_callback
 from app.infrastructure.queue.redis_client import get_redis
 from app.infrastructure.utils.logging import get_logger, init_logging
-from app.runtime.graph.graph import run_app
 from app.server.api import (
     auth,
+    chat,
     documents,
     harness,
     health,
@@ -41,8 +38,10 @@ from app.server.api.auth import (
     get_current_active_user,
     get_current_admin_user,
 )
+from app.server.chat_runtime import apply_request_runtime_config, get_chat_graph_app
 from app.server.cors_policy import build_cors_options
 from app.server.error_handlers import register_exception_handlers
+from app.server.rate_limit import build_rate_limiter, init_rate_limiter
 
 logger = get_logger("exception_handler")
 
@@ -55,7 +54,7 @@ async def lifespan(app: FastAPI):
     ensure_schema_if_possible()
 
     redis = get_redis()
-    await FastAPILimiter.init(redis)
+    await init_rate_limiter(redis)
 
     await checkpoint_store.get_saver()
     logger.info(f"Checkpoint store initialized: {type(checkpoint_store)}")
@@ -68,24 +67,7 @@ def per_req_config_modifier(config: dict[str, Any], request: Any) -> dict[str, A
     Injects Langfuse callback into the config for every request.
     Also injects user_id and thread_id into configurable params if needed.
     """
-    # 自动生成 thread_id 如果不存在
-    config.setdefault("configurable", {})
-    if "thread_id" not in config["configurable"]:
-        config["configurable"]["thread_id"] = str(uuid.uuid4())
-
-    # 注入 user_id 到 configurable
-    user = getattr(request.state, "user", None)
-    if user:
-        config["configurable"]["user_id"] = user.username
-
-    handler = get_langfuse_callback()
-    if handler:
-        existing_callbacks = config.get("callbacks", [])
-        if isinstance(existing_callbacks, list):
-            config["callbacks"] = existing_callbacks + [handler]
-        else:
-            config["callbacks"] = [handler]
-    return config
+    return apply_request_runtime_config(config, request)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -135,7 +117,7 @@ register_exception_handlers(app)
 
 # 路由（LangServe）
 # 保护 /chat 接口：需要登录 + 限流 (10次/60秒)
-graph_app = run_app(checkpointer=checkpoint_store)
+graph_app = get_chat_graph_app()
 
 add_routes(
     app,
@@ -145,7 +127,7 @@ add_routes(
     per_req_config_modifier=per_req_config_modifier,
     dependencies=[
         Depends(get_current_active_user),
-        Depends(RateLimiter(times=10, seconds=60)),
+        Depends(build_rate_limiter(times=10, seconds=60)),
     ],
 )
 
@@ -164,6 +146,7 @@ app.include_router(health.router)
 
 # 认证路由
 app.include_router(auth.router)
+app.include_router(chat.router, dependencies=[Depends(build_rate_limiter(times=10, seconds=60))])
 app.include_router(interrupt.router, dependencies=[Depends(get_current_active_user)])
 app.include_router(upload.router)  # 移除 admin 限制，内部已根据 user 隔离
 app.include_router(tasks.router)

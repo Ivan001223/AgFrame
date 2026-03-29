@@ -7,8 +7,10 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.server.api import chat as chat_api
 from app.server.api import documents as documents_api
 from app.server.api import history as history_api
+from app.server.api import interrupt as interrupt_api
 from app.server.api import memory as memory_api
 from app.server.api import tasks as tasks_api
 from app.server.api import upload as upload_api
@@ -31,6 +33,9 @@ def test_workbench_smoke_flow(tmp_path: Any, monkeypatch: Any):
         "tasks": {},
         "documents": [],
         "history": {},
+        "chat_states": {},
+        "checkpoints": {},
+        "interrupt_events": [],
         "memory_items": [],
         "profile": {"facts": [{"text": "prefers concise answers"}]},
         "next_doc_id": 1,
@@ -115,7 +120,11 @@ def test_workbench_smoke_flow(tmp_path: Any, monkeypatch: Any):
             sessions = list(state["history"].get(user_id, {}).values())
             q = str(query or "").lower()
             if q:
-                sessions = [s for s in sessions if q in s["title"].lower()]
+                sessions = [
+                    s for s in sessions
+                    if q in s["title"].lower()
+                    or any(q in str(message.get("content") or "").lower() for message in s.get("messages", []))
+                ]
             return sessions
 
         def save_session(self, user_id: str, session_id: str, messages: list[dict[str, Any]], title: str | None = None):
@@ -200,6 +209,161 @@ def test_workbench_smoke_flow(tmp_path: Any, monkeypatch: Any):
         def embed_documents(self, texts: list[str]):
             return [[0.1, 0.2] for _ in texts]
 
+    class _ChatState:
+        def __init__(self, values: dict[str, Any]):
+            self.values = values
+
+    class _CheckpointStore:
+        async def load(self, session_id: str):
+            return state["checkpoints"].get(session_id)
+
+        async def save(self, session_id: str, checkpoint: dict[str, Any]):
+            state["checkpoints"][session_id] = {
+                "checkpoint": checkpoint,
+                "updated_at": "t1",
+            }
+            return state["checkpoints"][session_id]
+
+    class _EventService:
+        def record(self, **kwargs):
+            state["interrupt_events"].append(kwargs)
+            return {"event_id": f"he-{len(state['interrupt_events'])}", **kwargs}
+
+        def list_for_session(self, *, session_id: str, user_id: str | None = None, limit: int = 100):
+            events = [
+                {"event_id": f"he-{index}", **event}
+                for index, event in enumerate(state["interrupt_events"], start=1)
+                if event.get("session_id") == session_id
+                and (user_id is None or event.get("user_id") == user_id)
+            ]
+            return events[:limit]
+
+    def _persist_history(
+        *,
+        user_id: str,
+        session_id: str,
+        messages: list[dict[str, Any]],
+        title: str | None = None,
+    ):
+        return _HistoryStore().save_session(user_id, session_id, messages, title)
+
+    class _GraphApp:
+        async def ainvoke(self, input_value: dict[str, Any], config: dict[str, Any]):
+            context = dict(input_value.get("context") or {})
+            session_id = str(context.get("session_id") or config.get("configurable", {}).get("thread_id") or "")
+            user_id = str(config.get("configurable", {}).get("user_id") or user.username)
+            user_messages = list(input_value.get("messages") or [])
+            assistant_content = (
+                "Approval pending smoke draft"
+                if context.get("require_human_approval")
+                else "Workbench smoke reply"
+            )
+            session_state = {
+                "session_id": session_id,
+                "user_id": user_id,
+                "messages": [
+                    *user_messages,
+                    {"role": "assistant", "content": assistant_content},
+                ],
+                "context": {
+                    "context_pruning": {"method": "smoke"},
+                    "session_id": session_id,
+                    "user_id": user_id,
+                },
+                "interrupted": bool(context.get("require_human_approval")),
+            }
+            if context.get("require_human_approval"):
+                action_required = {
+                    "action_type": str(context.get("interrupt_action_type") or "deploy"),
+                    "description": str(context.get("interrupt_description") or "need approval"),
+                    "payload": dict(context.get("interrupt_payload") or {"next_step": "generate"}),
+                    "requires_approval": True,
+                    "approved": False,
+                    "approved_by": None,
+                    "approved_at": None,
+                }
+                session_state["action_required"] = action_required
+                state["checkpoints"][session_id] = {
+                    "checkpoint": {
+                        "checkpoint_id": f"cp-{session_id}",
+                        "checkpoint_ns": "",
+                        "user_id": user_id,
+                        "context": {
+                            "user_id": user_id,
+                            "session_id": session_id,
+                        },
+                        "interrupted": True,
+                        "action_required": action_required,
+                        "channel_values": {
+                            "user_id": user_id,
+                            "context": {
+                                "user_id": user_id,
+                                "session_id": session_id,
+                            },
+                            "interrupted": True,
+                            "action_required": action_required,
+                        },
+                    },
+                    "updated_at": "t0",
+                }
+            state["chat_states"][session_id] = session_state
+            return {
+                "messages": session_state["messages"],
+                "context": session_state["context"],
+                "interrupted": session_state["interrupted"],
+            }
+
+        async def aget_state(self, config: dict[str, Any]):
+            session_id = str(config.get("configurable", {}).get("thread_id") or "")
+            current = state["chat_states"].get(session_id) or {}
+            if current:
+                return _ChatState(current)
+            return _ChatState({"messages": [], "context": {}, "interrupted": False})
+
+    class _ResumeService:
+        async def resume_approved_session(self, *, session_id: str, checkpoint: dict[str, Any]):
+            checkpoint_data = dict(checkpoint.get("checkpoint") or {})
+            action_required = dict(checkpoint_data.get("action_required") or {})
+            if not bool(action_required.get("approved")):
+                return {
+                    "ok": False,
+                    "interrupted": True,
+                    "error_message": "approval missing",
+                }
+            current = dict(state["chat_states"].get(session_id) or {})
+            messages = list(current.get("messages") or [])
+            approved_reply = "Approved smoke reply"
+            messages.append({"role": "assistant", "content": approved_reply})
+            context = dict(current.get("context") or {})
+            context["context_pruning"] = {"method": "smoke_resume"}
+            current.update(
+                {
+                    "messages": messages,
+                    "context": context,
+                    "interrupted": False,
+                    "action_required": None,
+                }
+            )
+            state["chat_states"][session_id] = current
+
+            checkpoint_data["interrupted"] = False
+            checkpoint_data["action_required"] = None
+            channel_values = checkpoint_data.get("channel_values")
+            if isinstance(channel_values, dict):
+                channel_values["interrupted"] = False
+                channel_values["action_required"] = None
+            state["checkpoints"][session_id] = {
+                "checkpoint": checkpoint_data,
+                "updated_at": "t2",
+            }
+            return {
+                "ok": True,
+                "interrupted": False,
+                "reply": approved_reply,
+                "messages": messages,
+                "context": context,
+            }
+
     monkeypatch.setattr(upload_api.os.path, "join", _join)
     monkeypatch.setattr(upload_api, "ensure_schema_if_possible", lambda: False)
     monkeypatch.setattr(upload_api, "init_task", _init_task)
@@ -214,7 +378,40 @@ def test_workbench_smoke_flow(tmp_path: Any, monkeypatch: Any):
 
     monkeypatch.setattr(history_api, "ensure_schema_if_possible", lambda: True)
     monkeypatch.setattr(history_api, "MySQLConversationStore", lambda: _HistoryStore())
-    monkeypatch.setattr(history_api, "_update_memory_after_save", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        history_api,
+        "persist_session_messages",
+        lambda *, user_id, session_id, messages, background_tasks=None, title=None: _persist_history(
+            user_id=user_id,
+            session_id=session_id,
+            messages=messages,
+            title=title,
+        ),
+    )
+    monkeypatch.setattr(chat_api, "get_chat_graph_app", lambda: _GraphApp())
+    monkeypatch.setattr(
+        chat_api,
+        "persist_session_messages",
+        lambda *, user_id, session_id, messages, background_tasks=None, title=None: _persist_history(
+            user_id=user_id,
+            session_id=session_id,
+            messages=messages,
+            title=title,
+        ),
+    )
+    monkeypatch.setattr(interrupt_api, "checkpoint_store", _CheckpointStore())
+    monkeypatch.setattr(interrupt_api, "get_graph_resume_service", lambda: _ResumeService())
+    monkeypatch.setattr(interrupt_api, "get_interrupt_event_service", lambda: _EventService())
+    monkeypatch.setattr(
+        interrupt_api,
+        "persist_session_messages",
+        lambda *, user_id, session_id, messages, background_tasks=None, title=None: _persist_history(
+            user_id=user_id,
+            session_id=session_id,
+            messages=messages,
+            title=title,
+        ),
+    )
 
     monkeypatch.setattr(memory_api, "ensure_schema_if_possible", lambda: True)
     monkeypatch.setattr(memory_api, "PgUserMemoryStore", lambda: _MemoryStore())
@@ -223,12 +420,14 @@ def test_workbench_smoke_flow(tmp_path: Any, monkeypatch: Any):
     monkeypatch.setattr(memory_api, "get_embeddings", lambda: _Embeddings())
 
     app = FastAPI()
+    app.include_router(chat_api.router)
+    app.include_router(interrupt_api.router)
     app.include_router(upload_api.router)
     app.include_router(tasks_api.router)
     app.include_router(documents_api.router)
     app.include_router(history_api.router)
     app.include_router(memory_api.router)
-    for module in [upload_api, tasks_api, documents_api, history_api, memory_api]:
+    for module in [chat_api, interrupt_api, upload_api, tasks_api, documents_api, history_api, memory_api]:
         app.dependency_overrides[module.get_current_active_user] = lambda u=user: u
 
     client = TestClient(app)
@@ -253,15 +452,114 @@ def test_workbench_smoke_flow(tmp_path: Any, monkeypatch: Any):
     assert doc.status_code == 200
     assert doc.json()["preview"][0]["content"] == "hello doc"
 
-    save = client.post(
-        f"/history/{user.username}/save",
-        json={"session_id": "s1", "title": "guide chat", "messages": [{"role": "user", "content": "question"}]},
+    chat = client.post(
+        "/chat/workbench-invoke",
+        json={
+            "input": {
+                "messages": [{"role": "user", "content": "question about guide"}],
+                "context": {"session_id": "s1", "context_focus_hint": "focus on upload smoke"},
+            },
+            "config": {"configurable": {"thread_id": "s1"}},
+        },
     )
-    assert save.status_code == 200
+    assert chat.status_code == 200
+    assert chat.json()["reply"] == "Workbench smoke reply"
+    assert chat.json()["messages"][-1]["role"] == "assistant"
 
     history = client.get(f"/history/{user.username}", params={"q": "guide"})
     assert history.status_code == 200
     assert history.json()["history"][0]["id"] == "s1"
+    assert history.json()["history"][0]["messages"][-1]["content"] == "Workbench smoke reply"
+
+    interrupt_chat = client.post(
+        "/chat/workbench-invoke",
+        json={
+            "input": {
+                "messages": [{"role": "user", "content": "deploy the guide changes"}],
+                "context": {
+                    "session_id": "approve-1",
+                    "require_human_approval": True,
+                    "interrupt_action_type": "deploy",
+                    "interrupt_description": "approve guide deploy",
+                    "interrupt_payload": {"next_step": "generate"},
+                },
+            },
+            "config": {"configurable": {"thread_id": "approve-1"}},
+        },
+    )
+    assert interrupt_chat.status_code == 200
+    assert interrupt_chat.json()["interrupted"] is True
+
+    interrupt_status = client.get("/interrupt/approve-1")
+    assert interrupt_status.status_code == 200
+    assert interrupt_status.json()["interrupted"] is True
+    assert interrupt_status.json()["action_required"]["action_type"] == "deploy"
+
+    approve = client.post("/interrupt/approve-1/approve", json={"approved": True})
+    assert approve.status_code == 200
+    assert approve.json()["approved"] is True
+
+    resume_ready = client.get("/interrupt/approve-1/resume")
+    assert resume_ready.status_code == 200
+
+    resumed = client.post("/interrupt/approve-1/resume")
+    assert resumed.status_code == 200
+    assert resumed.json()["resumed"] is True
+    assert resumed.json()["reply"] == "Approved smoke reply"
+
+    approve_events = client.get("/interrupt/approve-1/events")
+    assert approve_events.status_code == 200
+    assert [event["event_type"] for event in approve_events.json()["events"]] == [
+        "interrupt.approved",
+        "interrupt.resume_requested",
+        "interrupt.resumed",
+    ]
+
+    resumed_history = client.get(f"/history/{user.username}/approve-1")
+    assert resumed_history.status_code == 200
+    assert resumed_history.json()["messages"][-1]["content"] == "Approved smoke reply"
+
+    reject_chat = client.post(
+        "/chat/workbench-invoke",
+        json={
+            "input": {
+                "messages": [{"role": "user", "content": "deploy but reject this"}],
+                "context": {
+                    "session_id": "reject-1",
+                    "require_human_approval": True,
+                    "interrupt_action_type": "deploy",
+                    "interrupt_description": "reject guide deploy",
+                    "interrupt_payload": {"next_step": "generate"},
+                },
+            },
+            "config": {"configurable": {"thread_id": "reject-1"}},
+        },
+    )
+    assert reject_chat.status_code == 200
+    assert reject_chat.json()["interrupted"] is True
+
+    reject = client.post("/interrupt/reject-1/approve", json={"approved": False})
+    assert reject.status_code == 200
+    assert reject.json()["approved"] is False
+
+    rejected_status = client.get("/interrupt/reject-1")
+    assert rejected_status.status_code == 200
+    assert rejected_status.json()["interrupted"] is True
+    assert rejected_status.json()["action_required"]["approved"] is False
+
+    rejected_resume = client.get("/interrupt/reject-1/resume")
+    assert rejected_resume.status_code == 400
+
+    reject_events = client.get("/interrupt/reject-1/events")
+    assert reject_events.status_code == 200
+    assert [event["event_type"] for event in reject_events.json()["events"]] == [
+        "interrupt.rejected",
+        "interrupt.resume_blocked",
+    ]
+
+    rejected_history = client.get(f"/history/{user.username}/reject-1")
+    assert rejected_history.status_code == 200
+    assert rejected_history.json()["messages"][-1]["content"] == "Approval pending smoke draft"
 
     profile = client.get("/memory/profile")
     assert profile.status_code == 200

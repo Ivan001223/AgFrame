@@ -1,13 +1,23 @@
-# 🚀 AgFrame (Agent Framework)
+<div align="center">
+  <h1>🚀 AgFrame (Agent Framework)</h1>
+</div>
 
-![Python](https://img.shields.io/badge/Python-3.11+-blue?style=flat-square&logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-cyan?style=flat-square&logo=fastapi&logoColor=white)
-![LangGraph](https://img.shields.io/badge/LangGraph-0.3+-FF6B6B?style=flat-square&logoColor=white)
-![License](https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square)
-![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat-square&logo=docker&logoColor=white)
+<div align="center">
+  <a href="README-CN.md">中文文档</a>
+</div>
 
-**⚡ 生产级 Agent/RAG 后端框架 | 基于 FastAPI + LangGraph 构建**  
-专注于复杂工作流编排、轻量级混合检索、分层记忆与可观测性
+<div align="center">
+  <img src="https://img.shields.io/badge/Python-3.11+-blue?style=flat-square&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/FastAPI-0.115+-cyan?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI">
+  <img src="https://img.shields.io/badge/LangGraph-0.3+-FF6B6B?style=flat-square&logoColor=white" alt="LangGraph">
+  <img src="https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square" alt="License">
+  <img src="https://img.shields.io/badge/Docker-Ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
+</div>
+
+<div align="center">
+  <b>⚡ Production-Grade Agent/RAG Backend Framework | Built on FastAPI + LangGraph</b><br>
+  Focuses on complex workflow orchestration, lightweight hybrid retrieval, hierarchical memory, and observability
+</div>
 
 ---
 
@@ -21,47 +31,21 @@
 
 ---
 
-## ✨ 核心特性速览
+## ✨ Core Features Quick Look
 
-| 🏗️ 工作流编排 | 🧠 轻量级 RAG | 💾 分层记忆 | 🔮 LLM 工厂 | 📊 可观测性 | 🛠️ 基础设施 |
+| 🏗️ Workflow Orchestration | 🧠 Lightweight RAG | 💾 Hierarchical Memory | 🔮 LLM Factory | 📊 Observability | 🛠️ Infrastructure |
 |:---:|:---:|:---:|:---:|:---:|:---:|
-| LangGraph | 双路检索 (Dense+BM25) | 短期对话窗口 | 多模型支持 | Langfuse | Redis Worker |
-| Harness 运行态 | RRF 排序融合 | 长期画像更新 | 嵌入模型 | 任务诊断队列 | PostgreSQL |
-| Human-in-Loop | 上下文轻量裁剪 | pgvector 检索 | 结构化输出 | Checkpoint 追踪 | Docker 编排 |
+| LangGraph | Dual Retrieval (Dense+BM25) | Short-term Dialog Window | Multi-Model Support | Langfuse | Redis Worker |
+| Harness Runtime | RRF Rank Fusion | Long-term Profile Update | Embedding Models | Task Diagnostic Queue | PostgreSQL |
+| Human-in-Loop | Context Lightweight Pruning | pgvector Retrieval | Structured Output | Checkpoint Tracking | Docker Orchestration |
 
 ---
 
-## 📐 架构总览
+## 📐 Architecture Overview
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      FastAPI Server                         │
-│                  (Auth / REST / LangServe)                  │
-└─────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────────┐
-│                    LangGraph / Harness                      │
-│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
-│   │ Orchestr │  │  State   │  │  Nodes   │  │ Interrupt│  │
-│   └──────────┘  └──────────┘  └──────────┘  └──────────┘  │
-└─────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────────┐
-│                      Skills / Services                      │
-│  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐     │
-│  │  RAG   │ │ Memory │ │ Profile│ │ Research│ │ Tools  │    │
-│  └────────┘ └────────┘ └────────┘ └────────┘ └────────┘     │
-└─────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────────┐
-│                   Infrastructure                            │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐    │
-│  │ pgvector │ │  Redis   │ │ ARQ Queue│ │ Observability│    │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────────┘    │
-└─────────────────────────────────────────────────────────────┘
-```
+![AgFrame Architecture Overview](data/assets/framework.png)
 
-## 📂 目录结构
+## 📂 Directory Structure
 
 ```
 ╭────────────────────────────────────────────────────────────────────────────╮
@@ -69,96 +53,96 @@
 ╰────────────────────────────────────────────────────────────────────────────╯
 │
 ├── app/
-│   ├── server/              # 🚀 FastAPI 入口
-│   │   ├── api/             #   路由层
-│   │   └── main.py          #   应用启动
-│   ├── runtime/             # ⚙️ 运行时核心
-│   │   ├── graph/           #   LangGraph 工作流
-│   │   │   ├── graph.py     #   图定义
+│   ├── server/              # 🚀 FastAPI Entry
+│   │   ├── api/             #   Routing Layer
+│   │   └── main.py          #   Application Start
+│   ├── runtime/             # ⚙️ Runtime Core
+│   │   ├── graph/           #   LangGraph Workflow
+│   │   │   ├── graph.py     #   Graph Definition
 │   │   │   ├── state.py     #   State Schema
-│   │   │   ├── orchestrator.py # 编排器
-│   │   │   ├── registry.py  #   节点注册表
-│   │   │   └── nodes/       #   节点实现
-│   │   ├── llm/             #   LLM 工厂
-│   │   └── prompts/         #   Prompt 模板与裁剪策略
-│   ├── skills/              # 🛠️ 原子能力层
-│   │   ├── rag/             #   混合检索
-│   │   ├── memory/          #   记忆检索技能
-│   │   ├── profile/         #   用户画像
-│   │   ├── research/        #   网络搜索
-│   │   ├── ocr/             #   图片 OCR
-│   │   ├── common/          #   公共技能
-│   │   └── tools/           #   代码执行
-│   ├── infrastructure/      # 🏗️ 基础设施
-│   │   ├── config/          #   配置管理
+│   │   │   ├── orchestrator.py # Orchestrator
+│   │   │   ├── registry.py  #   Node Registry
+│   │   │   └── nodes/       #   Node Implementation
+│   │   ├── llm/             #   LLM Factory
+│   │   └── prompts/         #   Prompt Templates and Pruning Strategy
+│   ├── skills/              # 🛠️ Atomic Skills Layer
+│   │   ├── rag/             #   Hybrid Retrieval
+│   │   ├── memory/          #   Memory Retrieval Skills
+│   │   ├── profile/         #   User Profile
+│   │   ├── research/        #   Web Search
+│   │   ├── ocr/             #   Image OCR
+│   │   ├── common/          #   Common Skills
+│   │   └── tools/           #   Code Execution
+│   ├── infrastructure/      # 🏗️ Infrastructure
+│   │   ├── config/          #   Configuration Management
 │   │   ├── database/        #   SQLAlchemy ORM
 │   │   ├── checkpoint/      #   Redis Checkpoint
-│   │   ├── queue/           #   ARQ 异步任务
-│   │   ├── sandbox/         #   代码沙箱
-│   │   ├── observability/   #   可观测性
-│   │   └── utils/           #   工具函数
-│   ├── agents/              # 🤖 Agent 节点工厂
-│   ├── memory/              # 🧠 记忆模块
-│   │   ├── long_term/       #   长期记忆引擎
-│   │   └── vector_stores/   #   向量存储 (pgvector)
-│   └── examples/            # 🔬 调试脚本与示例
+│   │   ├── queue/           #   ARQ Async Tasks
+│   │   ├── sandbox/         #   Code Sandbox
+│   │   ├── observability/   #   Observability
+│   │   └── utils/           #   Utility Functions
+│   ├── agents/              # 🤖 Agent Node Factory
+│   ├── memory/              # 🧠 Memory Module
+│   │   ├── long_term/       #   Long-term Memory Engine
+│   │   └── vector_stores/   #   Vector Stores (pgvector)
+│   └── examples/            # 🔬 Debug Scripts and Examples
 │
-├── configs/                 # ⚙️ 配置文件
-├── docker/                 # 🐳 Docker 初始化脚本
-├── docs/                   # 📖 部署/架构/安全/测试文档
-├── frontend/               # 💻 Next.js 工作台前端
-├── scripts/                # 🧰 工具与冒烟测试脚本
-├── data/                   # 📁 运行时数据
-├── tests/                  # 🧪 单元测试与评测
+├── configs/                 # ⚙️ Configuration Files
+├── docker/                 # 🐳 Docker Initialization Scripts
+├── docs/                   # 📖 Deployment/Architecture/Security/Testing Docs
+├── frontend/               # 💻 Next.js Workbench Frontend
+├── scripts/                # 🧰 Tools and Smoke Test Scripts
+├── data/                   # 📁 Runtime Data
+├── tests/                  # 🧪 Unit Tests and Evaluations
 │
-├── docker-compose.yml      # 🐳 基础设施编排
-├── pyproject.toml         # 🐍 Python 项目配置
-└── uv.lock                 # 🔒 依赖锁文件
+├── docker-compose.yml      # 🐳 Infrastructure Orchestration
+├── pyproject.toml         # 🐍 Python Project Configuration
+└── uv.lock                 # 🔒 Dependency Lock File
 ```
 
-## 默认检索链路
+## Default Retrieval Pipeline
 
 ```text
 Query
   -> Dense Search + BM25 Search
   -> RRF Fusion
-  -> Candidate Pruning (轻量级候选裁剪)
-  -> Parent Restore (父文档还原)
-  -> Prompt Assembly (组装 Prompt)
+  -> Candidate Pruning (Lightweight Candidate Pruning)
+  -> Parent Restore (Parent Document Restoration)
+  -> Prompt Assembly (Assemble Prompt)
 ```
 
-当前推荐最佳实践：
-- 在主文档检索路径中仅保留 `Dense + BM25 + RRF`
-- 在组装 Prompt 之前使用轻量级裁剪策略
-- 将基于大模型的重排器 (Reranker) 视为遗留兼容组件，而非默认必选项
+Current recommended best practices:
+- Only retain `Dense + BM25 + RRF` in the main document retrieval path
+- Use a lightweight pruning strategy before assembling the Prompt
+- Treat the LLM-based Reranker as a legacy compatibility component, not a default requirement
 
-## 🚀 快速开始
+## 🚀 Quick Start
 
-### 1. 环境安装
+### 1. Environment Installation
 
 ```bash
 uv python install 3.11
 uv sync
 ```
 
-可选依赖组：
-- `uv sync --group document-ai`: 高精度 PDF / Office 文档解析能力
-- `uv sync --group evals`: 离线评估与 Benchmark 工具
+Optional dependency groups:
+- `uv sync --group document-ai`: High-precision PDF / Office document parsing capabilities
+- `uv sync --group evals`: Offline evaluation and Benchmark tools
 
-默认安装现在已经包含本地 Embedding / OCR / Transformers / Torch 运行时依赖，因此 `uv sync` 后即可直接使用本地推理链路。
+The default installation now includes local Embedding / OCR / Transformers / Torch runtime dependencies, so you can directly use the local inference pipeline after `uv sync`.
 
-### 2. 配置说明
+### 2. Configuration Instructions
 
 ```bash
 cp configs/config.example.json configs/config.json
 ```
 
-至少需要更新以下配置项：
+At least the following configurations need to be updated:
 - `auth.secret_key`
-- `database.url` 或数据库凭证
-- `llm.api_key` (若使用云端模型)
+- `database.url` or database credentials
+- `llm.api_key` (if using cloud models)
 
-轻量级推荐配置参考：
+Lightweight recommended configuration reference:
 
 ```json
 {
@@ -187,73 +171,72 @@ cp configs/config.example.json configs/config.json
 }
 ```
 
-### 3. 使用 Docker Compose 启动整套项目
+### 3. Start the Full Stack with Docker Compose
 
 ```bash
 cp .env.example .env
 docker compose up --build -d
 ```
 
-默认会启动：
+By default, it will start:
 - `postgres`
-- `redis`（基于 Redis Stack，提供队列、限流与 LangGraph checkpoint 所需的 RediSearch 能力）
+- `redis` (based on Redis Stack, providing queues, rate limiting, and RediSearch capabilities required for LangGraph checkpoint)
 - `backend`
 - `worker`
 - `frontend`
 
-默认访问地址：
+Default access addresses:
 - Frontend: `http://127.0.0.1:3000`
 - API: `http://127.0.0.1:8000`
-- Swagger 文档: `http://127.0.0.1:8000/docs`
+- Swagger Docs: `http://127.0.0.1:8000/docs`
 
-说明：
-- 若要直接使用聊天能力，请在 `.env` 中填写 `LLM_API_KEY`
-- 若要启用文档摄取 / RAG，仍建议在 `configs/config.json` 中补充 embeddings 配置或远程 embeddings 服务地址
+Instructions:
+- If you want to use the chat capability directly, please fill in `LLM_API_KEY` in `.env`
+- If you want to enable document ingestion / RAG, it is still recommended to supplement the embeddings configuration or remote embeddings service address in `configs/config.json`
 
-可选观测组件：
+Optional observability components:
 
 ```bash
 docker compose --profile observability up --build -d
 ```
 
-这会额外启动 `clickhouse`、`minio`、`langfuse-server`、`langfuse-worker`。
-Langfuse 默认暴露在 `http://127.0.0.1:3001`。
+This will additionally start `clickhouse`, `minio`, `langfuse-server`, `langfuse-worker`.
+Langfuse is exposed by default at `http://127.0.0.1:3001`.
 
-### 4. 手动启动 Backend API
+### 4. Start Backend API Manually
 
 ```bash
 uv run python -m app.server.main
 ```
 
-### 5. 手动启动异步 Worker
+### 5. Start Async Worker Manually
 
 ```bash
 uv run arq app.infrastructure.queue.worker_settings
 ```
 
-## 🩺 健康检查与运行时信号
+## 🩺 Health Check & Runtime Signals
 
-`readiness` 端点 (Endpoint) 会暴露当前轻量级检索状态与 Harness 引擎状态：
+The `readiness` endpoint will expose the current lightweight retrieval status and Harness engine status:
 - `components.retrieval == "hybrid_rrf"`
 - `components.context_pruning == "lightweight_ranker"`
 
-`reranker` 组件为向后兼容保留，但默认检索路径不再强依赖。
+The `reranker` component is retained for backward compatibility, but the default retrieval path no longer strongly depends on it.
 
-## 📖 文档指引
+## 📖 Documentation Guide
 
-- [部署指南 (Deployment Guide)](./docs/deployment.md)
-- [RAG 架构设计 (RAG Architecture)](./docs/rag-architecture.md)
-- [RAG 迁移指南 (RAG Migration Guide)](./docs/rag-migration.md)
-- [测试指南 (Testing Guide)](./docs/testing.md)
-- [前端架构 (Frontend Architecture)](./docs/frontend-architecture.md)
-- [安全规范 (Security Notes)](./docs/security.md)
-- [路线图 (Roadmap)](./docs/roadmap.md)
+- [Deployment Guide](./docs/deployment.md)
+- [RAG Architecture & Migration](./docs/rag-architecture.md)
+- [Testing Guide](./docs/testing.md)
+- [Frontend Architecture](./docs/frontend-architecture.md)
+- [Security Notes](./docs/security.md)
+- [Roadmap](./docs/roadmap.md)
 
-## 📌 当前状态
+## 📌 Current Status
 
-当前代码库反映了最新的轻量级 RAG 与 Agent 编排设计：
-- 文档检索已彻底移除对模型重排器 (Model Reranker) 的硬依赖
-- 记忆检索采用轻量级本地打分排序
-- 上下文裁剪采用轻量级排序 / 启发式评分
-- **(v0.2.1)** 引入 Harness 执行引擎，支持 LangGraph 任务中断 (Interrupt) 与 Checkpoint 审批恢复
-- 基础配置项和健康度报告均与该轻量化、高可控链路保持一致
+The current codebase reflects the latest lightweight RAG and Agent orchestration design:
+- Document retrieval has completely removed the hard dependency on Model Reranker
+- Memory retrieval uses lightweight local scoring and ranking
+- Context pruning uses lightweight ranking / heuristic scoring
+- **(v0.2.1)** Introduced Harness execution engine, supporting LangGraph task Interrupt and Checkpoint approval resumption
+- Basic configuration items and health reports are all consistent with this lightweight, highly controllable pipeline

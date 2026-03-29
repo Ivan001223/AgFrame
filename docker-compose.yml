@@ -64,7 +64,9 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://127.0.0.1:3000","http://localhost:3000"]}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
-      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_MODEL: ${LLM_MODEL:-dev-stub}
+      MODEL_PATH_EMBEDDING: ${MODEL_PATH_EMBEDDING:-dev-stub}
+      ENABLE_HUMAN_APPROVAL: ${ENABLE_HUMAN_APPROVAL:-true}
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
       LANGFUSE_HOST: ${LANGFUSE_HOST:-}
@@ -112,7 +114,9 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://:redissecret@redis:6379/0}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
-      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_MODEL: ${LLM_MODEL:-dev-stub}
+      MODEL_PATH_EMBEDDING: ${MODEL_PATH_EMBEDDING:-dev-stub}
+      ENABLE_HUMAN_APPROVAL: ${ENABLE_HUMAN_APPROVAL:-true}
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
       LANGFUSE_HOST: ${LANGFUSE_HOST:-}

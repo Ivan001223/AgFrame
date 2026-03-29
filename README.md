@@ -144,7 +144,8 @@ uv sync
 可选依赖组：
 - `uv sync --group document-ai`: 高精度 PDF / Office 文档解析能力
 - `uv sync --group evals`: 离线评估与 Benchmark 工具
-- `uv sync --group local-inference`: 本地 Embedding / OCR 模型支持（或兼容遗留 Reranker）
+
+默认安装现在已经包含本地 Embedding / OCR / Transformers / Torch 运行时依赖，因此 `uv sync` 后即可直接使用本地推理链路。
 
 ### 2. 配置说明
 

@@ -19,10 +19,10 @@ cp configs/config.example.json configs/config.json
 
 可选依赖组：
 
-- `uv sync --no-dev --group local-inference`
-  用于支持本地 Embeddings 模型、本地 OCR 或遗留的 Reranker 模型兼容。
 - `uv sync --no-dev --group document-ai`
   用于支持更高精度的 PDF / Office 文档解析。
+
+默认安装已经包含本地 Embeddings、本地 OCR、Torch、Transformers 与遗留 Reranker 兼容所需依赖。
 
 默认的文档 RAG、记忆检索与上下文裁剪路径**不需要**加载本地大模型 Reranker。
 

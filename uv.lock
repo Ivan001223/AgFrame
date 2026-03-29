@@ -57,6 +57,7 @@ dependencies = [
     { name = "langchain-openai" },
     { name = "langfuse" },
     { name = "langgraph" },
+    { name = "langgraph-checkpoint-redis" },
     { name = "langserve", extra = ["all"] },
     { name = "matplotlib" },
     { name = "mysql-connector-python" },
@@ -72,12 +73,18 @@ dependencies = [
     { name = "pypdf" },
     { name = "python-dotenv" },
     { name = "python-multipart" },
+    { name = "qwen-vl-utils" },
     { name = "rank-bm25" },
     { name = "redis" },
     { name = "requests" },
+    { name = "sentence-transformers" },
     { name = "sqlalchemy" },
     { name = "streamlit" },
     { name = "tiktoken" },
+    { name = "timm" },
+    { name = "torch" },
+    { name = "torchvision" },
+    { name = "transformers" },
     { name = "uvicorn" },
 ]
 
@@ -95,14 +102,6 @@ document-ai = [
 evals = [
     { name = "ragas" },
 ]
-local-inference = [
-    { name = "qwen-vl-utils" },
-    { name = "sentence-transformers" },
-    { name = "timm" },
-    { name = "torch" },
-    { name = "torchvision" },
-    { name = "transformers" },
-]
 
 [package.metadata]
 requires-dist = [
@@ -114,7 +113,7 @@ requires-dist = [
     { name = "einops" },
     { name = "faiss-cpu" },
     { name = "fastapi" },
-    { name = "fastapi-limiter" },
+    { name = "fastapi-limiter", specifier = "==0.1.6" },
     { name = "fpdf" },
     { name = "httpx" },
     { name = "jieba" },
@@ -125,6 +124,7 @@ requires-dist = [
     { name = "langchain-openai" },
     { name = "langfuse" },
     { name = "langgraph" },
+    { name = "langgraph-checkpoint-redis", specifier = "==0.4.0" },
     { name = "langserve", extras = ["all"] },
     { name = "matplotlib" },
     { name = "mysql-connector-python" },
@@ -140,12 +140,18 @@ requires-dist = [
     { name = "pypdf", specifier = ">=6.9.1" },
     { name = "python-dotenv" },
     { name = "python-multipart" },
+    { name = "qwen-vl-utils", specifier = ">=0.0.14,<0.1" },
     { name = "rank-bm25" },
     { name = "redis" },
     { name = "requests" },
+    { name = "sentence-transformers", specifier = ">=5.3.0,<6" },
     { name = "sqlalchemy", specifier = ">=2.0.0" },
     { name = "streamlit" },
     { name = "tiktoken" },
+    { name = "timm", specifier = ">=1.0.25,<1.1" },
+    { name = "torch", specifier = ">=2.10.0,<2.11" },
+    { name = "torchvision", specifier = ">=0.25.0,<0.26" },
+    { name = "transformers", specifier = ">=4.46.3,<6" },
     { name = "uvicorn" },
 ]
 
@@ -159,14 +165,6 @@ dev = [
 ]
 document-ai = [{ name = "unstructured", extras = ["all-docs"], specifier = ">=0.21.5,<0.22" }]
 evals = [{ name = "ragas", specifier = ">=0.4.3,<0.5" }]
-local-inference = [
-    { name = "qwen-vl-utils", specifier = ">=0.0.14,<0.1" },
-    { name = "sentence-transformers", specifier = ">=5.3.0,<6" },
-    { name = "timm", specifier = ">=1.0.25,<1.1" },
-    { name = "torch", specifier = ">=2.10.0,<2.11" },
-    { name = "torchvision", specifier = ">=0.25.0,<0.26" },
-    { name = "transformers", specifier = ">=4.46.3,<6" },
-]
 
 [[package]]
 name = "aiofiles"
@@ -939,15 +937,15 @@ wheels = [
 
 [[package]]
 name = "fastapi-limiter"
-version = "0.2.0"
+version = "0.1.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastapi" },
-    { name = "pyrate-limiter" },
+    { name = "redis" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b7/32/81f64b69a79345caca0a90d1601ae7c84c39438145793514ee82daac4fc6/fastapi_limiter-0.2.0.tar.gz", hash = "sha256:b042259f6280056b5b2b3f506edd76c8e0648d7a5ce86c3485216a4a0fd0ec14", size = 7401, upload-time = "2026-02-06T07:00:09.831Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7f/99/c7903234488d4dca5f9bccb4f88c2f582a234f0dca33348781c9cf8a48c6/fastapi_limiter-0.1.6.tar.gz", hash = "sha256:6f5fde8efebe12eb33861bdffb91009f699369a3c2862cdc7c1d9acf912ff443", size = 8307, upload-time = "2024-01-05T09:14:48.628Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c4/9b/35278a18254f187d55bb450ded6bc9a59c7b3010d164e1796f3dfb7aa73d/fastapi_limiter-0.2.0-py3-none-any.whl", hash = "sha256:e576ebb29cc9614c2f38471c60ed0e849024e9a1b7a2aeb4c2a31a6d708b4aea", size = 5219, upload-time = "2026-02-06T07:00:07.824Z" },
+    { url = "https://files.pythonhosted.org/packages/cd/b5/6f6b4d18bee1cafc857eae12738b3a03b7d1102b833668be868938c57b9d/fastapi_limiter-0.1.6-py3-none-any.whl", hash = "sha256:2e53179a4208b8f2c8795e38bb001324d3dc37d2800ff49fd28ec5caabf7a240", size = 15829, upload-time = "2024-01-05T09:14:47.613Z" },
 ]
 
 [[package]]
@@ -1419,6 +1417,15 @@ wheels = [
 ]
 
 [[package]]
+name = "jsonpath-ng"
+version = "1.8.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/32/58/250751940d75c8019659e15482d548a4aa3b6ce122c515102a4bfdac50e3/jsonpath_ng-1.8.0.tar.gz", hash = "sha256:54252968134b5e549ea5b872f1df1168bd7defe1a52fed5a358c194e1943ddc3", size = 74513, upload-time = "2026-02-24T14:42:06.182Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/03/99/33c7d78a3fb70d545fd5411ac67a651c81602cc09c9cf0df383733f068c5/jsonpath_ng-1.8.0-py3-none-any.whl", hash = "sha256:b8dde192f8af58d646fc031fac9c99fe4d00326afc4148f1f043c601a8cfe138", size = 67844, upload-time = "2026-02-28T00:53:19.637Z" },
+]
+
+[[package]]
 name = "jsonpointer"
 version = "3.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1666,6 +1673,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b1/44/a8df45d1e8b4637e29789fa8bae1db022c953cc7ac80093cfc52e923547e/langgraph_checkpoint-4.0.1.tar.gz", hash = "sha256:b433123735df11ade28829e40ce25b9be614930cd50245ff2af60629234befd9", size = 158135, upload-time = "2026-02-27T21:06:16.092Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/65/4c/09a4a0c42f5d2fc38d6c4d67884788eff7fd2cfdf367fdf7033de908b4c0/langgraph_checkpoint-4.0.1-py3-none-any.whl", hash = "sha256:e3adcd7a0e0166f3b48b8cf508ce0ea366e7420b5a73aa81289888727769b034", size = 50453, upload-time = "2026-02-27T21:06:14.293Z" },
+]
+
+[[package]]
+name = "langgraph-checkpoint-redis"
+version = "0.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "langgraph-checkpoint" },
+    { name = "orjson" },
+    { name = "redis" },
+    { name = "redisvl" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b3/69/3ba1b17a95b9b6be432ef9be95f64529dbee043d55bf1f1a5aff9b4ce7f5/langgraph_checkpoint_redis-0.4.0.tar.gz", hash = "sha256:7db66f4c5919c7d939fe6d62c5f9a4c5147434142eca6cdad9fd470d11ccfb74", size = 118104, upload-time = "2026-03-11T21:58:33.464Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0c/41/de1658d54dbd50f92aeee6539ebf9abe1c54ea9954f4314d9634f3311803/langgraph_checkpoint_redis-0.4.0-py3-none-any.whl", hash = "sha256:ba8e48943fd056bae55a87284ab47159e23ca0038a1491374f65564c1af99a35", size = 130151, upload-time = "2026-03-11T21:58:32.537Z" },
 ]
 
 [[package]]
@@ -3041,15 +3063,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pyrate-limiter"
-version = "4.0.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/03/98/2b3dc1ba6bdf2efaeaa3e102124cbd2636a4ccec241ffeb8a1de207f5cd4/pyrate_limiter-4.0.2.tar.gz", hash = "sha256:b678841e2215f114ef6f98c7093755ca3b466de83cb5a881231fd6e321fa14b5", size = 301304, upload-time = "2026-01-23T09:37:33.612Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/13/b9/80ffe3f2c34d3247186d74b1d08c1fed1e3ad4127ff6a8a5501b7bf16a97/pyrate_limiter-4.0.2-py3-none-any.whl", hash = "sha256:35ec42b9bb9cfabcafab14d0c5c6523f48378c3da2949e534ce3cbdfea71eadd", size = 36439, upload-time = "2026-01-23T09:37:32.097Z" },
-]
-
-[[package]]
 name = "pytest"
 version = "9.0.2"
 source = { registry = "https://pypi.org/simple" }
@@ -3195,6 +3208,15 @@ wheels = [
 ]
 
 [[package]]
+name = "python-ulid"
+version = "3.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/40/7e/0d6c82b5ccc71e7c833aed43d9e8468e1f2ff0be1b3f657a6fcafbb8433d/python_ulid-3.1.0.tar.gz", hash = "sha256:ff0410a598bc5f6b01b602851a3296ede6f91389f913a5d5f8c496003836f636", size = 93175, upload-time = "2025-08-18T16:09:26.305Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6c/a0/4ed6632b70a52de845df056654162acdebaf97c20e3212c559ac43e7216e/python_ulid-3.1.0-py3-none-any.whl", hash = "sha256:e2cdc979c8c877029b4b7a38a6fba3bc4578e4f109a308419ff4d3ccf0a46619", size = 11577, upload-time = "2025-08-18T16:09:25.047Z" },
+]
+
+[[package]]
 name = "pytz"
 version = "2026.1.post1"
 source = { registry = "https://pypi.org/simple" }
@@ -3317,6 +3339,25 @@ wheels = [
 [package.optional-dependencies]
 hiredis = [
     { name = "hiredis" },
+]
+
+[[package]]
+name = "redisvl"
+version = "0.16.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jsonpath-ng" },
+    { name = "ml-dtypes" },
+    { name = "numpy" },
+    { name = "pydantic" },
+    { name = "python-ulid" },
+    { name = "pyyaml" },
+    { name = "redis" },
+    { name = "tenacity" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c7/cf/a41c9b547d46a1945b3a154c304efdb0e10df8c8117a333382522f915b6a/redisvl-0.16.0.tar.gz", hash = "sha256:992c0b8c305fbcd89f6b39fb75f1cd708ac7f8d2cf332bd08a2ad49f67f610c4", size = 874578, upload-time = "2026-03-13T12:56:31.137Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/40/7d/6685ad622785f9b78772ab36ffd00cf9b957b19a4ec846dd72dc420e1b89/redisvl-0.16.0-py3-none-any.whl", hash = "sha256:af11e4b3bd2c23241f715d6979afeb8a738bee83551b538bed35cca025006114", size = 199510, upload-time = "2026-03-13T12:56:29.239Z" },
 ]
 
 [[package]]

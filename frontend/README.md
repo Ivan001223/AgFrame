@@ -5,6 +5,7 @@
 目前已实现的路由：
 - `/login` (登录)
 - `/chat` (对话工作台)
+- `/harness` (Harness 控制面：run、approval、verification、timeline、retry)
 - `/knowledge` (知识库管理)
 - `/conversations` (会话中心)
 - `/conversations/[conversationId]` (会话详情)
@@ -33,7 +34,8 @@ npm run dev
 
 ## 开发须知 (Notes)
 
-- 对话界面使用 `POST /chat/invoke`，并通过 `/history/{user}/save` 进行轮次持久化。
+- 对话界面使用 `POST /chat/workbench-invoke`，由后端统一完成 graph 执行与轮次持久化。
+- Harness 控制面读取 `GET /harness/runs`、`GET /harness/runs/{run_id}`、`GET /harness/policies`，并支持 `POST /harness/runs`、`POST /harness/runs/{run_id}/approval`、`POST /harness/runs/{run_id}/retry`。
 - 用户个人设置读写对应 `GET|POST /settings/user`。
 - 管理员全局设置读写对应 `GET|POST /settings`。
 - 文档上传请求指向 `POST /upload`，其 multipart 字段名为 `files`。

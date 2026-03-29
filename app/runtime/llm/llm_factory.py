@@ -1,6 +1,7 @@
 from langchain_openai import ChatOpenAI
 
 from app.infrastructure.config.settings import settings
+from app.runtime.llm.dev_stub import DevStubChatModel
 
 # from app.runtime.llm.local_qwen import LocalQwen3VL  # Moved inside function to avoid heavy imports
 
@@ -44,6 +45,8 @@ def get_llm(temperature: float = 0, streaming: bool = True, json_mode: bool = Fa
     # 判断是否需要使用本地 Qwen
     if model_name == "local-qwen3-vl":
         return get_local_qwen_provider()
+    if model_name in {"dev-stub", "dev_stub"}:
+        return DevStubChatModel(model_name="dev-stub", streaming=streaming)
 
     model_kwargs = {}
     if json_mode and llm_config.json_mode_response_format:

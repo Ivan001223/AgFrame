@@ -86,8 +86,7 @@ class ModelReranker:
             return importlib.import_module("torch")
         except ModuleNotFoundError as exc:
             raise RuntimeError(
-                "缺少可选依赖 'torch'。如需本地 reranker 模型，请执行 "
-                "`uv sync --group local-inference`。"
+                "缺少运行时依赖 'torch'。请执行 `uv sync` 或重新安装项目依赖后再使用本地 reranker 模型。"
             ) from exc
 
     def _load_model(self):

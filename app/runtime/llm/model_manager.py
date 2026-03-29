@@ -24,8 +24,7 @@ def _require_torch() -> Any:
         return torch
     except ModuleNotFoundError as exc:
         raise RuntimeError(
-            "缺少可选依赖 'torch'。如需本地 embeddings/reranker/Qwen 模型，请执行 "
-            "`uv sync --group local-inference`。"
+            "缺少运行时依赖 'torch'。请执行 `uv sync` 或重新安装项目依赖后再使用本地模型。"
         ) from exc
 
 
@@ -34,8 +33,7 @@ def _require_transformers() -> tuple[Any, Any]:
         module = importlib.import_module("transformers")
     except ModuleNotFoundError as exc:
         raise RuntimeError(
-            "缺少可选依赖 'transformers'。如需本地 embeddings/reranker/Qwen 模型，请执行 "
-            "`uv sync --group local-inference`。"
+            "缺少运行时依赖 'transformers'。请执行 `uv sync` 或重新安装项目依赖后再使用本地模型。"
         ) from exc
     return module.AutoModel, module.AutoProcessor
 

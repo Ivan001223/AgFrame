@@ -1,5 +1,7 @@
 import importlib
+import math
 import logging
+from hashlib import sha256
 from typing import Any
 
 import httpx
@@ -58,6 +60,7 @@ class ModelEmbeddings(Embeddings):
         self.model_name = self._spec.model_ref
         if not self.model_name:
             raise ValueError("embeddings.model_name 未配置，且未传入 model_name")
+        self._use_dev_stub = self.model_name in {"dev-stub", "dev_stub"}
 
         self._backend = str(backend)
         self._batch_size = 32 if batch_size is None else int(batch_size)
@@ -77,7 +80,9 @@ class ModelEmbeddings(Embeddings):
         self._tokenizer = None
         self._st_model = None
         self._loaded_source = None
-        if self._use_remote_api:
+        if self._use_dev_stub:
+            self._device = "stub"
+        elif self._use_remote_api:
             self._device = "remote"
         else:
             self._device = get_best_device() if str(device).lower() in {"auto", ""} else str(device)
@@ -88,12 +93,13 @@ class ModelEmbeddings(Embeddings):
             return importlib.import_module("torch")
         except ModuleNotFoundError as exc:
             raise RuntimeError(
-                "缺少可选依赖 'torch'。如需本地 embeddings 模型，请执行 "
-                "`uv sync --group local-inference`。"
+                "缺少运行时依赖 'torch'。请执行 `uv sync` 或重新安装项目依赖后再使用本地 embeddings 模型。"
             ) from exc
 
     def _load_model(self):
         """懒加载模型：仅在首次使用时加载"""
+        if self._use_dev_stub:
+            return
         if self._use_remote_api:
             return
         if self._backend == "sentence_transformers":
@@ -148,6 +154,8 @@ class ModelEmbeddings(Embeddings):
         if not texts:
             return []
         prefixed = [self._doc_prefix + t for t in texts]
+        if self._use_dev_stub:
+            return self._embed_stub(prefixed)
         if self._use_remote_api:
             return self._embed_remote(prefixed)
         if self._backend == "sentence_transformers":
@@ -168,6 +176,8 @@ class ModelEmbeddings(Embeddings):
         """
         self._load_model()
         prefixed = self._query_prefix + text
+        if self._use_dev_stub:
+            return self._embed_stub([prefixed])[0]
         if self._use_remote_api:
             return self._embed_remote([prefixed])[0]
         if self._backend == "sentence_transformers":
@@ -286,6 +296,32 @@ class ModelEmbeddings(Embeddings):
         if any(v is None for v in vectors):
             raise ValueError("远程 embeddings 响应缺少 embedding 字段")
         return vectors
+
+    def _embed_stub(self, texts: list[str]) -> list[list[float]]:
+        dim = int(settings.feature_flags.pgvector_dimension or 1024)
+        return [self._stub_vector(text, dim=dim) for text in texts]
+
+    def _stub_vector(self, text: str, *, dim: int) -> list[float]:
+        values: list[float] = []
+        seed = sha256(text.encode("utf-8")).digest()
+        counter = 0
+
+        while len(values) < dim:
+            digest = sha256(seed + counter.to_bytes(4, "big")).digest()
+            for index in range(0, len(digest), 4):
+                chunk = digest[index:index + 4]
+                if len(chunk) < 4:
+                    continue
+                scalar = int.from_bytes(chunk, "big") / 0xFFFFFFFF
+                values.append((scalar * 2.0) - 1.0)
+                if len(values) >= dim:
+                    break
+            counter += 1
+
+        if self._normalize:
+            norm = math.sqrt(sum(value * value for value in values)) or 1.0
+            values = [value / norm for value in values]
+        return values[:dim]
 
 
 _model_embeddings_instance = None

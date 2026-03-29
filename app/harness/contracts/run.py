@@ -5,6 +5,11 @@ from enum import Enum
 from pydantic import BaseModel
 
 
+class HarnessTaskType(str, Enum):
+    DOCUMENT_INGEST = "document_ingest"
+    SESSION_RESUME_APPROVAL = "session_resume_approval"
+
+
 class HarnessRunStatus(str, Enum):
     CREATED = "created"
     QUEUED = "queued"
@@ -19,7 +24,7 @@ class HarnessRunStatus(str, Enum):
 
 
 class HarnessRunCreate(BaseModel):
-    task_type: str
+    task_type: HarnessTaskType
     input: dict[str, object]
     session_id: str | None = None
     metadata: dict[str, object] | None = None

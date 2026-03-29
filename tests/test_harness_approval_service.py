@@ -39,9 +39,6 @@ async def test_approval_service_approve_updates_checkpoint_and_enqueues(monkeypa
         def persist_approval_resolution(self, run_id: str, *, approved: bool):
             calls["marks"].append(("persist", run_id, approved))
 
-        def mark_resumed(self, run_id: str):
-            calls["marks"].append(("resumed", run_id))
-
         def mark_rejected(self, run_id: str):
             calls["marks"].append(("rejected", run_id))
 
@@ -61,7 +58,7 @@ async def test_approval_service_approve_updates_checkpoint_and_enqueues(monkeypa
     assert calls["saved"][1]["action_required"]["approved"] is True
     assert calls["enqueued"] == "hr-1"
     assert ("approved", "hr-1") in calls["marks"]
-    assert ("resumed", "hr-1") in calls["marks"]
+    assert ("persist", "hr-1", True) in calls["marks"]
 
 
 @pytest.mark.anyio
@@ -98,9 +95,6 @@ async def test_approval_service_reject_does_not_enqueue(monkeypatch):
 
         def mark_approved(self, run_id: str):
             calls["marks"].append(("approved", run_id))
-
-        def mark_resumed(self, run_id: str):
-            calls["marks"].append(("resumed", run_id))
 
     async def _enqueue(run_id: str):
         calls["enqueued"] = run_id

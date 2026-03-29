@@ -12,9 +12,9 @@ class ApprovalService:
 
     def get_pending_approval(self, run_id: str):
         approval = self.run_service.get_pending_approval_for_run(run_id)
-        if approval is None:
-            return None
-        return approval
+        if approval is not None:
+            return approval
+        return self.run_service.get_latest_approval(run_id)
 
     async def resolve(
         self,
@@ -56,7 +56,6 @@ class ApprovalService:
         if approved:
             self.run_service.mark_approved(run_id)
             self.run_service.persist_approval_resolution(run_id, approved=True)
-            self.run_service.mark_resumed(run_id)
             await enqueue_harness_resume(run_id)
         else:
             self.run_service.mark_rejected(run_id)

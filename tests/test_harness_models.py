@@ -7,3 +7,4 @@ def test_harness_tables_are_registered():
     assert "harness_run" in tables
     assert "harness_approval" in tables
     assert "harness_verification" in tables
+    assert "harness_event" in tables

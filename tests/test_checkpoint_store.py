@@ -196,3 +196,17 @@ async def test_checkpoint_store_load_adapts_real_checkpoint_without_losing_inter
     }
     assert loaded["checkpoint"]["channel_values"]["foo"] == "bar"
     assert "foo" not in loaded["checkpoint"]
+
+
+def test_checkpoint_store_get_next_version_supports_string_versions():
+    checkpoint_store = AsyncRedisSaverWrapper()
+
+    assert checkpoint_store.get_next_version(None, None) == "00000000000000000000000000000001.0000000000000000"
+    assert checkpoint_store.get_next_version(4, None) == "00000000000000000000000000000005.0000000000000000"
+    assert (
+        checkpoint_store.get_next_version(
+            "00000000000000000000000000000009.0000000000000000",
+            None,
+        )
+        == "00000000000000000000000000000010.0000000000000000"
+    )

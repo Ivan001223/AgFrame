@@ -91,6 +91,20 @@ class AsyncRedisSaverWrapper(BaseCheckpointSaver):
     def __init__(self):
         self._saver: Any = None
 
+    def get_next_version(self, current: Any, channel: Any) -> Any:
+        saver = self._saver
+        getter = getattr(saver, "get_next_version", None) if saver is not None else None
+        if callable(getter):
+            return getter(current, channel)
+
+        if current is None:
+            current_v = 0
+        elif isinstance(current, int):
+            current_v = current
+        else:
+            current_v = int(str(current).split(".")[0])
+        return f"{current_v + 1:032}.0000000000000000"
+
     async def get_saver(self):
         if self._saver is None:
             from langgraph.checkpoint.redis import AsyncRedisSaver

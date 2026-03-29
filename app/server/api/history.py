@@ -9,6 +9,7 @@ from app.infrastructure.database.models import User
 from app.infrastructure.database.schema import ensure_schema_if_possible
 from app.infrastructure.database.stores import MySQLConversationStore
 from app.server.api.auth import get_current_active_user
+from app.server.session_history import persist_session_messages
 
 router = APIRouter()
 
@@ -74,22 +75,13 @@ async def save_history(
     messages = payload.get("messages") or []
     title = payload.get("title")
 
-    if not ensure_schema_if_possible():
-        return history_manager.save_session(user_id, session_id, messages, title)
-
-    store = MySQLConversationStore()
-    saved = store.save_session(user_id, session_id, messages, title)
-    background_tasks.add_task(
-        _update_memory_after_save, user_id, session_id, messages
+    return persist_session_messages(
+        user_id=user_id,
+        session_id=session_id,
+        messages=messages,
+        background_tasks=background_tasks,
+        title=title,
     )
-
-    return saved
-
-
-def _update_memory_after_save(user_id: str, session_id: str, messages: list[dict[str, Any]]) -> None:
-    from app.memory.long_term.memory_update_service import memory_update_service
-
-    memory_update_service.update_after_save(user_id, session_id, messages)
 
 
 @router.delete("/history/{user_id}/{session_id}")

@@ -1,13 +1,19 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.harness.runtime.event_service import HarnessEventService
 from app.infrastructure.checkpoint.redis_store import checkpoint_store
+from app.infrastructure.database.history_manager import history_manager
 from app.infrastructure.database.models import User
+from app.infrastructure.database.schema import ensure_schema_if_possible
+from app.infrastructure.database.stores import MySQLConversationStore
 from app.runtime.graph.state import ActionRequired
+from app.runtime.graph.resume_service import GraphResumeService
 from app.server.api.auth import get_current_active_user
+from app.server.session_history import persist_session_messages
 
 router = APIRouter(prefix="/interrupt", tags=["human-in-the-loop"])
 
@@ -32,6 +38,108 @@ class ApproveResponse(BaseModel):
     approved_at: str
 
 
+class ResumeExecutionResponse(BaseModel):
+    session_id: str
+    resumed: bool
+    interrupted: bool | None = None
+    reply: str | None = None
+    messages: list[dict[str, str]] = []
+    context: dict[str, Any] | None = None
+
+
+def get_graph_resume_service():
+    return GraphResumeService()
+
+
+def get_interrupt_event_service():
+    return HarnessEventService(database_optional=True)
+
+
+def _normalize_resume_messages(messages: Any) -> list[dict[str, str]]:
+    normalized: list[dict[str, str]] = []
+    if not isinstance(messages, list):
+        return normalized
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "").strip()
+        content = str(message.get("content") or "")
+        if role and content:
+            normalized.append({"role": role, "content": content})
+    return normalized
+
+
+def _checkpoint_owner(checkpoint_data: dict[str, Any]) -> str | None:
+    candidates: list[Any] = [
+        checkpoint_data.get("user_id"),
+        (checkpoint_data.get("context") or {}).get("user_id") if isinstance(checkpoint_data.get("context"), dict) else None,
+    ]
+    channel_values = checkpoint_data.get("channel_values")
+    if isinstance(channel_values, dict):
+        candidates.extend(
+            [
+                channel_values.get("user_id"),
+                (channel_values.get("context") or {}).get("user_id")
+                if isinstance(channel_values.get("context"), dict)
+                else None,
+            ]
+        )
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    return None
+
+
+def _history_visible_to_user(session_id: str, current_user: User) -> bool:
+    if current_user.role == "admin":
+        return True
+    if ensure_schema_if_possible():
+        return MySQLConversationStore().get_session_detail(current_user.username, session_id) is not None
+    return history_manager.get_session(current_user.username, session_id) is not None
+
+
+def _interrupt_event_user_id(checkpoint_data: dict[str, Any], current_user: User) -> str:
+    owner = _checkpoint_owner(checkpoint_data)
+    return owner or current_user.username
+
+
+def _record_interrupt_event(
+    *,
+    session_id: str,
+    checkpoint_data: dict[str, Any],
+    current_user: User,
+    event_type: str,
+    details: dict[str, Any] | None = None,
+) -> dict[str, object] | None:
+    return get_interrupt_event_service().record(
+        event_type=event_type,
+        event_source="interrupt",
+        user_id=_interrupt_event_user_id(checkpoint_data, current_user),
+        session_id=session_id,
+        actor=current_user.username,
+        details=dict(details or {}),
+    )
+
+
+def _ensure_interrupt_visible_to_user(
+    *,
+    session_id: str,
+    checkpoint: dict[str, Any],
+    current_user: User,
+) -> dict[str, Any]:
+    checkpoint_data = dict(checkpoint.get("checkpoint") or {})
+    if current_user.role == "admin":
+        return checkpoint_data
+    owner = _checkpoint_owner(checkpoint_data)
+    if owner:
+        if owner != current_user.username:
+            raise HTTPException(status_code=403, detail="Not authorized to access this session interrupt")
+        return checkpoint_data
+    if not _history_visible_to_user(session_id, current_user):
+        raise HTTPException(status_code=403, detail="Not authorized to access this session interrupt")
+    return checkpoint_data
+
+
 @router.get("/{session_id}", response_model=InterruptStatusResponse)
 async def get_interrupt_status(
     session_id: str,
@@ -41,7 +149,11 @@ async def get_interrupt_status(
     if not checkpoint:
         raise HTTPException(status_code=404, detail="Session not found or no interrupt")
 
-    checkpoint_data = checkpoint.get("checkpoint", {})
+    checkpoint_data = _ensure_interrupt_visible_to_user(
+        session_id=session_id,
+        checkpoint=checkpoint,
+        current_user=current_user,
+    )
     action_required = checkpoint_data.get("action_required")
     interrupted = checkpoint_data.get("interrupted", False)
 
@@ -51,6 +163,28 @@ async def get_interrupt_status(
         "action_required": action_required,
         "checkpoint_saved_at": checkpoint.get("updated_at"),
     }
+
+
+@router.get("/{session_id}/events")
+async def list_interrupt_events(
+    session_id: str,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+):
+    checkpoint = await checkpoint_store.load(session_id)
+    if not checkpoint:
+        raise HTTPException(status_code=404, detail="Session not found or no interrupt")
+
+    checkpoint_data = _ensure_interrupt_visible_to_user(
+        session_id=session_id,
+        checkpoint=checkpoint,
+        current_user=current_user,
+    )
+    user_id = None if current_user.role == "admin" else _interrupt_event_user_id(checkpoint_data, current_user)
+    events = get_interrupt_event_service().list_for_session(
+        session_id=session_id,
+        user_id=user_id,
+    )
+    return {"events": events}
 
 
 @router.post("/{session_id}/approve", response_model=ApproveResponse)
@@ -63,7 +197,11 @@ async def approve_action(
     if not checkpoint:
         raise HTTPException(status_code=404, detail="Session not found or no interrupt")
 
-    checkpoint_data = checkpoint.get("checkpoint", {})
+    checkpoint_data = _ensure_interrupt_visible_to_user(
+        session_id=session_id,
+        checkpoint=checkpoint,
+        current_user=current_user,
+    )
     action_required = checkpoint_data.get("action_required")
 
     if not action_required:
@@ -74,6 +212,16 @@ async def approve_action(
         action_required["approved_by"] = current_user.username
         action_required["approved_at"] = datetime.utcnow().isoformat()
         await checkpoint_store.save(session_id, checkpoint_data)
+        _record_interrupt_event(
+            session_id=session_id,
+            checkpoint_data=checkpoint_data,
+            current_user=current_user,
+            event_type="interrupt.rejected",
+            details={
+                "action_type": str(action_required.get("action_type") or "unknown"),
+                "comment": request.comment,
+            },
+        )
 
         return {
             "session_id": session_id,
@@ -89,6 +237,16 @@ async def approve_action(
 
     checkpoint_data["action_required"] = action_required
     await checkpoint_store.save(session_id, checkpoint_data)
+    _record_interrupt_event(
+        session_id=session_id,
+        checkpoint_data=checkpoint_data,
+        current_user=current_user,
+        event_type="interrupt.approved",
+        details={
+            "action_type": str(action_required.get("action_type") or "unknown"),
+            "comment": request.comment,
+        },
+    )
 
     return {
         "session_id": session_id,
@@ -108,10 +266,24 @@ async def get_resume_command(
     if not checkpoint:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    checkpoint_data = checkpoint.get("checkpoint", {})
+    checkpoint_data = _ensure_interrupt_visible_to_user(
+        session_id=session_id,
+        checkpoint=checkpoint,
+        current_user=current_user,
+    )
     action_required = checkpoint_data.get("action_required")
 
     if action_required and not action_required.get("approved"):
+        _record_interrupt_event(
+            session_id=session_id,
+            checkpoint_data=checkpoint_data,
+            current_user=current_user,
+            event_type="interrupt.resume_blocked",
+            details={
+                "reason": "approval_not_granted",
+                "action_type": str(action_required.get("action_type") or "unknown"),
+            },
+        )
         raise HTTPException(status_code=400, detail="Action not yet approved")
 
     return {
@@ -124,4 +296,77 @@ async def get_resume_command(
                 "checkpoint_id": checkpoint_data.get("checkpoint_id"),
             }
         },
+    }
+
+
+@router.post("/{session_id}/resume", response_model=ResumeExecutionResponse)
+async def resume_session(
+    session_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+):
+    checkpoint = await checkpoint_store.load(session_id)
+    if not checkpoint:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    _ensure_interrupt_visible_to_user(
+        session_id=session_id,
+        checkpoint=checkpoint,
+        current_user=current_user,
+    )
+    checkpoint_data = dict(checkpoint.get("checkpoint") or {})
+    _record_interrupt_event(
+        session_id=session_id,
+        checkpoint_data=checkpoint_data,
+        current_user=current_user,
+        event_type="interrupt.resume_requested",
+        details={},
+    )
+    result = await get_graph_resume_service().resume_approved_session(
+        session_id=session_id,
+        checkpoint=checkpoint,
+    )
+    if not bool(result.get("ok")):
+        _record_interrupt_event(
+            session_id=session_id,
+            checkpoint_data=checkpoint_data,
+            current_user=current_user,
+            event_type="interrupt.resume_failed",
+            details={
+                "error_code": str(result.get("error_code") or ""),
+                "error_message": str(result.get("error_message") or ""),
+            },
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=result.get("error_message") or "Session resume failed",
+        )
+
+    messages = _normalize_resume_messages(result.get("messages"))
+    if messages:
+        persist_session_messages(
+            user_id=current_user.username,
+            session_id=session_id,
+            messages=messages,
+            background_tasks=background_tasks,
+        )
+    _record_interrupt_event(
+        session_id=session_id,
+        checkpoint_data=checkpoint_data,
+        current_user=current_user,
+        event_type="interrupt.resumed",
+        details={
+            "interrupted": result.get("interrupted"),
+            "message_count": len(messages),
+            "reply_present": bool(result.get("reply")),
+        },
+    )
+
+    return {
+        "session_id": session_id,
+        "resumed": True,
+        "interrupted": result.get("interrupted"),
+        "reply": result.get("reply"),
+        "messages": messages,
+        "context": result.get("context"),
     }

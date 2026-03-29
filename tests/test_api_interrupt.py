@@ -83,11 +83,13 @@ def _seed_checkpoint(
     checkpoint_id: str,
     checkpoint_ns: str = "",
     with_action_required: bool = True,
+    user_id: str = "u1",
 ):
     checkpoint = empty_checkpoint()
     channel_values = {
         "foo": {"keep": True},
         "interrupted": True,
+        "user_id": user_id,
     }
     channel_versions = {
         "foo": "00000000000000000000000000000002.0000000000000000",
@@ -133,8 +135,34 @@ def test_interrupt_endpoints(monkeypatch: pytest.MonkeyPatch):
     checkpoint_store = AsyncRedisSaverWrapper()
     fake_saver = _FakeSaver()
     checkpoint_store._saver = fake_saver
+    recorded_events: list[dict[str, object]] = []
+
+    class _EventService:
+        def record(self, **kwargs):
+            recorded_events.append(kwargs)
+            return {"event_id": f"he-{len(recorded_events)}", **kwargs}
+
+        def list_for_session(self, *, session_id: str, user_id: str | None = None, limit: int = 100):
+            events = [
+                {"event_id": f"he-{index}", **event}
+                for index, event in enumerate(recorded_events, start=1)
+                if event.get("session_id") == session_id
+                and (user_id is None or event.get("user_id") == user_id)
+            ]
+            return events[:limit]
 
     monkeypatch.setattr(interrupt_api, "checkpoint_store", checkpoint_store)
+    monkeypatch.setattr(interrupt_api, "ensure_schema_if_possible", lambda: False)
+    monkeypatch.setattr(interrupt_api, "get_interrupt_event_service", lambda: _EventService())
+    monkeypatch.setattr(
+        interrupt_api.history_manager,
+        "save_session",
+        lambda user_id, session_id, messages, title=None: {
+            "id": session_id,
+            "title": title or "history",
+            "messages": messages,
+        },
+    )
     app = FastAPI()
     app.include_router(interrupt_api.router)
     app.dependency_overrides[interrupt_api.get_current_active_user] = lambda: _U(username="u1")
@@ -174,6 +202,38 @@ def test_interrupt_endpoints(monkeypatch: pytest.MonkeyPatch):
     }
     assert saved_call["checkpoint"]["pending_sends"] == ["send-1"]
 
+    class _ResumeService:
+        async def resume_approved_session(self, *, session_id: str, checkpoint: dict[str, object]):
+            assert session_id == "s1"
+            assert checkpoint["checkpoint"]["channel_values"]["user_id"] == "u1"
+            return {
+                "ok": True,
+                "interrupted": False,
+                "reply": "approved reply",
+                "messages": [
+                    {"role": "user", "content": "hi"},
+                    {"role": "assistant", "content": "approved reply"},
+                ],
+                "context": {"context_pruning": {"method": "heuristic"}},
+            }
+
+    monkeypatch.setattr(interrupt_api, "get_graph_resume_service", lambda: _ResumeService())
+    resumed = c.post("/interrupt/s1/resume")
+    assert resumed.status_code == 200
+    resumed_body = resumed.json()
+    assert resumed_body["resumed"] is True
+    assert resumed_body["reply"] == "approved reply"
+    assert resumed_body["messages"][-1]["role"] == "assistant"
+    assert resumed_body["context"]["context_pruning"]["method"] == "heuristic"
+
+    s1_events = c.get("/interrupt/s1/events")
+    assert s1_events.status_code == 200
+    assert [event["event_type"] for event in s1_events.json()["events"]] == [
+        "interrupt.approved",
+        "interrupt.resume_requested",
+        "interrupt.resumed",
+    ]
+
     _seed_checkpoint(fake_saver, session_id="s2", checkpoint_id="cp-2", checkpoint_ns="default")
     reject = c.post("/interrupt/s2/approve", json={"approved": False})
     assert reject.status_code == 200
@@ -181,8 +241,21 @@ def test_interrupt_endpoints(monkeypatch: pytest.MonkeyPatch):
     assert fake_saver.saved_calls[-1]["config"]["configurable"]["checkpoint_id"] == "cp-2"
     assert fake_saver.saved_calls[-1]["checkpoint"]["id"] != "cp-2"
 
+    rejected_status = c.get("/interrupt/s2")
+    assert rejected_status.status_code == 200
+    assert rejected_status.json()["interrupted"] is True
+    assert rejected_status.json()["action_required"]["approved"] is False
+    assert rejected_status.json()["action_required"]["approved_by"] == "u1"
+
     resume_blocked = c.get("/interrupt/s2/resume")
     assert resume_blocked.status_code == 400
+
+    s2_events = c.get("/interrupt/s2/events")
+    assert s2_events.status_code == 200
+    assert [event["event_type"] for event in s2_events.json()["events"]] == [
+        "interrupt.rejected",
+        "interrupt.resume_blocked",
+    ]
 
     _seed_checkpoint(
         fake_saver,
@@ -193,3 +266,93 @@ def test_interrupt_endpoints(monkeypatch: pytest.MonkeyPatch):
     )
     r400 = c.post("/interrupt/s3/approve", json={"approved": True})
     assert r400.status_code == 400
+
+
+def test_interrupt_endpoints_enforce_session_isolation(monkeypatch: pytest.MonkeyPatch):
+    checkpoint_store = AsyncRedisSaverWrapper()
+    fake_saver = _FakeSaver()
+    checkpoint_store._saver = fake_saver
+
+    monkeypatch.setattr(interrupt_api, "checkpoint_store", checkpoint_store)
+    app = FastAPI()
+    app.include_router(interrupt_api.router)
+    app.dependency_overrides[interrupt_api.get_current_active_user] = lambda: _U(username="u1")
+    c = TestClient(app)
+
+    _seed_checkpoint(fake_saver, session_id="foreign", checkpoint_id="cp-9", user_id="u2")
+
+    r_get = c.get("/interrupt/foreign")
+    assert r_get.status_code == 403
+
+    r_approve = c.post("/interrupt/foreign/approve", json={"approved": True})
+    assert r_approve.status_code == 403
+
+    r_resume = c.post("/interrupt/foreign/resume")
+    assert r_resume.status_code == 403
+
+
+def test_interrupt_resume_persists_history(monkeypatch: pytest.MonkeyPatch):
+    checkpoint_store = AsyncRedisSaverWrapper()
+    fake_saver = _FakeSaver()
+    checkpoint_store._saver = fake_saver
+
+    class _EventService:
+        def record(self, **kwargs):
+            return {"event_id": "he-1", **kwargs}
+
+        def list_for_session(self, *, session_id: str, user_id: str | None = None, limit: int = 100):
+            return []
+
+    monkeypatch.setattr(interrupt_api, "checkpoint_store", checkpoint_store)
+    monkeypatch.setattr(interrupt_api, "ensure_schema_if_possible", lambda: False)
+    monkeypatch.setattr(interrupt_api, "get_interrupt_event_service", lambda: _EventService())
+
+    saved: dict[str, object] = {}
+
+    def _save_session(user_id: str, session_id: str, messages: list[dict[str, str]], title: str | None = None):
+        saved["user_id"] = user_id
+        saved["session_id"] = session_id
+        saved["messages"] = messages
+        saved["title"] = title
+        return {
+            "id": session_id,
+            "title": title or "smoke",
+            "messages": messages,
+        }
+
+    monkeypatch.setattr(interrupt_api.history_manager, "save_session", _save_session)
+
+    app = FastAPI()
+    app.include_router(interrupt_api.router)
+    app.dependency_overrides[interrupt_api.get_current_active_user] = lambda: _U(username="u1")
+    c = TestClient(app)
+
+    _seed_checkpoint(fake_saver, session_id="persisted", checkpoint_id="cp-10", checkpoint_ns="")
+
+    class _ResumeService:
+        async def resume_approved_session(self, *, session_id: str, checkpoint: dict[str, object]):
+            assert session_id == "persisted"
+            return {
+                "ok": True,
+                "interrupted": False,
+                "reply": "approved reply",
+                "messages": [
+                    {"role": "user", "content": "hi"},
+                    {"role": "assistant", "content": "approved reply"},
+                ],
+                "context": {"context_pruning": {"method": "heuristic"}},
+            }
+
+    monkeypatch.setattr(interrupt_api, "get_graph_resume_service", lambda: _ResumeService())
+
+    approve = c.post("/interrupt/persisted/approve", json={"approved": True})
+    assert approve.status_code == 200
+
+    resumed = c.post("/interrupt/persisted/resume")
+    assert resumed.status_code == 200
+    assert saved["user_id"] == "u1"
+    assert saved["session_id"] == "persisted"
+    assert saved["messages"] == [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "approved reply"},
+    ]

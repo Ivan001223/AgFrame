@@ -5,6 +5,7 @@ from typing import Any, Literal
 from langgraph.graph import END, StateGraph
 
 from app.infrastructure.config.settings import settings
+from app.runtime.graph.nodes.bootstrap_request import bootstrap_request_node
 from app.runtime.graph.nodes.human_interrupt import check_approval_node, human_interrupt_node
 from app.runtime.graph.state import AgentState
 from app.skills.common.assemble_prompt import assemble_prompt_node
@@ -67,6 +68,8 @@ def _should_interrupt(state: AgentState) -> bool:
 
 
 def _check_approval(state: AgentState) -> Literal["approved", "pending"]:
+    if state.get("interrupted") is False and str(state.get("next_step") or "") != "wait_approval":
+        return "approved"
     action_required = state.get("action_required")
     if action_required and action_required.get("approved"):
         return "approved"
@@ -85,6 +88,7 @@ def run_app(checkpointer: Any | None = None):
     enable_self_correction = flags.enable_self_correction
     enable_human_approval = flags.enable_human_approval
 
+    workflow.add_node("bootstrap_request", bootstrap_request_node)
     workflow.add_node("router", router_node)
     workflow.add_node("retrieve_docs", retrieve_docs_node)
     workflow.add_node("retrieve_memories", retrieve_memories_node)
@@ -98,7 +102,8 @@ def run_app(checkpointer: Any | None = None):
         workflow.add_node("human_interrupt", human_interrupt_node)
         workflow.add_node("check_approval", check_approval_node)
 
-    workflow.set_entry_point("router")
+    workflow.set_entry_point("bootstrap_request")
+    workflow.add_edge("bootstrap_request", "router")
     workflow.add_conditional_edges(
         "router",
         _route_key,

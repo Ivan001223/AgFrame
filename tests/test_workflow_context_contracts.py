@@ -3,6 +3,7 @@ from app.runtime.contracts.workflow_context import build_workflow_context_payloa
 
 def test_build_workflow_context_payload_preserves_and_overrides_workflow_fields():
     existing = {
+        "user_id": "old-user",
         "session_id": "sess-1",
         "context_focus_hint": "focus",
         "grade": {
@@ -23,6 +24,8 @@ def test_build_workflow_context_payload_preserves_and_overrides_workflow_fields(
 
     payload = build_workflow_context_payload(
         current=existing,
+        user_id="u1",
+        session_id="sess-2",
         grade={
             "verdict": "search",
             "reasoning": "need latest info",
@@ -35,7 +38,8 @@ def test_build_workflow_context_payload_preserves_and_overrides_workflow_fields(
         self_correction="search then rewrite",
     )
 
-    assert payload["session_id"] == "sess-1"
+    assert payload["user_id"] == "u1"
+    assert payload["session_id"] == "sess-2"
     assert payload["grade"]["verdict"] == "search"
     assert payload["search_query"] == "fresh query"
     assert payload["web_search"]["result"] == "fresh result"

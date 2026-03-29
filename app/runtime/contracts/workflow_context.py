@@ -21,6 +21,7 @@ class GradePayload(TypedDict):
 
 
 class WorkflowContextPayload(ChatContextPruningPayload, total=False):
+    user_id: str
     grade: GradePayload
     search_query: str
     web_search: WebSearchPayload
@@ -34,6 +35,8 @@ class WorkflowContextPayload(ChatContextPruningPayload, total=False):
 def build_workflow_context_payload(
     *,
     current: Mapping[str, Any] | None = None,
+    user_id: str | None = None,
+    session_id: str | None = None,
     grade: GradePayload | None = None,
     search_query: str | None = None,
     web_search: WebSearchPayload | None = None,
@@ -47,7 +50,14 @@ def build_workflow_context_payload(
     interrupt_description: str | None = None,
     interrupt_payload: dict[str, Any] | None = None,
 ) -> WorkflowContextPayload:
-    payload: WorkflowContextPayload = build_chat_context_pruning_payload(current=current)
+    payload: WorkflowContextPayload = build_chat_context_pruning_payload(
+        current=current,
+        session_id=session_id,
+    )
+
+    existing_user_id = payload.get("user_id")
+    if isinstance(existing_user_id, str) and existing_user_id:
+        payload["user_id"] = existing_user_id
 
     existing_grade = payload.get("grade")
     if isinstance(existing_grade, dict):
@@ -101,6 +111,8 @@ def build_workflow_context_payload(
         payload["web_search"] = web_search
     if self_correction is not None:
         payload["self_correction"] = self_correction
+    if user_id is not None:
+        payload["user_id"] = user_id
     if require_human_approval is not None:
         payload["require_human_approval"] = require_human_approval
     if interrupt_action_type is not None:

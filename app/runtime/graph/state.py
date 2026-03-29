@@ -45,6 +45,7 @@ class AgentState(TypedDict, total=False):
         reasoning: 路由或决策背后的推理过程
         context: 传递的上下文数据字典
         user_id: 当前用户 ID
+        session_id: 当前会话 ID
     """
     # 消息列表：使用 add_messages 策略，新消息会自动追加到列表中
     messages: Annotated[list[BaseMessage], add_messages]
@@ -56,6 +57,7 @@ class AgentState(TypedDict, total=False):
     # 通用上下文：存储跨节点共享的数据
     context: WorkflowContextPayload
     user_id: str
+    session_id: str
 
     route: RouteDecision
     context_focus_hint: str

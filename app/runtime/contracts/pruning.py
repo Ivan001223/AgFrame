@@ -36,15 +36,15 @@ def build_retrieval_debug_payload(
 def build_chat_context_pruning_payload(
     *,
     current: Mapping[str, Any] | None = None,
+    session_id: str | None = None,
     focus_hint: str | None = None,
     prompt_pruning: PromptPruningSummary | None = None,
     retrieval_debug: RetrievalDebugPayload | None = None,
 ) -> ChatContextPruningPayload:
     payload: ChatContextPruningPayload = dict(current or {})
-    existing = current or {}
-    session_id = payload.get("session_id")
-    if isinstance(session_id, str) and session_id:
-        payload["session_id"] = session_id
+    existing_session_id = payload.get("session_id")
+    if isinstance(existing_session_id, str) and existing_session_id:
+        payload["session_id"] = existing_session_id
     existing_focus_hint = payload.get("context_focus_hint")
     if isinstance(existing_focus_hint, str) and existing_focus_hint:
         payload["context_focus_hint"] = existing_focus_hint
@@ -55,6 +55,8 @@ def build_chat_context_pruning_payload(
     if isinstance(existing_retrieval_debug, dict):
         payload["retrieval_debug"] = build_retrieval_debug_payload(current=existing_retrieval_debug)
 
+    if session_id:
+        payload["session_id"] = session_id
     if focus_hint:
         payload["context_focus_hint"] = focus_hint
     if prompt_pruning is not None:

@@ -101,10 +101,22 @@ def test_get_document_enforces_ownership(tmp_path: Any, monkeypatch: Any):
     client = _build_client(tmp_path, monkeypatch, _U(username="u1"))
     own = client.get("/documents/1")
     assert own.status_code == 200
+    assert own.json()["download_url"] == "/documents/1/download"
     assert len(own.json()["preview"]) == 1
     assert own.json()["preview"][0]["content"] == "p1"
 
     other = client.get("/documents/2")
+    assert other.status_code == 403
+
+
+def test_download_document_enforces_ownership(tmp_path: Any, monkeypatch: Any):
+    client = _build_client(tmp_path, monkeypatch, _U(username="u1"))
+
+    own = client.get("/documents/1/download")
+    assert own.status_code == 200
+    assert own.content == b"pdf"
+
+    other = client.get("/documents/2/download")
     assert other.status_code == 403
 
 

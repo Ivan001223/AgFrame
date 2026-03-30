@@ -1,12 +1,14 @@
 'use client';
 
+import { InlineNotice } from '@/components/feedback/InlineNotice';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getStoredToken } from '@/lib/auth/session';
 import { useCurrentUserQuery, useLoginMutation } from '@/domains/auth/hooks';
+import { getErrorMessage } from '@/lib/http/errors';
 
 const loginSchema = z.object({
   username: z.string().min(1, 'Username is required'),
@@ -20,6 +22,7 @@ export default function LoginPage() {
   const loginMutation = useLoginMutation();
   const token = getStoredToken();
   const currentUserQuery = useCurrentUserQuery();
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   const {
     register,
@@ -36,14 +39,13 @@ export default function LoginPage() {
   }, [currentUserQuery.data, router, token]);
 
   const onSubmit = (data: LoginFormValues) => {
+    setLoginError(null);
     loginMutation.mutate(data, {
       onSuccess: () => {
         router.replace('/chat');
       },
       onError: (error: unknown) => {
-        alert(
-          error instanceof Error ? error.message : 'Login failed'
-        );
+        setLoginError(getErrorMessage(error, 'Login failed'));
       },
     });
   };
@@ -64,6 +66,13 @@ export default function LoginPage() {
             Restoring your session...
           </div>
         )}
+        {loginError ? (
+          <InlineNotice
+            variant="error"
+            message={loginError}
+            onDismiss={() => setLoginError(null)}
+          />
+        ) : null}
         <form className="mt-8 space-y-6" onSubmit={handleSubmit(onSubmit)}>
           <div className="space-y-4 rounded-md shadow-sm">
             <div>

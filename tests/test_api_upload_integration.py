@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import builtins
-import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,14 +20,6 @@ class _U:
 def client(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     docs_root = tmp_path / "documents"
     uploads_root = tmp_path / "uploads"
-    orig_join = os.path.join
-
-    def _join(a: str, *p: str) -> str:
-        if a == "data/documents":
-            return orig_join(str(docs_root), *p)
-        if a == "data/uploads":
-            return orig_join(str(uploads_root), *p)
-        return orig_join(a, *p)
 
     async def _init_task(*args: Any, **kwargs: Any) -> None:
         return None
@@ -42,12 +33,14 @@ def client(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     async def _get_task(task_id: str) -> dict[str, str]:
         return {}
 
-    monkeypatch.setattr(upload_api.os.path, "join", _join)
+    monkeypatch.setattr(upload_api.settings.storage_local, "documents_dir", str(docs_root))
+    monkeypatch.setattr(upload_api.settings.storage_local, "uploads_dir", str(uploads_root))
     monkeypatch.setattr(upload_api, "init_task", _init_task)
     monkeypatch.setattr(upload_api, "enqueue_ingest_pdf", _enqueue)
     monkeypatch.setattr(upload_api, "claim_task_operation", _claim_task_operation)
     monkeypatch.setattr(upload_api, "get_task", _get_task)
     monkeypatch.setattr(upload_api, "ensure_schema_if_possible", lambda: False)
+    monkeypatch.setattr(upload_api, "_extract_uploaded_image_text", lambda path: "ocr text")
 
     app = FastAPI()
     app.include_router(upload_api.router)
@@ -99,20 +92,13 @@ def test_upload_image_returns_url(client: TestClient):
     )
     assert r.status_code == 200
     out = r.json()
-    assert out["url"].startswith("/uploads/")
+    assert out["url"].startswith("/uploads/u1/")
+    assert out["text"] == "ocr text"
 
 
 def test_upload_documents_marks_duplicates(tmp_path: Any, monkeypatch: pytest.MonkeyPatch):
     docs_root = tmp_path / "documents"
     uploads_root = tmp_path / "uploads"
-    orig_join = os.path.join
-
-    def _join(a: str, *p: str) -> str:
-        if a == "data/documents":
-            return orig_join(str(docs_root), *p)
-        if a == "data/uploads":
-            return orig_join(str(uploads_root), *p)
-        return orig_join(a, *p)
 
     async def _init_task(*args: Any, **kwargs: Any) -> None:
         raise AssertionError("should not enqueue duplicate")
@@ -124,7 +110,8 @@ def test_upload_documents_marks_duplicates(tmp_path: Any, monkeypatch: pytest.Mo
         def find_by_checksum(self, *, user_id: str, checksum: str):
             return {"doc_id": 42, "user_id": user_id, "checksum": checksum}
 
-    monkeypatch.setattr(upload_api.os.path, "join", _join)
+    monkeypatch.setattr(upload_api.settings.storage_local, "documents_dir", str(docs_root))
+    monkeypatch.setattr(upload_api.settings.storage_local, "uploads_dir", str(uploads_root))
     monkeypatch.setattr(upload_api, "init_task", _init_task)
     monkeypatch.setattr(upload_api, "enqueue_ingest_pdf", _enqueue)
     monkeypatch.setattr(upload_api, "ensure_schema_if_possible", lambda: True)
@@ -149,14 +136,6 @@ def test_upload_documents_marks_duplicates(tmp_path: Any, monkeypatch: pytest.Mo
 def test_upload_documents_returns_existing_inflight_task(tmp_path: Any, monkeypatch: pytest.MonkeyPatch):
     docs_root = tmp_path / "documents"
     uploads_root = tmp_path / "uploads"
-    orig_join = os.path.join
-
-    def _join(a: str, *p: str) -> str:
-        if a == "data/documents":
-            return orig_join(str(docs_root), *p)
-        if a == "data/uploads":
-            return orig_join(str(uploads_root), *p)
-        return orig_join(a, *p)
 
     async def _claim_task_operation(operation_key: str, task_id: str, **kwargs: Any) -> str:
         return "existing-task"
@@ -170,7 +149,8 @@ def test_upload_documents_returns_existing_inflight_task(tmp_path: Any, monkeypa
     async def _enqueue(*args: Any, **kwargs: Any) -> None:
         raise AssertionError("should not enqueue duplicate inflight task")
 
-    monkeypatch.setattr(upload_api.os.path, "join", _join)
+    monkeypatch.setattr(upload_api.settings.storage_local, "documents_dir", str(docs_root))
+    monkeypatch.setattr(upload_api.settings.storage_local, "uploads_dir", str(uploads_root))
     monkeypatch.setattr(upload_api, "claim_task_operation", _claim_task_operation)
     monkeypatch.setattr(upload_api, "get_task", _get_task)
     monkeypatch.setattr(upload_api, "init_task", _init_task)

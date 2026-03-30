@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -41,14 +40,6 @@ def test_workbench_smoke_flow(tmp_path: Any, monkeypatch: Any):
         "next_doc_id": 1,
     }
     user = _User()
-    orig_join = os.path.join
-
-    def _join(a: str, *p: str) -> str:
-        if a == "data/documents":
-            return orig_join(str(docs_root), *p)
-        if a == "data/uploads":
-            return orig_join(str(uploads_root), *p)
-        return orig_join(a, *p)
 
     async def _init_task(task_id: str, payload: dict[str, Any]) -> None:
         state["tasks"][task_id] = {k: str(v) for k, v in payload.items()}
@@ -364,7 +355,8 @@ def test_workbench_smoke_flow(tmp_path: Any, monkeypatch: Any):
                 "context": context,
             }
 
-    monkeypatch.setattr(upload_api.os.path, "join", _join)
+    monkeypatch.setattr(upload_api.settings.storage_local, "documents_dir", str(docs_root))
+    monkeypatch.setattr(upload_api.settings.storage_local, "uploads_dir", str(uploads_root))
     monkeypatch.setattr(upload_api, "ensure_schema_if_possible", lambda: False)
     monkeypatch.setattr(upload_api, "init_task", _init_task)
     monkeypatch.setattr(upload_api, "claim_task_operation", _claim_task_operation)
@@ -450,7 +442,12 @@ def test_workbench_smoke_flow(tmp_path: Any, monkeypatch: Any):
 
     doc = client.get(f"/documents/{doc_id}")
     assert doc.status_code == 200
+    assert doc.json()["download_url"] == f"/documents/{doc_id}/download"
     assert doc.json()["preview"][0]["content"] == "hello doc"
+
+    download = client.get(f"/documents/{doc_id}/download")
+    assert download.status_code == 200
+    assert download.content == b"%PDF-1.4"
 
     chat = client.post(
         "/chat/workbench-invoke",

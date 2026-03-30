@@ -1,5 +1,6 @@
 'use client';
 
+import { InlineNotice } from '@/components/feedback/InlineNotice';
 import { FormEvent, useMemo, useState } from 'react';
 import { Shield, ShieldAlert } from 'lucide-react';
 import { useCurrentUserQuery } from '@/domains/auth/hooks';
@@ -41,6 +42,7 @@ export default function AdminSettingsPage() {
     useState<ContextPruningAdminConfig | null>(null);
   const [draftOverride, setDraftOverride] = useState<string | null>(null);
   const [lastSavedSection, setLastSavedSection] = useState<'json' | 'pruning' | null>(null);
+  const [jsonValidationError, setJsonValidationError] = useState<string | null>(null);
   const pruningDraft = pruningDraftOverride ?? basePruningDraft;
   const draft = useMemo(() => {
     if (draftOverride !== null) {
@@ -55,6 +57,7 @@ export default function AdminSettingsPage() {
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setJsonValidationError(null);
 
     try {
       const parsed = JSON.parse(draft) as Record<string, unknown>;
@@ -68,7 +71,7 @@ export default function AdminSettingsPage() {
         },
       });
     } catch {
-      alert('Settings must be valid JSON.');
+      setJsonValidationError('Settings must be valid JSON.');
     }
   };
 
@@ -216,9 +219,7 @@ export default function AdminSettingsPage() {
               </button>
             </div>
             {updateMutation.isSuccess && lastSavedSection === 'pruning' && (
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200">
-                Context pruning settings saved.
-              </div>
+              <InlineNotice variant="success" message="Context pruning settings saved." />
             )}
           </form>
         )}
@@ -242,6 +243,13 @@ export default function AdminSettingsPage() {
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4 px-6 py-6">
+            {jsonValidationError && (
+              <InlineNotice
+                variant="error"
+                message={jsonValidationError}
+                onDismiss={() => setJsonValidationError(null)}
+              />
+            )}
             <textarea
               value={draft}
               onChange={(event) => setDraftOverride(event.target.value)}
@@ -261,9 +269,7 @@ export default function AdminSettingsPage() {
               </button>
             </div>
             {updateMutation.isSuccess && lastSavedSection === 'json' && (
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200">
-                Admin settings saved.
-              </div>
+              <InlineNotice variant="success" message="Admin settings saved." />
             )}
           </form>
         )}

@@ -1,5 +1,6 @@
 'use client';
 
+import { InlineNotice } from '@/components/feedback/InlineNotice';
 import { FormEvent, useMemo, useState } from 'react';
 import { Settings2 } from 'lucide-react';
 import {
@@ -11,6 +12,7 @@ export default function SettingsPage() {
   const { data, isLoading, isError } = useUserSettingsQuery();
   const updateMutation = useUpdateUserSettingsMutation();
   const [draftOverride, setDraftOverride] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const draft = useMemo(() => {
     if (draftOverride !== null) {
       return draftOverride;
@@ -23,12 +25,13 @@ export default function SettingsPage() {
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setValidationError(null);
 
     try {
       const parsed = JSON.parse(draft) as Record<string, unknown>;
       updateMutation.mutate(parsed);
     } catch {
-      alert('Settings must be valid JSON.');
+      setValidationError('Settings must be valid JSON.');
     }
   };
 
@@ -62,6 +65,13 @@ export default function SettingsPage() {
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4 px-6 py-6">
+            {validationError && (
+              <InlineNotice
+                variant="error"
+                message={validationError}
+                onDismiss={() => setValidationError(null)}
+              />
+            )}
             <textarea
               value={draft}
               onChange={(event) => setDraftOverride(event.target.value)}
@@ -81,9 +91,7 @@ export default function SettingsPage() {
               </button>
             </div>
             {updateMutation.isSuccess && (
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200">
-                Settings saved.
-              </div>
+              <InlineNotice variant="success" message="Settings saved." />
             )}
           </form>
         )}

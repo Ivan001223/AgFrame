@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 import uuid
@@ -5,6 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, UploadFile
 
+from app.infrastructure.config.settings import settings
 from app.infrastructure.database.schema import ensure_schema_if_possible
 from app.infrastructure.database.stores import MySQLDocStore
 from app.infrastructure.database.models import User
@@ -19,6 +21,21 @@ from app.infrastructure.utils.files import sha256_file
 from app.server.api.auth import get_current_active_user
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+def _get_ocr_engine():
+    from app.skills.ocr.ocr_engine import ocr_engine
+
+    return ocr_engine
+
+
+def _extract_uploaded_image_text(file_path: str) -> str:
+    try:
+        return _get_ocr_engine().process_file(file_path) or ""
+    except Exception as exc:
+        logger.warning("image OCR failed path=%s error=%s", file_path, exc)
+        return ""
 
 
 # 上传（RAG）
@@ -30,7 +47,7 @@ async def upload_documents(
     user_id = current_user.username if current_user else "unknown"
 
     # 物理路径隔离：data/documents/{user_id}/
-    upload_dir = os.path.join("data/documents", user_id)
+    upload_dir = os.path.join(settings.storage_local.documents_dir, user_id)
     os.makedirs(upload_dir, exist_ok=True)
 
     results = []
@@ -148,7 +165,7 @@ async def upload_image(
     # Image upload logic usually for quick OCR or multimodal,
     # not necessarily RAG ingestion. But could verify user.
     user_id = current_user.username if current_user else "unknown"
-    uploads_dir = os.path.join("data/uploads", user_id)
+    uploads_dir = os.path.join(settings.storage_local.uploads_dir, user_id)
     os.makedirs(uploads_dir, exist_ok=True)
 
     original_name = os.path.basename(file.filename or "")
@@ -158,5 +175,5 @@ async def upload_image(
     with open(file_path, "wb") as f:
         f.write(await file.read())
 
-    # text = ocr_engine.process_file(file_path)  # 若已配置 OCR 引擎可取消注释启用
-    return {"url": f"/uploads/{safe_name}", "text": "OCR Placeholder"}
+    text = _extract_uploaded_image_text(file_path)
+    return {"url": f"/uploads/{user_id}/{safe_name}", "text": text}

@@ -1,16 +1,32 @@
 'use client';
 
+import { useState } from 'react';
+import { InlineNotice } from '@/components/feedback/InlineNotice';
 import { useParams, useRouter } from 'next/navigation';
-import { useDocumentDetailQuery } from '@/domains/documents/hooks';
-import { ArrowLeft, FileText } from 'lucide-react';
+import { downloadDocumentFile, useDocumentDetailQuery } from '@/domains/documents/hooks';
+import { getErrorMessage } from '@/lib/http/errors';
+import { ArrowLeft, Download, FileText } from 'lucide-react';
 import Link from 'next/link';
 
 export default function DocumentDetailPage() {
   const params = useParams();
   const router = useRouter();
   const docId = params.docId as string;
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const { data: doc, isLoading, isError } = useDocumentDetailQuery(docId);
+
+  const handleDownload = async () => {
+    if (!doc) {
+      return;
+    }
+    setDownloadError(null);
+    try {
+      await downloadDocumentFile(doc);
+    } catch (error) {
+      setDownloadError(getErrorMessage(error, 'Failed to download document.'));
+    }
+  };
 
   if (isLoading) {
     return <div className="p-8 text-gray-500">Loading document details...</div>;
@@ -41,12 +57,21 @@ export default function DocumentDetailPage() {
         Back to documents
       </Link>
 
+      {downloadError ? (
+        <InlineNotice
+          variant="error"
+          message={downloadError}
+          onDismiss={() => setDownloadError(null)}
+          className="mb-6"
+        />
+      ) : null}
+
       <div className="overflow-hidden bg-white shadow sm:rounded-lg dark:bg-gray-800">
         <div className="px-4 py-5 sm:px-6 flex items-center gap-4 border-b border-gray-200 dark:border-gray-700">
           <div className="bg-indigo-100 p-3 rounded-lg dark:bg-indigo-900/50">
             <FileText className="h-8 w-8 text-indigo-600 dark:text-indigo-400" />
           </div>
-          <div>
+          <div className="flex-1 min-w-0">
             <h3 className="text-lg font-medium leading-6 text-gray-900 dark:text-white">
               {doc.filename}
             </h3>
@@ -54,6 +79,14 @@ export default function DocumentDetailPage() {
               Document Id: {doc.doc_id}
             </p>
           </div>
+          <button
+            type="button"
+            onClick={handleDownload}
+            className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700"
+          >
+            <Download className="h-4 w-4" />
+            Download
+          </button>
         </div>
         
         <div className="px-4 py-5 sm:p-0">

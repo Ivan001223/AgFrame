@@ -4,6 +4,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 
 from app.infrastructure.database.models import User
 from app.infrastructure.database.schema import ensure_schema_if_possible
@@ -27,6 +28,7 @@ def _serialize_document(row: dict) -> dict:
         "user_id": row.get("user_id"),
         "filename": os.path.basename(source_path),
         "source_path": source_path,
+        "download_url": f"/documents/{row.get('doc_id')}/download" if row.get("doc_id") is not None else None,
         "checksum": row.get("checksum"),
         "created_at": row.get("created_at"),
         "parent_chunk_count": row.get("parent_chunk_count", 0),
@@ -69,6 +71,28 @@ async def get_document(
     out = _serialize_document(doc)
     out["preview"] = store.get_document_preview(doc_id, limit=preview_limit)
     return out
+
+
+@router.get("/{doc_id}/download")
+async def download_document(
+    doc_id: int,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+):
+    if not ensure_schema_if_possible():
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    store = MySQLDocStore()
+    doc = store.get_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if current_user.role != "admin" and doc.get("user_id") != current_user.username:
+        raise HTTPException(status_code=403, detail="Not authorized to access this document")
+
+    source_path = str(doc.get("source_path") or "").strip()
+    if not source_path or not os.path.isfile(source_path):
+        raise HTTPException(status_code=404, detail="Document source file is missing")
+
+    return FileResponse(source_path, filename=os.path.basename(source_path))
 
 
 @router.delete("/{doc_id}")

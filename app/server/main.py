@@ -6,7 +6,6 @@ from typing import Any
 import uvicorn
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from langserve import add_routes
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -20,6 +19,7 @@ from app.server.api import (
     auth,
     chat,
     documents,
+    file_access,
     harness,
     health,
     history,
@@ -131,14 +131,12 @@ add_routes(
     ],
 )
 
-# 静态文件
+# 文件目录
 documents_dir = storage_config.documents_dir
 uploads_dir = storage_config.uploads_dir
 
 os.makedirs(documents_dir, exist_ok=True)
 os.makedirs(uploads_dir, exist_ok=True)
-app.mount("/files", StaticFiles(directory=documents_dir), name="files")
-app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
 # Include Routers
 # 健康检查路由（无需认证）
@@ -156,6 +154,7 @@ app.include_router(history.router, dependencies=[Depends(get_current_active_user
 app.include_router(memory.router, dependencies=[Depends(get_current_active_user)])
 app.include_router(profile.router, dependencies=[Depends(get_current_active_user)])
 app.include_router(documents.router, dependencies=[Depends(get_current_active_user)])
+app.include_router(file_access.router, dependencies=[Depends(get_current_active_user)])
 app.include_router(vectorstore.router, dependencies=[Depends(get_current_admin_user)])
 
 if __name__ == "__main__":

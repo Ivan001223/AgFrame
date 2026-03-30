@@ -1,14 +1,22 @@
 'use client';
 
 import { useState } from 'react';
+import { InlineNotice } from '@/components/feedback/InlineNotice';
 import {
+  downloadDocumentFile,
   useDocumentsQuery,
   useUploadDocumentMutation,
   useDeleteDocumentMutation,
   useReindexDocumentMutation,
 } from '@/domains/documents/hooks';
+import { getErrorMessage } from '@/lib/http/errors';
 import Link from 'next/link';
-import { Trash2, RefreshCw, Eye, FileText, UploadCloud, AlertCircle } from 'lucide-react';
+import { Trash2, RefreshCw, Eye, FileText, UploadCloud, AlertCircle, Download } from 'lucide-react';
+
+type Notice = {
+  variant: 'success' | 'error' | 'info';
+  message: string;
+};
 
 export default function KnowledgePage() {
   const { data: documents, isLoading, isError } = useDocumentsQuery();
@@ -17,15 +25,29 @@ export default function KnowledgePage() {
   const reindexMutation = useReindexDocumentMutation();
 
   const [isUploading, setIsUploading] = useState(false);
+  const [notice, setNotice] = useState<Notice | null>(null);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setIsUploading(true);
+      setNotice(null);
       try {
-        await uploadMutation.mutateAsync(file);
-      } catch {
-        alert('Failed to upload document.');
+        const response = await uploadMutation.mutateAsync(file);
+        const result = response.results[0];
+        if (!result) {
+          setNotice({ variant: 'info', message: 'Upload completed.' });
+        } else if (result.status === 'queued') {
+          setNotice({ variant: 'success', message: `${file.name} uploaded and queued for indexing.` });
+        } else if (result.status === 'duplicate') {
+          setNotice({ variant: 'info', message: `${file.name} is already in the knowledge base.` });
+        } else if (result.status === 'already_queued') {
+          setNotice({ variant: 'info', message: `${file.name} is already queued for processing.` });
+        } else {
+          setNotice({ variant: 'error', message: result.message || `Failed to upload ${file.name}.` });
+        }
+      } catch (error) {
+        setNotice({ variant: 'error', message: getErrorMessage(error, 'Failed to upload document.') });
       } finally {
         setIsUploading(false);
         // Reset the input value
@@ -36,12 +58,43 @@ export default function KnowledgePage() {
 
   const handleDelete = async (id: number, name: string) => {
     if (window.confirm(`Are you sure you want to delete ${name}?`)) {
-      await deleteMutation.mutateAsync(id);
+      setNotice(null);
+      try {
+        await deleteMutation.mutateAsync(id);
+        setNotice({ variant: 'success', message: `${name} was deleted.` });
+      } catch (error) {
+        setNotice({ variant: 'error', message: getErrorMessage(error, `Failed to delete ${name}.`) });
+      }
     }
   };
 
   const handleReindex = async (id: number) => {
-    await reindexMutation.mutateAsync(id);
+    const target = documents?.find((doc) => doc.doc_id === id);
+    setNotice(null);
+    try {
+      await reindexMutation.mutateAsync(id);
+      setNotice({
+        variant: 'success',
+        message: `${target?.filename ?? 'Document'} was queued for re-indexing.`,
+      });
+    } catch (error) {
+      setNotice({
+        variant: 'error',
+        message: getErrorMessage(error, 'Failed to queue document re-indexing.'),
+      });
+    }
+  };
+
+  const handleDownload = async (filename: string, downloadUrl?: string | null) => {
+    setNotice(null);
+    try {
+      await downloadDocumentFile({ filename, download_url: downloadUrl });
+    } catch (error) {
+      setNotice({
+        variant: 'error',
+        message: getErrorMessage(error, `Failed to download ${filename}.`),
+      });
+    }
   };
 
   return (
@@ -74,6 +127,15 @@ export default function KnowledgePage() {
           </label>
         </div>
       </div>
+
+      {notice ? (
+        <InlineNotice
+          variant={notice.variant}
+          message={notice.message}
+          onDismiss={() => setNotice(null)}
+          className="mb-6"
+        />
+      ) : null}
 
       <div className="overflow-hidden rounded-lg bg-white shadow dark:bg-gray-800">
         <ul className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -119,6 +181,13 @@ export default function KnowledgePage() {
                 </div>
 
                 <div className="flex items-center gap-2 flex-shrink-0 ml-4">
+                  <button
+                    onClick={() => handleDownload(doc.filename, doc.download_url)}
+                    className="p-2 text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+                    title="Download original file"
+                  >
+                    <Download className="h-4 w-4" />
+                  </button>
                   <button
                     onClick={() => handleReindex(doc.doc_id)}
                     className="p-2 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"

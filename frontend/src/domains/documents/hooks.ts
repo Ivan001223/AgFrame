@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiClient } from '@/lib/http/client';
+import { API_BASE_URL, apiClient } from '@/lib/http/client';
 import { getStoredToken } from '@/lib/auth/session';
 
 export type DocumentDTO = {
@@ -7,6 +7,7 @@ export type DocumentDTO = {
   user_id: string;
   filename: string;
   source_path: string;
+  download_url?: string | null;
   checksum?: string | null;
   created_at: number;
   parent_chunk_count: number;
@@ -113,4 +114,32 @@ export function useUploadDocumentMutation() {
       queryClient.invalidateQueries({ queryKey: DOCUMENT_KEYS.all });
     },
   });
+}
+
+export async function downloadDocumentFile(doc: Pick<DocumentDTO, 'filename' | 'download_url'>) {
+  if (!doc.download_url) {
+    throw new Error('Download URL is unavailable');
+  }
+
+  const token = getStoredToken();
+  const response = await fetch(`${API_BASE_URL}${doc.download_url}`, {
+    method: 'GET',
+    headers: {
+      ...(token && { Authorization: `Bearer ${token}` }),
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Download failed');
+  }
+
+  const blob = await response.blob();
+  const objectUrl = window.URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = objectUrl;
+  anchor.download = doc.filename || 'document';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(objectUrl);
 }

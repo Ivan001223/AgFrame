@@ -6,8 +6,8 @@ from langchain_core.tools import tool
 from langchain_experimental.utilities import PythonREPL
 
 from app.infrastructure.config.settings import settings
-from app.skills.ocr.ocr_engine import ocr_engine
-from app.skills.rag.rag_engine import get_rag_engine
+from app.infrastructure.utils.files import resolve_path_within_roots
+from app.skills.rag.rag_engine import extract_text_from_file, get_rag_engine
 
 
 # --- 1. 网页搜索 ---
@@ -60,7 +60,8 @@ def knowledge_retriever(query: str) -> str:
 @tool
 def read_document(file_path: str) -> str:
     """
-    读取文件（PDF 或图片）并提取文本。
+    读取文件并提取文本。
+    优先复用统一文档解析链路，支持 PDF、图片、TXT、MD、DOCX、XLSX。
     用于分析文件内容或从图片中提取文字。
     
     参数:
@@ -69,13 +70,47 @@ def read_document(file_path: str) -> str:
     try:
         if not os.path.exists(file_path):
             return f"Error: File not found {file_path}"
-            
-        text = ocr_engine.process_file(file_path)
+
+        text = extract_text_from_file(file_path)
         if not text:
             return "File content is empty or unreadable."
         return text
     except Exception as e:
         return f"Error reading file: {str(e)}"
+
+
+@tool
+def write_file(file_path: str, content: str) -> str:
+    """
+    将文本内容写入指定文件。
+    默认关闭，只有 enable_tools_write_file 打开后才会执行。
+    仅允许写入受控存储目录，避免误改项目代码或系统文件。
+    """
+    try:
+        flags = settings.feature_flags
+        if not flags.enable_tools_write_file:
+            return "Tool disabled: write_file"
+
+        storage_cfg = settings.storage_local
+        abs_path = resolve_path_within_roots(
+            file_path,
+            default_root=storage_cfg.data_dir,
+            allowed_roots=(
+                storage_cfg.data_dir,
+                storage_cfg.documents_dir,
+                storage_cfg.uploads_dir,
+            ),
+        )
+        parent = os.path.dirname(abs_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(abs_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return f"Wrote {len(content)} chars to {abs_path}"
+    except ValueError as e:
+        return f"File write denied: {e}"
+    except Exception as e:
+        return f"File write failed: {e}"
 
 # --- 6. 安全代码执行 ---
 @tool

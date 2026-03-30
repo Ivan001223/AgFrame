@@ -3,6 +3,8 @@ import os
 import tempfile
 import traceback
 
+os.environ.setdefault("OBJC_PRINT_DUPLICATE_CLASSES", "NO")
+
 from langchain_core.messages import HumanMessage
 from pdf2image import convert_from_path
 

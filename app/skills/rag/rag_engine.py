@@ -1,7 +1,12 @@
 import os
-from importlib import import_module
+import subprocess
+import tempfile
 from dataclasses import replace
+from importlib import import_module
+from shutil import which
 from typing import Any
+
+os.environ.setdefault("OBJC_PRINT_DUPLICATE_CLASSES", "NO")
 
 from langchain_community.document_loaders import (
     Docx2txtLoader,
@@ -29,7 +34,6 @@ from app.infrastructure.utils.text_split import split_text_by_chars
 from app.memory.vector_stores.pgvector_vectorstore import PgVectorVectorStore
 
 from app.runtime.llm.embeddings import get_embeddings
-from app.skills.ocr.ocr_engine import ocr_engine
 from app.skills.rag.hybrid_retriever_service import (
     HybridRetrievalConfig,
     HybridRetrieverService,
@@ -38,7 +42,16 @@ from app.skills.rag.hybrid_retriever_service import (
 logger = get_logger("rag_engine")
 
 
-def _partition_pdf(*, filename: str, infer_table_structure: bool, strategy: str):
+def _partition_pdf(
+    *,
+    filename: str,
+    infer_table_structure: bool,
+    strategy: str,
+    languages: list[str] | None = None,
+):
+    # On macOS, unstructured's import chain may load both cv2 and av. Suppress the
+    # duplicate Objective-C class noise before the first import.
+    os.environ.setdefault("OBJC_PRINT_DUPLICATE_CLASSES", "NO")
     try:
         partition_pdf = import_module("unstructured.partition.pdf").partition_pdf
     except ModuleNotFoundError as exc:
@@ -50,6 +63,155 @@ def _partition_pdf(*, filename: str, infer_table_structure: bool, strategy: str)
         filename=filename,
         infer_table_structure=infer_table_structure,
         strategy=strategy,
+        languages=languages or ["eng"],
+    )
+
+
+def _tesseract_available() -> bool:
+    return which("tesseract") is not None
+
+
+def _poppler_available() -> bool:
+    return which("pdfinfo") is not None
+
+
+def _ensure_mpl_config_dir() -> None:
+    if os.getenv("MPLCONFIGDIR"):
+        return
+    mpl_dir = os.path.join(tempfile.gettempdir(), "agframe-matplotlib")
+    os.makedirs(mpl_dir, exist_ok=True)
+    os.environ["MPLCONFIGDIR"] = mpl_dir
+
+
+def _extract_pdf_text_with_pypdf(file_path: str) -> str:
+    reader = PdfReader(file_path)
+    page_texts = [(page.extract_text() or "").strip() for page in reader.pages]
+    return "\n\n".join([page for page in page_texts if page])
+
+
+def _run_tesseract(image_path: str) -> str:
+    try:
+        completed = subprocess.run(
+            ["tesseract", image_path, "stdout"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        return ""
+    if completed.returncode != 0:
+        logger.warning(f"tesseract 识别失败: {completed.stderr.strip()}")
+        return ""
+    return completed.stdout.strip()
+
+
+def _cleanup_temp_files(paths: list[str]) -> None:
+    for path in paths:
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError as exc:
+                logger.debug(f"Failed to remove temp file {path}: {exc}")
+
+
+def _extract_image_text_with_tesseract(file_path: str) -> str:
+    return _run_tesseract(file_path)
+
+
+def _extract_pdf_text_with_tesseract(file_path: str) -> str:
+    from pdf2image import convert_from_path
+
+    images = convert_from_path(file_path, dpi=200)
+    temp_paths: list[str] = []
+    try:
+        for image in images:
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                image.save(tmp.name, format="PNG")
+                temp_paths.append(tmp.name)
+        page_texts = [_extract_image_text_with_tesseract(path) for path in temp_paths]
+        return "\n\n".join(text for text in page_texts if text)
+    finally:
+        _cleanup_temp_files(temp_paths)
+
+
+def _get_ocr_engine():
+    from app.skills.ocr.ocr_engine import ocr_engine
+
+    return ocr_engine
+
+
+def load_documents_from_path(file_path: str) -> list[Document]:
+    """
+    根据文件扩展名加载文档内容。
+    支持 PDF/图片 (OCR), DOCX, XLSX, MD, TXT。
+    """
+    docs: list[Document] = []
+    ext = os.path.splitext(file_path)[1].lower()
+
+    if ext == ".pdf":
+        text = ""
+        try:
+            text = _extract_pdf_text_with_pypdf(file_path)
+        except Exception as pdf_error:
+            logger.warning(f"pypdf 提取失败，尝试本地 tesseract OCR: {pdf_error}")
+            text = ""
+
+        if not text and _tesseract_available() and _poppler_available():
+            logger.info(f"PDF 未提取到可复制文本，使用本地 tesseract OCR 处理：{file_path}...")
+            try:
+                text = _extract_pdf_text_with_tesseract(file_path)
+            except Exception as ocr_error:
+                logger.warning(f"本地 tesseract OCR 解析失败，降级为本地 OCR: {ocr_error}")
+                text = ""
+        elif not text and not _tesseract_available():
+            logger.info(f"未检测到 tesseract，跳过本地 tesseract OCR：{file_path}")
+        elif not text and not _poppler_available():
+            logger.info(f"未检测到 poppler(pdfinfo)，跳过本地 tesseract OCR：{file_path}")
+
+        if text:
+            docs = [Document(page_content=text, metadata={"source": file_path})]
+        else:
+            text = _get_ocr_engine().process_file(file_path)
+            if text:
+                docs = [Document(page_content=text, metadata={"source": file_path})]
+            else:
+                logger.warning(f"OCR 未从 {file_path} 提取到文本")
+                docs = []
+
+    elif ext in [".png", ".jpg", ".jpeg", ".webp", ".tiff", ".bmp"]:
+        logger.info(f"正在处理图片文本提取：{file_path}...")
+        text = _extract_image_text_with_tesseract(file_path) if _tesseract_available() else ""
+        if not text:
+            text = _get_ocr_engine().process_file(file_path)
+        if text:
+            docs = [Document(page_content=text, metadata={"source": file_path})]
+        else:
+            logger.warning(f"OCR 未从 {file_path} 提取到文本")
+            docs = []
+    elif ext == ".docx":
+        loader = Docx2txtLoader(file_path)
+        docs = loader.load()
+    elif ext == ".xlsx":
+        loader = UnstructuredExcelLoader(file_path)
+        docs = loader.load()
+    elif ext == ".md":
+        loader = TextLoader(file_path, encoding="utf-8")
+        docs = loader.load()
+    elif ext == ".txt":
+        loader = TextLoader(file_path, encoding="utf-8")
+        docs = loader.load()
+    else:
+        raise ValueError(f"不支持的文件类型: {ext}")
+
+    return docs
+
+
+def extract_text_from_file(file_path: str) -> str:
+    docs = load_documents_from_path(file_path)
+    return "\n\n".join(
+        doc.page_content.strip()
+        for doc in docs
+        if str(getattr(doc, "page_content", "")).strip()
     )
 
 
@@ -108,64 +270,7 @@ class RAGEngine:
         Returns:
             List[Document]: 加载的文档对象列表
         """
-        docs: list[Document] = []
-        ext = os.path.splitext(file_path)[1].lower()
-
-        if ext == ".pdf":
-            logger.info(f"正在使用 Unstructured 处理 PDF：{file_path}...")
-            try:
-                # 尝试使用 unstructured 进行高级解析（支持表格）
-                elements = _partition_pdf(
-                    filename=file_path,
-                    infer_table_structure=True,
-                    strategy="hi_res",
-                )
-                text = "\n\n".join([str(e) for e in elements])
-                docs = [Document(page_content=text, metadata={"source": file_path})]
-            except Exception as e:
-                logger.warning(f"Unstructured 解析失败，尝试 pypdf 提取: {e}")
-                text = ""
-                try:
-                    reader = PdfReader(file_path)
-                    page_texts = [(page.extract_text() or "").strip() for page in reader.pages]
-                    text = "\n\n".join([page for page in page_texts if page])
-                except Exception as pdf_error:
-                    logger.warning(f"pypdf 提取失败，降级为 OCR: {pdf_error}")
-
-                if text:
-                    docs = [Document(page_content=text, metadata={"source": file_path})]
-                else:
-                    text = ocr_engine.process_file(file_path)
-                    if text:
-                        docs = [Document(page_content=text, metadata={"source": file_path})]
-                    else:
-                        logger.warning(f"OCR 未从 {file_path} 提取到文本")
-                        docs = []
-
-        elif ext in [".png", ".jpg", ".jpeg", ".webp", ".tiff", ".bmp"]:
-            logger.info(f"正在使用本地 OCR 处理：{file_path}...")
-            text = ocr_engine.process_file(file_path)
-            if text:
-                docs = [Document(page_content=text, metadata={"source": file_path})]
-            else:
-                logger.warning(f"OCR 未从 {file_path} 提取到文本")
-                docs = []
-        elif ext == ".docx":
-            loader = Docx2txtLoader(file_path)
-            docs = loader.load()
-        elif ext == ".xlsx":
-            loader = UnstructuredExcelLoader(file_path)
-            docs = loader.load()
-        elif ext == ".md":
-            loader = TextLoader(file_path, encoding="utf-8")
-            docs = loader.load()
-        elif ext == ".txt":
-            loader = TextLoader(file_path, encoding="utf-8")
-            docs = loader.load()
-        else:
-            raise ValueError(f"不支持的文件类型: {ext}")
-
-        return docs
+        return load_documents_from_path(file_path)
 
     def add_knowledge_base(self, file_path: str, user_id: str | None = None) -> dict[str, Any]:
         """

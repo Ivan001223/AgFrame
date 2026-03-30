@@ -1,8 +1,11 @@
 import importlib
+import os
 from collections.abc import Callable, Iterator, Sequence
 from logging import getLogger
 from threading import Thread
 from typing import Any
+
+os.environ.setdefault("OBJC_PRINT_DUPLICATE_CLASSES", "NO")
 
 logger = getLogger(__name__)
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun

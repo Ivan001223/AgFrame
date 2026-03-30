@@ -1,5 +1,6 @@
 from copy import deepcopy
 from datetime import datetime, timezone
+from importlib import import_module
 from typing import Any
 
 from langgraph.checkpoint.base import BaseCheckpointSaver, empty_checkpoint
@@ -22,6 +23,17 @@ def _get_redis_url() -> str:
     queue_cfg = settings.queue
     url = queue_cfg.redis_url or "redis://:redissecret@localhost:6379/0"
     return str(url)
+
+
+def _load_async_redis_saver() -> type[Any]:
+    try:
+        module = import_module("langgraph.checkpoint.redis")
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "缺少运行时依赖 'langgraph-checkpoint-redis'。"
+            "请重新同步项目依赖后再启动后端或 worker。"
+        ) from exc
+    return module.AsyncRedisSaver
 
 
 
@@ -107,8 +119,7 @@ class AsyncRedisSaverWrapper(BaseCheckpointSaver):
 
     async def get_saver(self):
         if self._saver is None:
-            from langgraph.checkpoint.redis import AsyncRedisSaver
-
+            AsyncRedisSaver = _load_async_redis_saver()
             self._saver = AsyncRedisSaver(redis_url=_get_redis_url())
             setup = getattr(self._saver, "setup", None)
             if callable(setup):

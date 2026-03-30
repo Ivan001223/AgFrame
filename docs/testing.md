@@ -55,7 +55,7 @@ Prerequisites:
 - backend and worker are running
 - PostgreSQL and Redis are reachable
 - current config allows upload, parsing, and harness scheduling
-- if `.env` still sets `LLM_MODEL=gpt-4o-mini`, provide a valid `LLM_API_KEY` or change `.env` to a stub model before startup
+- if you switch `.env` back to a cloud model, provide a valid `LLM_API_KEY` before startup
 
 Optional switches:
 

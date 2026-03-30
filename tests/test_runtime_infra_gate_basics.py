@@ -190,7 +190,7 @@ def test_model_manager_require_torch_missing_dependency(monkeypatch):
     monkeypatch.setattr(model_manager, "torch", None)
     monkeypatch.setattr(model_manager.importlib, "import_module", _missing_import)
 
-    with pytest.raises(RuntimeError, match="缺少可选依赖 'torch'"):
+    with pytest.raises(RuntimeError, match="缺少运行时依赖 'torch'"):
         model_manager._require_torch()
 
 
@@ -203,7 +203,7 @@ def test_model_manager_require_transformers_missing_dependency(monkeypatch):
 
     monkeypatch.setattr(model_manager.importlib, "import_module", _missing_import)
 
-    with pytest.raises(RuntimeError, match="缺少可选依赖 'transformers'"):
+    with pytest.raises(RuntimeError, match="缺少运行时依赖 'transformers'"):
         model_manager._require_transformers()
 
 

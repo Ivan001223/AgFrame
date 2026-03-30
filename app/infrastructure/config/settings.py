@@ -8,6 +8,7 @@ import json
 import logging
 import os
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -379,6 +380,10 @@ class Settings(BaseSettings):
                 return alias
         return field_name.upper()
 
+    def _llm_requires_api_key(self) -> bool:
+        model_name = str(self.llm.model or "").strip().lower()
+        return model_name not in {"dev-stub", "dev_stub", "local-qwen3-vl"}
+
     def validate_security(self) -> None:
         """验证安全配置"""
         import warnings
@@ -401,6 +406,14 @@ class Settings(BaseSettings):
 
         # 检查数据库密码
         db_password = self.database.password
+        db_url = str(self.database.url or "").strip()
+        if db_url:
+            try:
+                parsed = urlsplit(db_url)
+            except ValueError:
+                parsed = None
+            if parsed and parsed.password:
+                db_password = unquote(parsed.password)
         if db_password in insecure_keys or (db_password and len(db_password) < 8):
             raise ValueError(
                 "安全配置错误: database.password 使用了不安全的默认值。"
@@ -410,7 +423,7 @@ class Settings(BaseSettings):
 
         # 检查 API 密钥
         api_key = self.llm.api_key
-        if api_key in insecure_keys or api_key == "":
+        if self._llm_requires_api_key() and (api_key in insecure_keys or api_key == ""):
             warnings.warn(
                 "警告: llm.api_key 未配置，将无法使用 OpenAI 等云端 LLM。"
                 "请在 configs/config.json 中设置 API Key，或通过环境变量 LLM_API_KEY 设置。"

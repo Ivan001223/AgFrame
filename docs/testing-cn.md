@@ -51,7 +51,7 @@
 - backend 与 worker 正在运行
 - PostgreSQL 与 Redis 可访问
 - 当前配置允许上传、解析与 harness 调度
-- 如果 `.env` 仍然设置 `LLM_MODEL=gpt-4o-mini`，则需要有效的 `LLM_API_KEY`，或者在启动前把 `.env` 改成 stub 模型
+- 如果你把 `.env` 改回云模型，则需要在启动前提供有效的 `LLM_API_KEY`
 
 可选参数：
 

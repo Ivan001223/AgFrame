@@ -128,8 +128,8 @@ Minimum secure changes before startup:
 
 Notes:
 
-- `docker-compose.yml` falls back to `LLM_MODEL=dev-stub` only when `.env` does not override it.
-- `.env.example` currently sets `LLM_MODEL=gpt-4o-mini`, so local live smoke without a cloud key requires adjusting `.env`.
+- `.env.example` now defaults to `LLM_MODEL=dev-stub` and `MODEL_PATH_EMBEDDING=dev-stub`, so local startup works without a cloud key.
+- Switch `.env` to a cloud model and set `LLM_API_KEY` when you want real remote generation.
 
 ### 3. Start the full stack with Docker Compose
 
@@ -160,16 +160,31 @@ docker compose --profile observability up --build -d
 
 ### 4. Start services manually
 
+If you copied `.env.example`, replace the Docker-only service hosts before starting services on the host machine:
+
+```bash
+export AUTH_SECRET_KEY='replace-with-at-least-32-random-chars'
+export DATABASE_URL='postgresql+psycopg://agframe:agframe_secret@127.0.0.1:5432/agframe'
+export REDIS_URL='redis://:redissecret@127.0.0.1:6379/0'
+```
+
+If you want a local no-cloud smoke path, also override:
+
+```bash
+export LLM_MODEL='dev-stub'
+export MODEL_PATH_EMBEDDING='dev-stub'
+```
+
 Backend:
 
 ```bash
-./.venv/bin/python -m app.server.main
+./scripts/start-backend.sh
 ```
 
 Worker:
 
 ```bash
-./.venv/bin/arq app.infrastructure.queue.worker_settings.WorkerSettings
+./scripts/start-worker.sh
 ```
 
 Frontend:

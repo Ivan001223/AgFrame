@@ -210,3 +210,19 @@ def test_checkpoint_store_get_next_version_supports_string_versions():
         )
         == "00000000000000000000000000000010.0000000000000000"
     )
+
+
+@pytest.mark.anyio
+async def test_checkpoint_store_get_saver_reports_missing_dependency(monkeypatch):
+    checkpoint_store = AsyncRedisSaverWrapper()
+
+    def _missing_loader():
+        raise RuntimeError("缺少运行时依赖 'langgraph-checkpoint-redis'。")
+
+    monkeypatch.setattr(
+        "app.infrastructure.checkpoint.redis_store._load_async_redis_saver",
+        _missing_loader,
+    )
+
+    with pytest.raises(RuntimeError, match="langgraph-checkpoint-redis"):
+        await checkpoint_store.get_saver()

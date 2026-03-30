@@ -91,8 +91,8 @@ Default local addresses:
 
 Environment behavior to know:
 
-- `docker-compose.yml` falls back to `LLM_MODEL=dev-stub` and `MODEL_PATH_EMBEDDING=dev-stub` only when `.env` does not override them
-- `.env.example` currently sets `LLM_MODEL=gpt-4o-mini`, so copying it as-is means chat still expects a real cloud path unless you edit `.env`
+- `.env.example` now defaults to `LLM_MODEL=dev-stub` and `MODEL_PATH_EMBEDDING=dev-stub`, so local startup works without a cloud key
+- switch `.env` to a cloud model and set `LLM_API_KEY` when you want real remote generation
 - `ENABLE_HUMAN_APPROVAL` defaults to `true` in Docker Compose
 
 Optional observability profile:
@@ -114,16 +114,31 @@ Langfuse is exposed at `http://127.0.0.1:3001`.
 
 Use manual startup when running services outside Docker Compose.
 
+If you copied `.env.example`, override the Docker-only hostnames before starting backend or worker on the host:
+
+```bash
+export AUTH_SECRET_KEY='replace-with-at-least-32-random-chars'
+export DATABASE_URL='postgresql+psycopg://agframe:agframe_secret@127.0.0.1:5432/agframe'
+export REDIS_URL='redis://:redissecret@127.0.0.1:6379/0'
+```
+
+For a local smoke path without cloud credentials, also override:
+
+```bash
+export LLM_MODEL='dev-stub'
+export MODEL_PATH_EMBEDDING='dev-stub'
+```
+
 Backend:
 
 ```bash
-./.venv/bin/python -m app.server.main
+./scripts/start-backend.sh
 ```
 
 Worker:
 
 ```bash
-./.venv/bin/arq app.infrastructure.queue.worker_settings.WorkerSettings
+./scripts/start-worker.sh
 ```
 
 Frontend:

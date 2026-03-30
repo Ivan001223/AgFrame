@@ -85,8 +85,8 @@ docker compose ps
 
 环境变量行为说明：
 
-- `docker-compose.yml` 只有在 `.env` 未覆盖时才会回退到 `LLM_MODEL=dev-stub` 与 `MODEL_PATH_EMBEDDING=dev-stub`
-- `.env.example` 当前默认写入的是 `LLM_MODEL=gpt-4o-mini`，因此直接复制后仍会走真实云端模型路径，除非你手动调整 `.env`
+- `.env.example` 现在默认写入 `LLM_MODEL=dev-stub` 与 `MODEL_PATH_EMBEDDING=dev-stub`，因此本地启动默认不依赖云端 Key
+- 如果需要真实云端生成，再把 `.env` 改成云模型并补齐 `LLM_API_KEY`
 - `ENABLE_HUMAN_APPROVAL` 在 Docker Compose 中默认开启
 
 如需额外观测组件：
@@ -108,16 +108,31 @@ Langfuse 默认暴露在 `http://127.0.0.1:3001`。
 
 不使用 Docker Compose 时，可按以下方式手动启动。
 
+如果你是从 `.env.example` 复制得到 `.env`，在宿主机直接启动 backend 或 worker 之前，请先覆盖其中仅适用于 Docker 网络的主机名：
+
+```bash
+export AUTH_SECRET_KEY='replace-with-at-least-32-random-chars'
+export DATABASE_URL='postgresql+psycopg://agframe:agframe_secret@127.0.0.1:5432/agframe'
+export REDIS_URL='redis://:redissecret@127.0.0.1:6379/0'
+```
+
+如果希望在本地走无云端依赖的 smoke 路径，还需要额外覆盖：
+
+```bash
+export LLM_MODEL='dev-stub'
+export MODEL_PATH_EMBEDDING='dev-stub'
+```
+
 Backend：
 
 ```bash
-./.venv/bin/python -m app.server.main
+./scripts/start-backend.sh
 ```
 
 Worker：
 
 ```bash
-./.venv/bin/arq app.infrastructure.queue.worker_settings.WorkerSettings
+./scripts/start-worker.sh
 ```
 
 Frontend：

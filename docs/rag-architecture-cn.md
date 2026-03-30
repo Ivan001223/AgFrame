@@ -131,53 +131,53 @@ Dense Search (密集检索) + BM25 (稀疏检索)
 
 ---
 
-## Migration Guide from Legacy RAG
+## 从旧版 RAG 迁移指南
 
-If you are migrating from an older, heavier RAG architecture to AgFrame's currently recommended lightweight default pipeline, please refer to this guide.
+如果你正从更老、更重的 RAG 架构迁移到 AgFrame 当前推荐的轻量默认管线，请参考本节。
 
-Typical situations:
-- You previously used: Dense retrieval + Sparse retrieval + Model reranking
-- Your configuration file still contains `reranker.*` related items
-- Your previous Graph depended on an independent `rerank_docs` node
+典型场景：
+- 你之前使用的是：稠密检索 + 稀疏检索 + 模型重排
+- 你的配置文件里仍然保留了 `reranker.*` 相关项
+- 你之前的 Graph 依赖独立的 `rerank_docs` 节点
 
-### Configuration and Behavior Changes
+### 配置与行为变化
 
-**Old mode:**
+**旧模式：**
 ```text
 Query -> Hybrid Retrieve -> Model Rerank -> Parent Restore
 ```
 
-**Current mode:**
+**当前模式：**
 ```text
 Query -> Dense + BM25 -> RRF -> Candidate Pruning -> Parent Restore
 ```
 
-**Items to keep and tune:**
+**建议保留并继续调优的配置：**
 - `embeddings.*`
 - `rag.retrieval.*`
 - `prompt.context_pruning.*`
 
-**Items that should usually be empty (unless you need legacy compatibility):**
+**通常应保持为空的配置（除非你需要兼容旧版本）：**
 - `reranker.model_name`
 - `local_models.rerank_model`
 
-If your old configuration still includes `rerank_docs`, please remove it.
+如果你的旧配置里仍包含 `rerank_docs`，请将其移除。
 
-### Important Compatibility Note
+### 重要兼容性说明
 
-The configuration item `context_pruning.method="reranker"` is still accepted by the system. **However, it no longer means "use a large model-based reranker".**
-It has now been redirected and mapped to a lightweight local scoring algorithm. This is done so that old configuration files can continue to work without forcing a heavy model inference dependency at runtime.
+系统仍然接受配置项 `context_pruning.method="reranker"`。**但它已经不再表示“启用基于大模型的重排器”。**
+现在它会被重定向并映射到一个轻量的本地打分算法。这样做的目的是让旧配置文件继续可用，同时避免在运行时强制依赖重型模型推理。
 
-### Migration Checklist
+### 迁移检查清单
 
-1. Set `reranker.model_name=""`
-2. Set `local_models.rerank_model=""`
-3. Remove `rerank_docs` from the enabled nodes list (if it exists)
-4. Keep `prompt.context_pruning.method="auto"`, unless you have a specific reason not to
-5. Before modifying pruning thresholds, verify the recall quality of the underlying retrieval
+1. 设置 `reranker.model_name=""`
+2. 设置 `local_models.rerank_model=""`
+3. 从启用节点列表中移除 `rerank_docs`（如果存在）
+4. 保持 `prompt.context_pruning.method="auto"`，除非你有明确理由需要改动
+5. 在调整裁剪阈值之前，先验证底层检索链路的召回质量
 
-### Common Mistakes
+### 常见错误
 
-- Tuning pruning parameters before tuning recall depth
-- Mistakenly believing that configuration items containing the word `reranker` will still call a large model for reranking
-- Prematurely removing compatibility fields, causing old deployment environments to crash
+- 在调优召回深度之前就开始调裁剪参数
+- 误以为名称中包含 `reranker` 的配置项仍会调用大模型执行重排
+- 过早删除兼容字段，导致旧部署环境直接报错

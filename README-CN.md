@@ -30,7 +30,29 @@ AgFrame 当前由三层核心能力构成：
 
 ## 架构快照
 
-![AgFrame 架构总览](data/assets/framework.png)
+```mermaid
+flowchart TD
+    FE[Next.js 工作台<br/>Chat / Knowledge / Memory / Tasks / Agent Studio]
+    API[FastAPI 后端<br/>REST API / LangServe / 认证 / 限流]
+    CHAT["聊天运行时<br/>/chat/workbench-invoke"]
+    GRAPH[LangGraph 运行时]
+    INTERRUPT["中断链路<br/>审批 / 恢复"]
+    HARNESS["Harness 控制平面<br/>Runs / Verification / Policies / Studio"]
+    QUEUE[Redis + ARQ Worker]
+    REDIS[Redis Checkpoint]
+    PG[Postgres 持久化]
+
+    FE --> API
+    API --> CHAT
+    CHAT --> GRAPH
+    GRAPH --> REDIS
+    API --> INTERRUPT
+    INTERRUPT --> GRAPH
+    API --> HARNESS
+    HARNESS --> QUEUE
+    HARNESS --> PG
+    CHAT --> PG
+```
 
 ### 运行时形态
 
@@ -182,7 +204,6 @@ npm run dev
 - [前端架构](./docs/frontend-architecture-cn.md)
 - [RAG 架构](./docs/rag-architecture-cn.md)
 - [文档治理规范](./docs/documentation-governance-cn.md)
-- [路线图](./docs/roadmap-cn.md)
 
 ## 版本范围
 

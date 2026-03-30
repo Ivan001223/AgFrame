@@ -34,7 +34,29 @@ The current repository state is centered on a controllable agent runtime rather 
 
 ## Architecture Snapshot
 
-![AgFrame Architecture Overview](data/assets/framework.png)
+```mermaid
+flowchart TD
+    FE[Next.js Workbench<br/>Chat / Knowledge / Memory / Tasks / Agent Studio]
+    API[FastAPI Backend<br/>REST APIs / LangServe / Auth / Rate Limit]
+    CHAT["Chat Runtime<br/>/chat/workbench-invoke"]
+    GRAPH[LangGraph Runtime]
+    INTERRUPT["Interrupt Flow<br/>Approval / Resume"]
+    HARNESS["Harness Control Plane<br/>Runs / Verification / Policies / Studio"]
+    QUEUE[Redis + ARQ Worker]
+    REDIS[Redis Checkpoints]
+    PG[Postgres Persistence]
+
+    FE --> API
+    API --> CHAT
+    CHAT --> GRAPH
+    GRAPH --> REDIS
+    API --> INTERRUPT
+    INTERRUPT --> GRAPH
+    API --> HARNESS
+    HARNESS --> QUEUE
+    HARNESS --> PG
+    CHAT --> PG
+```
 
 ### Runtime shape
 
@@ -186,7 +208,6 @@ The ready check reports retrieval and runtime component readiness, including the
 - [Frontend Architecture](./docs/frontend-architecture.md)
 - [RAG Architecture](./docs/rag-architecture.md)
 - [Documentation Governance](./docs/documentation-governance.md)
-- [Roadmap](./docs/roadmap.md)
 
 ## Version Scope
 

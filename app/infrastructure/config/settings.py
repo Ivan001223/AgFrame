@@ -204,7 +204,6 @@ class FeatureFlagsConfig(BaseSettings):
     enable_docs_rag: bool = Field(default=True, alias="ENABLE_DOCS_RAG")
     enable_chat_memory: bool = Field(default=True, alias="ENABLE_CHAT_MEMORY")
     enable_self_correction: bool = Field(default=True, alias="ENABLE_SELF_CORRECTION")
-    enable_human_approval: bool = False
     allow_dangerous_deserialization: bool = False
     enable_tools_write_file: bool = False
     enable_tools_python_repl: bool = False
@@ -232,6 +231,21 @@ class ServerConfig(BaseSettings):
     port: int = Field(default=8000, alias="SERVER_PORT")
     cors_origins: list[str] = Field(default_factory=list, alias="CORS_ORIGINS")
     cors_allow_credentials: bool = False
+
+
+class MCPServerConfig(BaseSettings):
+    """MCP 服务器元数据配置（当前用于 Harness 能力展示，不直接承诺运行时已接通）。"""
+    server_id: str = ""
+    title: str = ""
+    description: str = ""
+    command: str = ""
+    args: list[str] = Field(default_factory=list)
+    enabled: bool = True
+
+
+class MCPConfig(BaseSettings):
+    """MCP inventory 配置"""
+    servers: list[MCPServerConfig] = Field(default_factory=list)
 
 
 # ==================== 主 Settings 类 ====================
@@ -283,6 +297,7 @@ class Settings(BaseSettings):
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     self_correction: SelfCorrectionConfig = Field(default_factory=SelfCorrectionConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
+    mcp: MCPConfig = Field(default_factory=MCPConfig)
 
     def __init__(self, **kwargs):
         """初始化配置，加载 config.json 文件覆盖"""

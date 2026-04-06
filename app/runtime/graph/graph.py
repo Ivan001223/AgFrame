@@ -67,6 +67,14 @@ def _should_interrupt(state: AgentState) -> bool:
     return bool(context.get("require_human_approval", False))
 
 
+def _after_generate_key(state: AgentState) -> Literal["interrupt", "grade", "end"]:
+    if _should_interrupt(state):
+        return "interrupt"
+    if settings.feature_flags.enable_self_correction:
+        return "grade"
+    return "end"
+
+
 def _check_approval(state: AgentState) -> Literal["approved", "pending"]:
     if state.get("interrupted") is False and str(state.get("next_step") or "") != "wait_approval":
         return "approved"
@@ -86,7 +94,6 @@ def run_app(checkpointer: Any | None = None):
     workflow = StateGraph(AgentState)
     flags = settings.feature_flags
     enable_self_correction = flags.enable_self_correction
-    enable_human_approval = flags.enable_human_approval
 
     workflow.add_node("bootstrap_request", bootstrap_request_node)
     workflow.add_node("router", router_node)
@@ -95,12 +102,11 @@ def run_app(checkpointer: Any | None = None):
     workflow.add_node("retrieve_profile", retrieve_profile_node)
     workflow.add_node("assemble", assemble_prompt_node)
     workflow.add_node("generate", generate_node)
+    workflow.add_node("human_interrupt", human_interrupt_node)
+    workflow.add_node("check_approval", check_approval_node)
     if enable_self_correction:
         workflow.add_node("grader", grader_node)
         workflow.add_node("web_search", web_search_node)
-    if enable_human_approval:
-        workflow.add_node("human_interrupt", human_interrupt_node)
-        workflow.add_node("check_approval", check_approval_node)
 
     workflow.set_entry_point("bootstrap_request")
     workflow.add_edge("bootstrap_request", "router")
@@ -123,29 +129,31 @@ def run_app(checkpointer: Any | None = None):
     workflow.add_edge("retrieve_profile", "assemble")
     workflow.add_edge("assemble", "generate")
 
-    if enable_human_approval:
-        workflow.add_conditional_edges(
-            "generate",
-            _should_interrupt,
-            {True: "human_interrupt", False: END},
-        )
-        workflow.add_edge("human_interrupt", END)
+    generate_routes: dict[str, str] = {
+        "interrupt": "human_interrupt",
+        "end": END,
+    }
+    if enable_self_correction:
+        generate_routes["grade"] = "grader"
+    workflow.add_conditional_edges(
+        "generate",
+        _after_generate_key,
+        generate_routes,
+    )
+    workflow.add_edge("human_interrupt", END)
+    workflow.add_conditional_edges(
+        "check_approval",
+        _check_approval,
+        {"approved": "generate", "pending": END},
+    )
 
-        workflow.add_conditional_edges(
-            "check_approval",
-            _check_approval,
-            {"approved": "generate", "pending": END},
-        )
-    elif enable_self_correction:
-        workflow.add_edge("generate", "grader")
+    if enable_self_correction:
         workflow.add_conditional_edges(
             "grader",
             _grader_key,
             {"accept": END, "rewrite": "retrieve_profile", "search": "web_search"},
         )
         workflow.add_edge("web_search", "retrieve_profile")
-    else:
-        workflow.add_edge("generate", END)
 
     compile_kwargs = {}
     if checkpointer:

@@ -110,13 +110,14 @@ def _record_interrupt_event(
     current_user: User,
     event_type: str,
     details: dict[str, Any] | None = None,
+    actor: str | None = None,
 ) -> dict[str, object] | None:
     return get_interrupt_event_service().record(
         event_type=event_type,
         event_source="interrupt",
         user_id=_interrupt_event_user_id(checkpoint_data, current_user),
         session_id=session_id,
-        actor=current_user.username,
+        actor=actor or current_user.username,
         details=dict(details or {}),
     )
 
@@ -138,6 +139,22 @@ def _ensure_interrupt_visible_to_user(
     if not _history_visible_to_user(session_id, current_user):
         raise HTTPException(status_code=403, detail="Not authorized to access this session interrupt")
     return checkpoint_data
+
+
+def _is_explicit_rejection(action_required: dict[str, Any] | None) -> bool:
+    if not isinstance(action_required, dict):
+        return False
+    if bool(action_required.get("approved")):
+        return False
+    return bool(action_required.get("approved_by") or action_required.get("approved_at"))
+
+
+def _is_approval_granted(action_required: dict[str, Any] | None) -> bool:
+    return isinstance(action_required, dict) and bool(action_required.get("approved"))
+
+
+def _resume_block_reason(action_required: dict[str, Any] | None) -> str:
+    return "approval_not_granted" if _is_explicit_rejection(action_required) else "approval_pending"
 
 
 @router.get("/{session_id}", response_model=InterruptStatusResponse)
@@ -273,14 +290,14 @@ async def get_resume_command(
     )
     action_required = checkpoint_data.get("action_required")
 
-    if action_required and not action_required.get("approved"):
+    if not _is_approval_granted(action_required):
         _record_interrupt_event(
             session_id=session_id,
             checkpoint_data=checkpoint_data,
             current_user=current_user,
             event_type="interrupt.resume_blocked",
             details={
-                "reason": "approval_not_granted",
+                "reason": _resume_block_reason(action_required),
                 "action_type": str(action_required.get("action_type") or "unknown"),
             },
         )
@@ -315,6 +332,23 @@ async def resume_session(
         current_user=current_user,
     )
     checkpoint_data = dict(checkpoint.get("checkpoint") or {})
+    checkpoint = await checkpoint_store.load(session_id) or {
+        "checkpoint": checkpoint_data,
+        "updated_at": checkpoint.get("updated_at"),
+    }
+    action_required = checkpoint_data.get("action_required")
+    if not _is_approval_granted(action_required):
+        _record_interrupt_event(
+            session_id=session_id,
+            checkpoint_data=checkpoint_data,
+            current_user=current_user,
+            event_type="interrupt.resume_blocked",
+            details={
+                "reason": _resume_block_reason(action_required),
+                "action_type": str(action_required.get("action_type") or "unknown"),
+            },
+        )
+        raise HTTPException(status_code=400, detail="Action not yet approved")
     _record_interrupt_event(
         session_id=session_id,
         checkpoint_data=checkpoint_data,

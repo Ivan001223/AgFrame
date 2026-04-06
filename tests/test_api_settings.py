@@ -155,3 +155,68 @@ def test_settings_runtime_status_uses_reranker_resolution(monkeypatch: pytest.Mo
     assert g.status_code == 200
     assert g.json()["runtime_status"]["reranker"]["configured"] is True
     assert g.json()["runtime_status"]["reranker"]["pruning_scoring_source"] == "lightweight_ranker"
+
+
+def test_settings_admin_can_update_mcp_inventory(monkeypatch: pytest.MonkeyPatch):
+    class _McpCfg:
+        def __init__(self):
+            self.servers = []
+
+        def model_dump(self):
+            return {"servers": list(self.servers)}
+
+    class _FakeSettings:
+        def __init__(self):
+            self.server = type("_ServerCfg", (), {"port": 8000, "model_dump": lambda self: {"port": self.port}})()
+            self.prompt = type(
+                "_PromptCfg",
+                (),
+                {"model_dump": lambda self: {"context_pruning": {"method": "heuristic", "auto_reranker_min_lines": 40}}},
+            )()
+            self.reranker = type("_RerankerCfg", (), {"model_name": "", "env_var": "MODEL_PATH_RERANKER", "provider": "hf"})()
+            self.local_models = type("_LocalModelsCfg", (), {"rerank_model": ""})()
+            self.model_manager = type("_ModelManagerCfg", (), {"provider": "hf"})()
+            self.mcp = _McpCfg()
+
+        def model_dump(self):
+            return {
+                "server": self.server.model_dump(),
+                "prompt": self.prompt.model_dump(),
+                "reranker": {
+                    "model_name": self.reranker.model_name,
+                    "env_var": self.reranker.env_var,
+                    "provider": self.reranker.provider,
+                },
+                "local_models": {"rerank_model": self.local_models.rerank_model},
+                "model_manager": {"provider": self.model_manager.provider},
+                "mcp": self.mcp.model_dump(),
+            }
+
+    monkeypatch.setattr(settings_api, "settings", _FakeSettings())
+
+    app = FastAPI()
+    app.include_router(settings_api.router)
+    app.dependency_overrides[settings_api.get_current_admin_user] = lambda: _U(username="admin", role="admin")
+    c = TestClient(app)
+
+    response = c.post(
+        "/settings",
+        json={
+            "mcp": {
+                "servers": [
+                    {
+                        "server_id": "filesystem",
+                        "title": "Filesystem",
+                        "description": "Workspace access",
+                        "command": "npx",
+                        "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+                        "enabled": True,
+                    }
+                ]
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["mcp"]["servers"][0]["server_id"] == "filesystem"
+    assert response.json()["mcp"]["servers"][0]["title"] == "Filesystem"

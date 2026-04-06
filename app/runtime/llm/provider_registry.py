@@ -31,6 +31,44 @@ class RegisteredProvider:
     enabled: bool = True
 
 
+def _normalize_model_name(model: str) -> str:
+    return str(model or "").strip().lower()
+
+
+def _normalize_base_url(base_url: str) -> str:
+    return str(base_url or "").strip().lower().rstrip("/")
+
+
+def infer_tool_calling_support(
+    *,
+    model: str,
+    base_url: str = "",
+    provider_id: str | None = None,
+) -> tuple[str, str]:
+    normalized_model = _normalize_model_name(model)
+    normalized_base_url = _normalize_base_url(base_url)
+    normalized_provider = str(provider_id or "").strip().lower()
+
+    if normalized_model == "local-qwen3-vl":
+        return "unsupported", "The local Qwen runtime does not support native tool calling."
+
+    if normalized_model in {"dev-stub", "dev_stub"}:
+        return "unknown", "The dev-stub adapter is test-oriented, so tool calling depends on the injected runtime."
+
+    if normalized_model.startswith(("gpt-", "o1", "o3", "o4")):
+        return "supported", "This model family supports OpenAI-style tool calling."
+
+    if normalized_base_url and any(
+        marker in normalized_base_url for marker in ("api.openai.com", "openai.azure.com", "/openai/", "/openai/v1")
+    ):
+        return "supported", "This provider route appears to be OpenAI-compatible for tool calling."
+
+    if normalized_provider.startswith("openai"):
+        return "supported", "This provider route is labeled as OpenAI-compatible for tool calling."
+
+    return "unknown", "Tool calling support is not verified for this provider route yet."
+
+
 def _obfuscate_key(api_key: str) -> str:
     """简单 base64 混淆（非加密），用于 DB 存储。生产环境应替换为 KMS。"""
     if not api_key:

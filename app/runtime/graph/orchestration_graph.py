@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from collections import defaultdict, deque
@@ -7,13 +8,17 @@ from inspect import isawaitable
 from typing import Annotated, Any, Callable, NotRequired, TypedDict
 
 import anyio
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
 from app.runtime.llm.stream_adapter import coerce_stream_text, stream_llm_events
 from app.runtime.llm.llm_factory import get_llm_for_provider
-from app.runtime.llm.provider_registry import ModelProviderRegistry, get_provider_registry
+from app.runtime.llm.provider_registry import (
+    ModelProviderRegistry,
+    get_provider_registry,
+    infer_tool_calling_support,
+)
 
 _log = logging.getLogger("runtime.graph.orchestration")
 
@@ -29,6 +34,16 @@ GAME_THEORY_DIRECTIVE = (
     "competitive responses, and likely equilibrium outcomes before choosing a strategy."
 )
 
+READ_ONLY_TOOL_IDS = frozenset(
+    {
+        "web_search",
+        "calculator",
+        "knowledge_retriever",
+        "read_document",
+        "get_current_time",
+    }
+)
+
 
 class OrchestrationState(TypedDict):
     """
@@ -41,6 +56,8 @@ class OrchestrationState(TypedDict):
     current_agent: str
     loop_index: int
     errors: list[str]
+    knowledge_base_ids: NotRequired[list[str]]
+    knowledge_context: NotRequired[str]
     continuation: NotRequired[dict[str, Any]]
 
 
@@ -56,6 +73,338 @@ def _coerce_timeout(value: Any, default_timeout: int) -> int:
         return int(value) if value is not None else default_timeout
     except (TypeError, ValueError):
         return default_timeout
+
+
+def _message_text(message: BaseMessage | Any) -> str:
+    content = getattr(message, "content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and "text" in item:
+                parts.append(str(item.get("text") or ""))
+        return "\n".join(part for part in parts if part)
+    return str(content or "")
+
+
+def _trim_tool_payload(value: Any, *, max_chars: int = 4000) -> str:
+    content = str(value or "").strip()
+    if len(content) <= max_chars:
+        return content
+    return content[: max(max_chars - 3, 1)].rstrip() + "..."
+
+
+def _build_tool_catalog_lookup(graph_json: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        _normalize_skill_key(str(item.get("tool_id") or "")): dict(item)
+        for item in graph_json.get("tool_catalog") or []
+        if isinstance(item, dict) and _normalize_skill_key(str(item.get("tool_id") or ""))
+    }
+
+
+def _build_mcp_catalog_lookup(graph_json: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        _normalize_skill_key(str(item.get("server_id") or "")): dict(item)
+        for item in graph_json.get("mcp_server_catalog") or []
+        if isinstance(item, dict) and _normalize_skill_key(str(item.get("server_id") or ""))
+    }
+
+
+def _build_tool_guidance_block(
+    *,
+    enabled_tool_ids: list[str],
+    tool_catalog_by_id: dict[str, dict[str, Any]],
+) -> str:
+    lines: list[str] = []
+    for tool_id in enabled_tool_ids:
+        item = tool_catalog_by_id.get(_normalize_skill_key(tool_id), {})
+        title = str(item.get("title") or _humanize_identifier(tool_id)).strip()
+        description = str(item.get("description") or "").strip()
+        line = f"- {title}"
+        if description:
+            line += f": {description}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _build_mcp_guidance_block(
+    *,
+    mcp_server_ids: list[str],
+    missing_mcp_server_ids: list[str],
+    mcp_catalog_by_id: dict[str, dict[str, Any]],
+) -> str:
+    sections: list[str] = []
+
+    available_lines: list[str] = []
+    for server_id in mcp_server_ids:
+        item = mcp_catalog_by_id.get(_normalize_skill_key(server_id), {})
+        title = str(item.get("title") or _humanize_identifier(server_id)).strip()
+        description = str(item.get("description") or "").strip()
+        line = f"- {title}"
+        if description:
+            line += f": {description}"
+        available_lines.append(line)
+    if available_lines:
+        sections.append("Configured MCP servers relevant to this node:\n" + "\n".join(available_lines))
+
+    missing_lines: list[str] = []
+    for server_id in missing_mcp_server_ids:
+        item = mcp_catalog_by_id.get(_normalize_skill_key(server_id), {})
+        title = str(item.get("title") or _humanize_identifier(server_id)).strip()
+        description = str(item.get("description") or "").strip()
+        line = f"- {title}"
+        if description:
+            line += f": {description}"
+        missing_lines.append(line)
+    if missing_lines:
+        sections.append("Relevant MCP servers not currently enabled in project inventory:\n" + "\n".join(missing_lines))
+
+    return "\n\n".join(sections)
+
+
+def _build_capability_execution_contract(summary: dict[str, Any]) -> str:
+    approved_skill_ids = [str(item) for item in summary.get("loaded_skill_ids") or [] if str(item).strip()]
+    executable_tool_ids = [str(item) for item in summary.get("enabled_tool_ids") or [] if str(item).strip()]
+    planning_only_tool_ids = [
+        str(item) for item in summary.get("provider_limited_tool_ids") or [] if str(item).strip()
+    ]
+    disabled_tool_ids = [str(item) for item in summary.get("disabled_tool_ids") or [] if str(item).strip()]
+    planning_only_mcp_server_ids = [str(item) for item in summary.get("mcp_server_ids") or [] if str(item).strip()]
+    missing_mcp_server_ids = [str(item) for item in summary.get("missing_mcp_server_ids") or [] if str(item).strip()]
+    requires_tool_calling = bool(summary.get("requires_tool_calling", False))
+    tool_execution_support = str(summary.get("tool_execution_support") or "unknown").strip() or "unknown"
+    tool_execution_support_reason = str(summary.get("tool_execution_support_reason") or "").strip()
+    if tool_execution_support == "unsupported" and executable_tool_ids:
+        planning_only_tool_ids = list(dict.fromkeys([*planning_only_tool_ids, *executable_tool_ids]))
+        executable_tool_ids = []
+
+    lines: list[str] = []
+    lines.append(
+        "Approved skill packs are guidance-only: "
+        + (", ".join(approved_skill_ids) if approved_skill_ids else "none")
+        + "."
+    )
+    lines.append(
+        "Directly executable tools in this runtime: "
+        + (", ".join(executable_tool_ids) if executable_tool_ids else "none")
+        + "."
+    )
+    if planning_only_tool_ids:
+        lines.append(
+            "Planning-only tools visible in policy/capability metadata but not executable right now: "
+            + ", ".join(planning_only_tool_ids)
+            + "."
+        )
+    if disabled_tool_ids:
+        lines.append(
+            "Disabled tools that stay unavailable until feature flags change: "
+            + ", ".join(disabled_tool_ids)
+            + "."
+        )
+    lines.append(
+        "MCP inventory is planning metadata only in this runtime: "
+        + (", ".join(planning_only_mcp_server_ids) if planning_only_mcp_server_ids else "none")
+        + "."
+    )
+    if missing_mcp_server_ids:
+        lines.append(
+            "Relevant MCP inventory gaps: " + ", ".join(missing_mcp_server_ids) + "."
+        )
+    if requires_tool_calling:
+        requirement_line = "This node expects direct tool-calling support."
+        if tool_execution_support != "supported":
+            requirement_line = (
+                "This node expects direct tool-calling support, but the current runtime/provider route does not fully satisfy that contract."
+            )
+        if tool_execution_support_reason:
+            requirement_line += f" Reason: {tool_execution_support_reason}."
+        lines.append(requirement_line)
+    return "\n".join(lines)
+
+
+def _resolve_enabled_tools(enabled_tool_ids: list[str]) -> list[Any]:
+    if not enabled_tool_ids:
+        return []
+    from app.skills.common.tools import ALL_TOOLS
+
+    tool_by_id = {
+        _normalize_skill_key(str(getattr(tool, "name", "") or "")): tool
+        for tool in ALL_TOOLS
+        if _normalize_skill_key(str(getattr(tool, "name", "") or ""))
+    }
+    return [
+        tool_by_id[normalized_tool_id]
+        for normalized_tool_id in [
+            _normalize_skill_key(tool_id)
+            for tool_id in enabled_tool_ids
+            if _normalize_skill_key(tool_id) in tool_by_id
+        ]
+    ]
+
+
+async def _invoke_bound_tool(tool: Any, args: Any) -> str:
+    if hasattr(tool, "ainvoke"):
+        return str(await tool.ainvoke(args))
+    if hasattr(tool, "invoke"):
+        return str(tool.invoke(args))
+    if callable(tool):
+        result = tool(args)
+        if isawaitable(result):
+            result = await result
+        return str(result)
+    raise TypeError(f"Unsupported tool type for {tool!r}")
+
+
+def _tool_is_read_only(tool_name: str) -> bool:
+    return _normalize_skill_key(tool_name) in READ_ONLY_TOOL_IDS
+
+
+async def _execute_tool_call(
+    raw_tool_call: dict[str, Any],
+    *,
+    tool_by_name: dict[str, Any],
+    run_index: int,
+) -> dict[str, Any]:
+    tool_name = _normalize_skill_key(str(raw_tool_call.get("name") or ""))
+    tool_call_id = str(raw_tool_call.get("id") or f"tool_call_{run_index + 1}")
+    tool_args = raw_tool_call.get("args") or {}
+    selected_tool = tool_by_name.get(tool_name)
+    status = "success"
+    if selected_tool is None:
+        tool_result = f"Tool unavailable: {tool_name or 'unknown'}"
+        status = "error"
+    else:
+        try:
+            tool_result = await _invoke_bound_tool(selected_tool, tool_args)
+        except Exception as exc:
+            tool_result = f"Tool execution failed: {exc!s}"
+            status = "error"
+
+    trimmed_tool_result = _trim_tool_payload(tool_result, max_chars=4000)
+    return {
+        "tool_name": tool_name or "unknown_tool",
+        "tool_call_id": tool_call_id,
+        "status": status,
+        "tool_message_content": trimmed_tool_result,
+        "run_record": {
+            "tool_id": tool_name or "unknown_tool",
+            "call_id": tool_call_id,
+            "status": status,
+            "args_preview": _trim_tool_payload(tool_args, max_chars=240),
+            "result_preview": _trim_tool_payload(tool_result, max_chars=400),
+            "result_char_count": len(str(tool_result or "")),
+        },
+    }
+
+
+async def _invoke_llm_with_tool_loop(
+    llm: Any,
+    messages: list[BaseMessage],
+    *,
+    enabled_tools: list[Any],
+    timeout_seconds: int,
+    on_stream_chunk: Callable[[str, str, int], Any] | None = None,
+    on_stream_event: Callable[[dict[str, Any]], Any] | None = None,
+    max_rounds: int = 4,
+) -> tuple[str, list[dict[str, Any]], str]:
+    if not enabled_tools:
+        content, mode = await _invoke_llm_with_streaming_fallback(
+            llm,
+            messages,
+            on_stream_chunk=on_stream_chunk,
+            on_stream_event=on_stream_event,
+        )
+        return content, [], mode
+
+    tool_by_name = {
+        _normalize_skill_key(str(getattr(tool, "name", "") or "")): tool
+        for tool in enabled_tools
+        if _normalize_skill_key(str(getattr(tool, "name", "") or ""))
+    }
+    bound_llm = llm
+    bind_tools = getattr(llm, "bind_tools", None)
+    if callable(bind_tools):
+        try:
+            maybe_bound = bind_tools(list(tool_by_name.values()))
+            if maybe_bound is not None:
+                bound_llm = maybe_bound
+        except Exception:
+            bound_llm = llm
+
+    conversation = list(messages)
+    tool_runs: list[dict[str, Any]] = []
+    last_ai_message: AIMessage | None = None
+
+    for round_index in range(max(max_rounds, 1)):
+        with anyio.fail_after(timeout_seconds):
+            response = await bound_llm.ainvoke(conversation)
+        ai_message = response if isinstance(response, AIMessage) else AIMessage(content=_message_text(response))
+        last_ai_message = ai_message
+        tool_calls = list(getattr(ai_message, "tool_calls", []) or [])
+        if not tool_calls:
+            return _message_text(ai_message).strip(), tool_runs, "tool_loop"
+
+        conversation.append(ai_message)
+        tool_results_by_index: dict[int, dict[str, Any]] = {}
+        pending_read_only_calls: list[tuple[int, dict[str, Any]]] = []
+
+        async def flush_read_only_batch() -> None:
+            nonlocal pending_read_only_calls
+            if not pending_read_only_calls:
+                return
+            indexes, batch = zip(*pending_read_only_calls, strict=False)
+            results = await asyncio.gather(
+                *[
+                    _execute_tool_call(
+                        raw_tool_call,
+                        tool_by_name=tool_by_name,
+                        run_index=len(tool_runs) + batch_index,
+                    )
+                    for batch_index, raw_tool_call in pending_read_only_calls
+                ]
+            )
+            for index, result in zip(indexes, results, strict=False):
+                tool_results_by_index[index] = result
+            pending_read_only_calls = []
+
+        for index, raw_tool_call in enumerate(tool_calls):
+            tool_name = _normalize_skill_key(str(raw_tool_call.get("name") or ""))
+            if _tool_is_read_only(tool_name):
+                pending_read_only_calls.append((index, raw_tool_call))
+                continue
+
+            await flush_read_only_batch()
+            tool_results_by_index[index] = await _execute_tool_call(
+                raw_tool_call,
+                tool_by_name=tool_by_name,
+                run_index=len(tool_runs) + index,
+            )
+
+        await flush_read_only_batch()
+
+        for index, _ in enumerate(tool_calls):
+            tool_result = tool_results_by_index[index]
+            conversation.append(
+                ToolMessage(
+                    content=str(tool_result.get("tool_message_content") or ""),
+                    tool_call_id=str(tool_result.get("tool_call_id") or ""),
+                    name=str(tool_result.get("tool_name") or "") or None,
+                    status=str(tool_result.get("status") or "success"),
+                )
+            )
+            tool_runs.append(dict(tool_result.get("run_record") or {}))
+
+    fallback_content = _message_text(last_ai_message).strip() if last_ai_message is not None else ""
+    if fallback_content:
+        return fallback_content, tool_runs, "tool_loop"
+    return (
+        "Tool execution stopped after reaching the maximum tool-call rounds. Provide a final answer without more tool calls.",
+        tool_runs,
+        "tool_loop",
+    )
 
 
 async def _invoke_llm_with_streaming_fallback(
@@ -130,6 +479,797 @@ def _merge_continuation_output(prefix: str, generated: str) -> str:
             overlap = size
             break
     return approved_prefix + generated_text[overlap:]
+
+
+def _normalize_skill_key(value: str) -> str:
+    return "".join(ch.lower() if ch.isalnum() else "_" for ch in value.strip()).strip("_")
+
+
+def _humanize_identifier(value: str) -> str:
+    parts = [part for part in value.replace("-", "_").split("_") if part]
+    return " ".join(part.capitalize() for part in parts) or value
+
+
+def _build_team_capability_roster(
+    *,
+    agents: list[dict[str, Any]],
+    capability_summary_by_agent_id: dict[str, dict[str, Any]],
+) -> str:
+    def resolve_readiness(summary: dict[str, Any]) -> tuple[str, list[str], list[str]]:
+        loaded_skills = [str(item) for item in summary.get("loaded_skill_ids") or [] if str(item).strip()]
+        missing_skills = [str(item) for item in summary.get("missing_skill_ids") or [] if str(item).strip()]
+        configured_allowed_tools = [
+            str(item) for item in summary.get("configured_allowed_tool_ids") or [] if str(item).strip()
+        ]
+        disabled_tools = [str(item) for item in summary.get("disabled_tool_ids") or [] if str(item).strip()]
+        provider_limited_tools = [
+            str(item) for item in summary.get("provider_limited_tool_ids") or [] if str(item).strip()
+        ]
+        configured_allowed_mcp = [
+            str(item) for item in summary.get("configured_allowed_mcp_server_ids") or [] if str(item).strip()
+        ]
+        missing_mcp = [str(item) for item in summary.get("missing_mcp_server_ids") or [] if str(item).strip()]
+        blockers = [str(item) for item in summary.get("readiness_blockers") or [] if str(item).strip()]
+        warnings = [str(item) for item in summary.get("readiness_warnings") or [] if str(item).strip()]
+        if not blockers and missing_skills:
+            blockers = [
+                "Missing approved skills before this node can run: " + ", ".join(missing_skills)
+            ]
+        has_explicit_capability_requirements = bool(
+            loaded_skills or missing_skills or configured_allowed_tools or configured_allowed_mcp
+        )
+        if not warnings:
+            if has_explicit_capability_requirements and missing_mcp:
+                warnings.append("Relevant MCP servers are not enabled in project inventory: " + ", ".join(missing_mcp))
+            if has_explicit_capability_requirements and provider_limited_tools:
+                warnings.append(
+                    "Current provider route cannot execute these tools directly: "
+                    + ", ".join(provider_limited_tools)
+                )
+            if has_explicit_capability_requirements and disabled_tools:
+                warnings.append(
+                    "Some relevant tools stay disabled until feature flags change: "
+                    + ", ".join(disabled_tools)
+                )
+        status = str(summary.get("readiness_status") or "").strip()
+        if status not in {"ready", "limited", "blocked"}:
+            status = "blocked" if blockers else "limited" if warnings else "ready"
+        return status, blockers, warnings
+
+    def resolve_summary(agent: dict[str, Any]) -> dict[str, Any]:
+        agent_id = str(agent.get("agent_id") or "").strip()
+        if agent_id and agent_id in capability_summary_by_agent_id:
+            return capability_summary_by_agent_id[agent_id]
+        cluster_agent_id = str(agent.get("cluster_agent_id") or "").strip()
+        if cluster_agent_id and cluster_agent_id in capability_summary_by_agent_id:
+            return capability_summary_by_agent_id[cluster_agent_id]
+        return {}
+
+    lines: list[str] = []
+    for agent in agents:
+        agent_id = str(agent.get("agent_id") or "").strip()
+        if not agent_id:
+            continue
+        summary = resolve_summary(agent)
+        loaded_skills = [str(item) for item in summary.get("loaded_skill_ids") or [] if str(item).strip()]
+        suggested_skills = [str(item) for item in summary.get("suggested_skill_ids") or [] if str(item).strip()]
+        enabled_tools = [str(item) for item in summary.get("enabled_tool_ids") or [] if str(item).strip()]
+        provider_limited_tools = [
+            str(item) for item in summary.get("provider_limited_tool_ids") or [] if str(item).strip()
+        ]
+        configured_allowed_tools = [
+            str(item) for item in summary.get("configured_allowed_tool_ids") or [] if str(item).strip()
+        ]
+        configured_denied_tools = [
+            str(item) for item in summary.get("configured_denied_tool_ids") or [] if str(item).strip()
+        ]
+        mcp_server_ids = [str(item) for item in summary.get("mcp_server_ids") or [] if str(item).strip()]
+        missing_mcp_server_ids = [str(item) for item in summary.get("missing_mcp_server_ids") or [] if str(item).strip()]
+        configured_allowed_mcp_server_ids = [
+            str(item) for item in summary.get("configured_allowed_mcp_server_ids") or [] if str(item).strip()
+        ]
+        configured_denied_mcp_server_ids = [
+            str(item) for item in summary.get("configured_denied_mcp_server_ids") or [] if str(item).strip()
+        ]
+        delegation_lane_ids = [str(item) for item in summary.get("delegation_lane_ids") or [] if str(item).strip()]
+        delegation_focus = str(summary.get("delegation_focus") or "").strip()
+        tool_support = str(summary.get("tool_execution_support") or "unknown").strip() or "unknown"
+        readiness_status, readiness_blockers, readiness_warnings = resolve_readiness(summary)
+        provider_route = str(summary.get("provider_route") or "project default").strip() or "project default"
+        review_mode = str(summary.get("review_mode") or "direct handoff").strip() or "direct handoff"
+        tool_policy_parts: list[str] = []
+        mcp_policy_parts: list[str] = []
+        if configured_allowed_tools:
+            tool_policy_parts.append(f"allow {', '.join(configured_allowed_tools)}")
+        if configured_denied_tools:
+            tool_policy_parts.append(f"deny {', '.join(configured_denied_tools)}")
+        if configured_allowed_mcp_server_ids:
+            mcp_policy_parts.append(f"allow {', '.join(configured_allowed_mcp_server_ids)}")
+        if configured_denied_mcp_server_ids:
+            mcp_policy_parts.append(f"deny {', '.join(configured_denied_mcp_server_ids)}")
+        lines.append(
+            f"- {str(agent.get('name') or agent_id)} ({str(agent.get('role') or 'specialist')}): "
+            f"skills={', '.join(loaded_skills) if loaded_skills else 'none'}; "
+            f"suggested={', '.join(suggested_skills) if suggested_skills else 'none'}; "
+            f"tools={', '.join(enabled_tools) if enabled_tools else 'none'}; "
+            f"provider_limited_tools={', '.join(provider_limited_tools) if provider_limited_tools else 'none'}; "
+            f"tool_policy={' / '.join(tool_policy_parts) if tool_policy_parts else 'inherit'}; "
+            f"mcp={', '.join(mcp_server_ids) if mcp_server_ids else 'none'}; "
+            f"mcp_gaps={', '.join(missing_mcp_server_ids) if missing_mcp_server_ids else 'none'}; "
+            f"mcp_policy={' / '.join(mcp_policy_parts) if mcp_policy_parts else 'inherit'}; "
+            f"lanes={', '.join(delegation_lane_ids) if delegation_lane_ids else 'generalist'}; "
+            f"focus={delegation_focus or 'general synthesis'}; "
+            f"readiness={readiness_status}; "
+            f"blockers={', '.join(readiness_blockers) if readiness_blockers else 'none'}; "
+            f"warnings={', '.join(readiness_warnings) if readiness_warnings else 'none'}; "
+            f"tool_support={tool_support}; "
+            f"provider={provider_route}; review={review_mode}."
+        )
+    return "\n".join(lines)
+
+
+def _resolve_agent_capability_summary(
+    *,
+    agent: dict[str, Any],
+    capability_summary_by_agent_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    agent_id = str(agent.get("agent_id") or "").strip()
+    if agent_id and agent_id in capability_summary_by_agent_id:
+        return capability_summary_by_agent_id[agent_id]
+    cluster_agent_id = str(agent.get("cluster_agent_id") or "").strip()
+    if cluster_agent_id and cluster_agent_id in capability_summary_by_agent_id:
+        return capability_summary_by_agent_id[cluster_agent_id]
+    return {}
+
+
+def _format_capability_snapshot(summary: dict[str, Any]) -> str:
+    loaded_skills = [str(item) for item in summary.get("loaded_skill_ids") or [] if str(item).strip()]
+    required_skills = [str(item) for item in summary.get("required_skill_ids") or [] if str(item).strip()]
+    missing_required_skills = [
+        str(item) for item in summary.get("missing_required_skill_ids") or [] if str(item).strip()
+    ]
+    required_tools = [str(item) for item in summary.get("required_tool_ids") or [] if str(item).strip()]
+    missing_required_tools = [
+        str(item) for item in summary.get("missing_required_tool_ids") or [] if str(item).strip()
+    ]
+    enabled_tools = [str(item) for item in summary.get("enabled_tool_ids") or [] if str(item).strip()]
+    requires_tool_calling = bool(summary.get("requires_tool_calling", False))
+    provider_limited_tools = [str(item) for item in summary.get("provider_limited_tool_ids") or [] if str(item).strip()]
+    configured_allowed_tools = [
+        str(item) for item in summary.get("configured_allowed_tool_ids") or [] if str(item).strip()
+    ]
+    configured_denied_tools = [
+        str(item) for item in summary.get("configured_denied_tool_ids") or [] if str(item).strip()
+    ]
+    required_mcp_server_ids = [
+        str(item) for item in summary.get("required_mcp_server_ids") or [] if str(item).strip()
+    ]
+    missing_required_mcp_server_ids = [
+        str(item) for item in summary.get("missing_required_mcp_server_ids") or [] if str(item).strip()
+    ]
+    mcp_server_ids = [str(item) for item in summary.get("mcp_server_ids") or [] if str(item).strip()]
+    missing_mcp_server_ids = [str(item) for item in summary.get("missing_mcp_server_ids") or [] if str(item).strip()]
+    configured_allowed_mcp_server_ids = [
+        str(item) for item in summary.get("configured_allowed_mcp_server_ids") or [] if str(item).strip()
+    ]
+    configured_denied_mcp_server_ids = [
+        str(item) for item in summary.get("configured_denied_mcp_server_ids") or [] if str(item).strip()
+    ]
+    delegation_lane_ids = [str(item) for item in summary.get("delegation_lane_ids") or [] if str(item).strip()]
+    delegation_focus = str(summary.get("delegation_focus") or "").strip()
+    tool_support = str(summary.get("tool_execution_support") or "unknown").strip() or "unknown"
+    availability_status = str(summary.get("availability_status") or "").strip()
+    availability_blockers = [str(item) for item in summary.get("availability_blockers") or [] if str(item).strip()]
+    availability_warnings = [str(item) for item in summary.get("availability_warnings") or [] if str(item).strip()]
+    readiness_status = str(summary.get("readiness_status") or "").strip()
+    readiness_blockers = [str(item) for item in summary.get("readiness_blockers") or [] if str(item).strip()]
+    readiness_warnings = [str(item) for item in summary.get("readiness_warnings") or [] if str(item).strip()]
+    if availability_status not in {"available", "limited", "unavailable"}:
+        availability_status = "unavailable" if (
+            missing_required_skills
+            or missing_required_tools
+            or missing_required_mcp_server_ids
+            or (requires_tool_calling and tool_support == "unsupported")
+        ) else "limited" if (requires_tool_calling and tool_support != "supported") else "available"
+    if readiness_status not in {"ready", "limited", "blocked"}:
+        readiness_status = "blocked" if summary.get("missing_skill_ids") else "limited" if (
+            missing_mcp_server_ids or provider_limited_tools
+        ) else "ready"
+    provider_route = str(summary.get("provider_route") or "project default").strip() or "project default"
+    review_mode = str(summary.get("review_mode") or "direct handoff").strip() or "direct handoff"
+    tool_policy_parts: list[str] = []
+    mcp_policy_parts: list[str] = []
+    if configured_allowed_tools:
+        tool_policy_parts.append(f"allow {', '.join(configured_allowed_tools)}")
+    if configured_denied_tools:
+        tool_policy_parts.append(f"deny {', '.join(configured_denied_tools)}")
+    if configured_allowed_mcp_server_ids:
+        mcp_policy_parts.append(f"allow {', '.join(configured_allowed_mcp_server_ids)}")
+    if configured_denied_mcp_server_ids:
+        mcp_policy_parts.append(f"deny {', '.join(configured_denied_mcp_server_ids)}")
+    return (
+        f"skills={', '.join(loaded_skills) if loaded_skills else 'none'}; "
+        f"required_skills={', '.join(required_skills) if required_skills else 'none'}; "
+        f"missing_required_skills={', '.join(missing_required_skills) if missing_required_skills else 'none'}; "
+        f"required_tools={', '.join(required_tools) if required_tools else 'none'}; "
+        f"missing_required_tools={', '.join(missing_required_tools) if missing_required_tools else 'none'}; "
+        f"tools={', '.join(enabled_tools) if enabled_tools else 'none'}; "
+        f"requires_tool_calling={'yes' if requires_tool_calling else 'no'}; "
+        f"provider_limited_tools={', '.join(provider_limited_tools) if provider_limited_tools else 'none'}; "
+        f"tool_policy={' / '.join(tool_policy_parts) if tool_policy_parts else 'inherit'}; "
+        f"required_mcp={', '.join(required_mcp_server_ids) if required_mcp_server_ids else 'none'}; "
+        f"missing_required_mcp={', '.join(missing_required_mcp_server_ids) if missing_required_mcp_server_ids else 'none'}; "
+        f"mcp={', '.join(mcp_server_ids) if mcp_server_ids else 'none'}; "
+        f"mcp_gaps={', '.join(missing_mcp_server_ids) if missing_mcp_server_ids else 'none'}; "
+        f"mcp_policy={' / '.join(mcp_policy_parts) if mcp_policy_parts else 'inherit'}; "
+        f"lanes={', '.join(delegation_lane_ids) if delegation_lane_ids else 'generalist'}; "
+        f"focus={delegation_focus or 'general synthesis'}; "
+        f"availability={availability_status}; "
+        f"availability_blockers={', '.join(availability_blockers) if availability_blockers else 'none'}; "
+        f"availability_warnings={', '.join(availability_warnings) if availability_warnings else 'none'}; "
+        f"readiness={readiness_status}; "
+        f"blockers={', '.join(readiness_blockers) if readiness_blockers else 'none'}; "
+        f"warnings={', '.join(readiness_warnings) if readiness_warnings else 'none'}; "
+        f"tool_support={tool_support}; "
+        f"provider={provider_route}; review={review_mode}"
+    )
+
+
+def _format_delegation_partner(recommendation: dict[str, Any]) -> str:
+    agent_name = str(recommendation.get("agent_name") or recommendation.get("agent_id") or "agent").strip()
+    fit = str(recommendation.get("fit") or "weak").strip() or "weak"
+    rationale = str(recommendation.get("rationale") or "").strip()
+    interaction = str(recommendation.get("interaction") or "").strip()
+    parts = [f"{agent_name} ({fit})"]
+    if interaction:
+        parts.append(f"via {interaction}")
+    if rationale:
+        parts.append(f"- {rationale}")
+    return " ".join(parts)
+
+
+def _format_agent_preview_list(entries: list[dict[str, Any]]) -> str:
+    names = [
+        str(item.get("agent_name") or item.get("agent_id") or "").strip()
+        for item in entries
+        if isinstance(item, dict) and str(item.get("agent_name") or item.get("agent_id") or "").strip()
+    ]
+    if not names:
+        return "none"
+    return ", ".join(names)
+
+
+def _build_structured_delegation_contract(contract: dict[str, Any] | None) -> str:
+    if not isinstance(contract, dict):
+        return ""
+
+    primary_role_mode = str(contract.get("primary_role_mode") or "generalist").strip() or "generalist"
+    supporting_role_modes = [
+        str(item).strip()
+        for item in contract.get("supporting_role_modes") or []
+        if str(item).strip()
+    ]
+    work_strategy = str(contract.get("work_strategy") or "flexible").strip() or "flexible"
+    primary_focus = str(contract.get("primary_focus") or "").strip()
+    upstream_agents = [
+        dict(item)
+        for item in contract.get("upstream_agents") or []
+        if isinstance(item, dict)
+    ]
+    downstream_agents = [
+        dict(item)
+        for item in contract.get("downstream_agents") or []
+        if isinstance(item, dict)
+    ]
+    preferred_collaborators = [
+        dict(item)
+        for item in contract.get("preferred_collaborators") or []
+        if isinstance(item, dict)
+    ]
+    weak_handoff_targets = [
+        dict(item)
+        for item in contract.get("weak_handoff_targets") or []
+        if isinstance(item, dict)
+    ]
+    watchouts = [
+        " ".join(str(item).split())
+        for item in contract.get("watchouts") or []
+        if str(item).strip()
+    ]
+
+    lines = [
+        f"Primary role mode: {primary_role_mode}.",
+        "Supporting role modes: "
+        + (", ".join(supporting_role_modes) if supporting_role_modes else "none")
+        + ".",
+        f"Work strategy: {work_strategy}.",
+        "Coordinate parallel work: "
+        + ("yes" if bool(contract.get("should_coordinate_parallel_work")) else "no")
+        + ".",
+        "Produce final output from this node: "
+        + ("yes" if bool(contract.get("should_produce_final_output")) else "no")
+        + ".",
+        f"Upstream agents: {_format_agent_preview_list(upstream_agents)}.",
+        f"Downstream agents: {_format_agent_preview_list(downstream_agents)}.",
+        f"Preferred collaborators: {_format_agent_preview_list(preferred_collaborators)}.",
+    ]
+    if primary_focus:
+        lines.append(f"Primary focus: {primary_focus}.")
+    if weak_handoff_targets:
+        lines.append(f"Weak handoff targets: {_format_agent_preview_list(weak_handoff_targets)}.")
+    if watchouts:
+        lines.append("Watchouts: " + " | ".join(watchouts[:4]))
+    return "\n".join(lines)
+
+
+def _build_orchestration_routing_summary(
+    orchestration_summary: dict[str, Any] | None,
+    *,
+    expected_agent_count: int | None = None,
+) -> str:
+    if not isinstance(orchestration_summary, dict):
+        return ""
+
+    total_agent_count = int(orchestration_summary.get("total_agent_count") or 0)
+    if expected_agent_count is not None and total_agent_count and total_agent_count != expected_agent_count:
+        return ""
+
+    readiness = str(orchestration_summary.get("readiness") or "ready").strip() or "ready"
+    start_agents = [
+        dict(item)
+        for item in orchestration_summary.get("start_agents") or []
+        if isinstance(item, dict)
+    ]
+    terminal_agents = [
+        dict(item)
+        for item in orchestration_summary.get("terminal_agents") or []
+        if isinstance(item, dict)
+    ]
+    phases = [
+        dict(item)
+        for item in orchestration_summary.get("phases") or []
+        if isinstance(item, dict)
+    ]
+    agent_routing = (
+        dict(orchestration_summary.get("agent_routing") or {})
+        if isinstance(orchestration_summary.get("agent_routing"), dict)
+        else {}
+    )
+    repair_priorities = [
+        dict(item)
+        for item in orchestration_summary.get("repair_priorities") or []
+        if isinstance(item, dict)
+    ]
+    single_owner_capability_risks = [
+        dict(item)
+        for item in orchestration_summary.get("single_owner_capability_risks") or []
+        if isinstance(item, dict)
+    ]
+
+    lines = [
+        f"Graph readiness: {readiness}.",
+        f"Start nodes: {_format_agent_preview_list(start_agents)}.",
+        f"Terminal nodes: {_format_agent_preview_list(terminal_agents)}.",
+    ]
+
+    phase_parts: list[str] = []
+    for phase in phases:
+        phase_id = str(phase.get("phase_id") or "").strip()
+        agents = [dict(item) for item in phase.get("agents") or [] if isinstance(item, dict)]
+        if not phase_id or not agents:
+            continue
+        phase_parts.append(f"{phase_id}={_format_agent_preview_list(agents)}")
+    if phase_parts:
+        lines.append("Phase anchors: " + "; ".join(phase_parts) + ".")
+
+    routing_parts: list[str] = []
+    routing_labels = {
+        "coordinator_anchors": "coordinator",
+        "research_anchors": "research",
+        "implementation_anchors": "implementation",
+        "verification_anchors": "verification",
+        "skill_capable_anchors": "skills",
+        "tool_capable_anchors": "tools",
+        "mcp_capable_anchors": "mcp",
+    }
+    for key, label in routing_labels.items():
+        entries = [dict(item) for item in agent_routing.get(key) or [] if isinstance(item, dict)]
+        if not entries:
+            continue
+        routing_parts.append(f"{label}={_format_agent_preview_list(entries)}")
+    if routing_parts:
+        lines.append("Routing anchors: " + "; ".join(routing_parts) + ".")
+
+    if repair_priorities:
+        repair_parts = [
+            f"{str(item.get('priority_id') or '').strip()} ({str(item.get('severity') or 'low').strip()} x{int(item.get('count') or 0)})"
+            for item in repair_priorities
+            if str(item.get("priority_id") or "").strip()
+        ]
+        if repair_parts:
+            lines.append("Repair watchlist: " + "; ".join(repair_parts) + ".")
+
+    if single_owner_capability_risks:
+        risk_parts: list[str] = []
+        for risk in single_owner_capability_risks[:4]:
+            capability_kind = str(risk.get("kind") or "capability").strip()
+            capability_id = str(risk.get("capability_id") or "").strip()
+            owners = [dict(item) for item in risk.get("owner_agents") or [] if isinstance(item, dict)]
+            if not capability_id:
+                continue
+            risk_parts.append(f"{capability_kind}:{capability_id} -> {_format_agent_preview_list(owners)}")
+        if risk_parts:
+            lines.append("Single-owner watchlist: " + "; ".join(risk_parts) + ".")
+
+    return "\n".join(lines)
+
+
+def _build_skill_guidance_block(
+    *,
+    loaded_skill_ids: list[str],
+    skill_catalog_by_id: dict[str, dict[str, Any]],
+) -> str:
+    lines: list[str] = []
+    for skill_id in loaded_skill_ids:
+        item = skill_catalog_by_id.get(_normalize_skill_key(skill_id), {})
+        title = str(item.get("title") or _humanize_identifier(skill_id)).strip()
+        prompt_hint = str(item.get("prompt_hint") or "").strip()
+        suggested_tools = [
+            _humanize_identifier(str(tool_id))
+            for tool_id in item.get("suggested_tool_ids") or []
+            if str(tool_id).strip()
+        ]
+        if not prompt_hint and not suggested_tools:
+            continue
+        line = f"- {title}: {prompt_hint or 'Use this approved skill pack when relevant.'}"
+        if suggested_tools:
+            line += f" Suggested tools when enabled: {', '.join(suggested_tools)}."
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _build_agent_collaboration_contract(
+    *,
+    agent_id: str,
+    agents_by_id: dict[str, dict[str, Any]],
+    edges: list[dict[str, Any]],
+    capability_summary_by_agent_id: dict[str, dict[str, Any]],
+) -> str:
+    incoming: list[str] = []
+    outgoing: list[str] = []
+    agent_summary = capability_summary_by_agent_id.get(agent_id, {})
+    downstream_fit_by_agent_id = {
+        str(item.get("agent_id") or "").strip(): dict(item)
+        for item in agent_summary.get("downstream_handoff_scores") or []
+        if isinstance(item, dict) and str(item.get("agent_id") or "").strip()
+    }
+    recommended_collaborators = [
+        dict(item)
+        for item in agent_summary.get("recommended_collaborators") or []
+        if isinstance(item, dict) and str(item.get("agent_id") or "").strip()
+    ]
+
+    for edge in edges:
+        source = str(edge.get("source_agent_id") or "").strip()
+        target = str(edge.get("target_agent_id") or "").strip()
+        interaction = str(edge.get("interaction") or "handoff").strip() or "handoff"
+        if target == agent_id:
+            source_agent = agents_by_id.get(source, {})
+            source_summary = _resolve_agent_capability_summary(
+                agent=source_agent,
+                capability_summary_by_agent_id=capability_summary_by_agent_id,
+            )
+            source_name = str(source_agent.get("name") or source or "unknown agent").strip()
+            incoming.append(
+                f"- {source_name} -> you via {interaction}; upstream profile: {_format_capability_snapshot(source_summary)}."
+            )
+        if source == agent_id:
+            target_agent = agents_by_id.get(target, {})
+            target_summary = _resolve_agent_capability_summary(
+                agent=target_agent,
+                capability_summary_by_agent_id=capability_summary_by_agent_id,
+            )
+            target_name = str(target_agent.get("name") or target or "unknown agent").strip()
+            fit_summary = downstream_fit_by_agent_id.get(target, {})
+            fit = str(fit_summary.get("fit") or "").strip()
+            rationale = str(fit_summary.get("rationale") or "").strip()
+            fit_text = f"fit={fit}; " if fit else ""
+            rationale_text = f"why={rationale}; " if rationale else ""
+            outgoing.append(
+                f"- you -> {target_name} via {interaction}; {fit_text}{rationale_text}"
+                f"downstream profile: {_format_capability_snapshot(target_summary)}."
+            )
+
+    sections: list[str] = []
+    if incoming:
+        sections.append("Incoming collaboration edges:\n" + "\n".join(incoming))
+    if outgoing:
+        sections.append("Outgoing collaboration edges:\n" + "\n".join(outgoing))
+    if not outgoing:
+        sections.append("No explicit downstream edge is configured, so produce a self-contained final output.")
+    if recommended_collaborators:
+        sections.append(
+            "Best-fit collaborators if you need an extra handoff:\n"
+            + "\n".join(f"- {_format_delegation_partner(item)}" for item in recommended_collaborators[:3])
+        )
+    sections.append(
+        "Shape your output for clean handoff: keep assumptions explicit, call out unresolved risks, and leave concrete next actions for the next edge. "
+        "When useful, include compact sections such as Summary, Next actions, Open questions, and Risks so the next node can pick up your work cleanly."
+    )
+    return "\n\n".join(sections)
+
+
+def _resolve_agent_output_key(agent: dict[str, Any]) -> str:
+    if bool(agent.get("cluster_summary")):
+        return str(agent.get("cluster_agent_id") or agent.get("agent_id") or "").strip()
+    return str(agent.get("agent_id") or "").strip()
+
+
+def _trim_handoff_payload(value: str, *, max_chars: int = 2200) -> str:
+    content = str(value or "").strip()
+    if len(content) <= max_chars:
+        return content
+    return content[: max(max_chars - 3, 1)].rstrip() + "..."
+
+
+def _dedupe_preserve_order(values: list[str], *, limit: int = 3) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = " ".join(str(value or "").strip().split())
+        if not normalized:
+            continue
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(normalized)
+        if len(output) >= limit:
+            break
+    return output
+
+
+def _extract_handoff_summary(content: str, *, max_chars: int = 280) -> str:
+    paragraphs = [
+        " ".join(part.strip().split())
+        for part in re.split(r"\n\s*\n", str(content or "").strip())
+        if str(part).strip()
+    ]
+    if not paragraphs:
+        return ""
+    summary = paragraphs[0]
+    if len(summary) <= max_chars:
+        return summary
+    return summary[: max(max_chars - 3, 1)].rstrip() + "..."
+
+
+def _extract_action_items(content: str) -> list[str]:
+    candidates: list[str] = []
+    for raw_line in str(content or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        lower = line.lower()
+        if re.match(r"^([-*]|\d+[.)])\s+", line):
+            candidates.append(re.sub(r"^([-*]|\d+[.)])\s+", "", line).strip())
+            continue
+        if lower.startswith(("next:", "next step:", "action:", "actions:", "todo:", "follow-up:", "follow up:")):
+            candidates.append(line.split(":", 1)[1].strip() if ":" in line else line)
+    return _dedupe_preserve_order(candidates)
+
+
+def _extract_open_questions(content: str) -> list[str]:
+    candidates: list[str] = []
+    for raw_line in str(content or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        lower = line.lower()
+        if lower.startswith("question:"):
+            candidates.append(line.split(":", 1)[1].strip())
+            continue
+        if line.endswith("?"):
+            candidates.append(line)
+    return _dedupe_preserve_order(candidates)
+
+
+def _extract_risk_flags(content: str) -> list[str]:
+    candidates: list[str] = []
+    for raw_line in str(content or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        lower = line.lower()
+        if (
+            lower.startswith(("risk:", "risks:", "blocker:", "blockers:", "unknown:", "uncertain:", "constraint:", "constraints:"))
+            or "blocked by" in lower
+            or "at risk" in lower
+        ):
+            candidates.append(line)
+    return _dedupe_preserve_order(candidates)
+
+
+def _build_agent_output_artifact(
+    *,
+    agent_config: dict[str, Any],
+    content: str,
+    outgoing_edges: list[dict[str, Any]],
+    agent_directory: dict[str, dict[str, Any]],
+    incoming_edges: list[dict[str, Any]] | None = None,
+    state: OrchestrationState | None = None,
+    tool_runs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    consumed_handoffs: list[dict[str, Any]] = []
+    outputs = (state or {}).get("agent_outputs", {}) or {}
+    artifacts = (state or {}).get("output_artifacts", {}) or {}
+
+    for edge in incoming_edges or []:
+        source_agent_id = str(edge.get("source_agent_id") or "").strip()
+        if not source_agent_id:
+            continue
+        source_agent = agent_directory.get(source_agent_id, {})
+        source_name = str(source_agent.get("name") or source_agent_id or "unknown agent").strip()
+        interaction = str(edge.get("interaction") or "handoff").strip() or "handoff"
+        output_key = _resolve_agent_output_key(source_agent or {"agent_id": source_agent_id})
+        source_output = str(outputs.get(output_key) or "").strip()
+        source_artifact = dict(artifacts.get(output_key) or {})
+        artifact_summary = _summarize_output_artifact(source_artifact)
+
+        if not artifact_summary and not source_output:
+            continue
+
+        handoff: dict[str, Any] = {
+            "source_agent_id": source_agent_id,
+            "source_agent_name": source_name,
+            "interaction": interaction,
+        }
+        if artifact_summary:
+            handoff["artifact_summary"] = artifact_summary
+        if source_output:
+            handoff["output_preview"] = _trim_handoff_payload(source_output, max_chars=400)
+            handoff["output_char_count"] = len(source_output)
+        consumed_handoffs.append(handoff)
+
+    downstream_handoffs: list[dict[str, str]] = []
+    for edge in outgoing_edges:
+        target_agent_id = str(edge.get("target_agent_id") or "").strip()
+        if not target_agent_id:
+            continue
+        target_agent = agent_directory.get(target_agent_id, {})
+        downstream_handoffs.append(
+            {
+                "target_agent_id": target_agent_id,
+                "target_agent_name": str(target_agent.get("name") or target_agent_id).strip(),
+                "interaction": str(edge.get("interaction") or "handoff").strip() or "handoff",
+            }
+        )
+
+    artifact = {
+        "node_kind": "agent",
+        "agent_id": str(agent_config.get("agent_id") or "").strip(),
+        "agent_name": str(agent_config.get("name") or agent_config.get("agent_id") or "agent").strip(),
+        "role": str(agent_config.get("role") or "specialist").strip() or "specialist",
+        "handoff_summary": _extract_handoff_summary(content),
+        "action_items": _extract_action_items(content),
+        "open_questions": _extract_open_questions(content),
+        "risk_flags": _extract_risk_flags(content),
+        "output_preview": _trim_handoff_payload(content, max_chars=600),
+        "output_char_count": len(str(content or "")),
+        "downstream_handoffs": downstream_handoffs,
+        "final_output": len(downstream_handoffs) == 0,
+    }
+    mcp_server_ids = [str(item) for item in agent_config.get("mcp_server_ids") or [] if str(item).strip()]
+    missing_mcp_server_ids = [
+        str(item) for item in agent_config.get("missing_mcp_server_ids") or [] if str(item).strip()
+    ]
+    allowed_tool_ids = [str(item) for item in agent_config.get("allowed_tool_ids") or [] if str(item).strip()]
+    denied_tool_ids = [str(item) for item in agent_config.get("denied_tool_ids") or [] if str(item).strip()]
+    allowed_mcp_server_ids = [
+        str(item) for item in agent_config.get("allowed_mcp_server_ids") or [] if str(item).strip()
+    ]
+    denied_mcp_server_ids = [
+        str(item) for item in agent_config.get("denied_mcp_server_ids") or [] if str(item).strip()
+    ]
+    if mcp_server_ids:
+        artifact["mcp_server_ids"] = mcp_server_ids
+    if missing_mcp_server_ids:
+        artifact["missing_mcp_server_ids"] = missing_mcp_server_ids
+    if allowed_tool_ids:
+        artifact["allowed_tool_ids"] = allowed_tool_ids
+    if denied_tool_ids:
+        artifact["denied_tool_ids"] = denied_tool_ids
+    if allowed_mcp_server_ids:
+        artifact["allowed_mcp_server_ids"] = allowed_mcp_server_ids
+    if denied_mcp_server_ids:
+        artifact["denied_mcp_server_ids"] = denied_mcp_server_ids
+    if consumed_handoffs:
+        artifact["consumed_handoffs"] = consumed_handoffs
+    if tool_runs:
+        artifact["tool_runs"] = list(tool_runs)
+    return artifact
+
+
+def _summarize_output_artifact(artifact: dict[str, Any]) -> str:
+    if not isinstance(artifact, dict) or not artifact:
+        return ""
+    if str(artifact.get("node_kind") or "") == "cluster":
+        summary_parts: list[str] = []
+        winning_strategy = str(artifact.get("winning_strategy") or artifact.get("winning_vote") or "").strip()
+        if winning_strategy:
+            summary_parts.append(f"winning strategy={winning_strategy}")
+        next_step = str(artifact.get("next_step") or "").strip()
+        if next_step:
+            summary_parts.append(f"next step={next_step}")
+        dominant_risks = str(artifact.get("dominant_risks") or "").strip()
+        if dominant_risks:
+            summary_parts.append(f"dominant risks={dominant_risks}")
+        return "; ".join(summary_parts)
+    summary_parts = []
+    handoff_summary = str(artifact.get("handoff_summary") or "").strip()
+    if handoff_summary:
+        summary_parts.append(f"summary={handoff_summary}")
+    action_items = [str(item).strip() for item in artifact.get("action_items") or [] if str(item).strip()]
+    if action_items:
+        summary_parts.append(f"next actions={', '.join(action_items[:3])}")
+    open_questions = [str(item).strip() for item in artifact.get("open_questions") or [] if str(item).strip()]
+    if open_questions:
+        summary_parts.append(f"open questions={', '.join(open_questions[:2])}")
+    risk_flags = [str(item).strip() for item in artifact.get("risk_flags") or [] if str(item).strip()]
+    if risk_flags:
+        summary_parts.append(f"risks={', '.join(risk_flags[:2])}")
+    tool_ids = [
+        str(item.get("tool_id") or "").strip()
+        for item in artifact.get("tool_runs") or []
+        if isinstance(item, dict) and str(item.get("tool_id") or "").strip()
+    ]
+    if tool_ids:
+        summary_parts.append(f"tools={', '.join(list(dict.fromkeys(tool_ids))[:3])}")
+    return "; ".join(summary_parts)
+    return ""
+
+
+def _build_upstream_handoff_context(
+    *,
+    agent_id: str,
+    agent_directory: dict[str, dict[str, Any]],
+    incoming_edges: list[dict[str, Any]],
+    state: OrchestrationState,
+) -> str:
+    if not incoming_edges:
+        return ""
+
+    outputs = state.get("agent_outputs", {}) or {}
+    artifacts = state.get("output_artifacts", {}) or {}
+    blocks: list[str] = []
+
+    for edge in incoming_edges:
+        source_agent_id = str(edge.get("source_agent_id") or "").strip()
+        if not source_agent_id:
+            continue
+        source_agent = agent_directory.get(source_agent_id, {})
+        source_name = str(source_agent.get("name") or source_agent_id or "unknown agent").strip()
+        interaction = str(edge.get("interaction") or "handoff").strip() or "handoff"
+        output_key = _resolve_agent_output_key(source_agent or {"agent_id": source_agent_id})
+        source_output = str(outputs.get(output_key) or "").strip()
+        artifact_summary = _summarize_output_artifact(dict(artifacts.get(output_key) or {}))
+
+        if not source_output and not artifact_summary:
+            continue
+
+        lines = [f"- From {source_name} via {interaction}."]
+        if artifact_summary:
+            lines.append(f"  Structured artifact: {artifact_summary}")
+        if source_output:
+            trimmed_output = _trim_handoff_payload(source_output)
+            indented_output = "\n".join(f"    {line}" for line in trimmed_output.splitlines())
+            lines.append("  Completed upstream output:")
+            lines.append(indented_output)
+        blocks.append("\n".join(lines))
+
+    if not blocks:
+        return ""
+
+    return "Direct upstream handoffs already completed:\n" + "\n\n".join(blocks)
 
 
 def _topological_sort(agents: list[dict[str, Any]], edges: list[dict[str, Any]]) -> list[str]:
@@ -523,6 +1663,8 @@ def _build_cluster_output_artifact(
     rounds: int,
     summary: str,
     prior_sections: list[str],
+    mcp_server_ids: list[str] | None = None,
+    missing_mcp_server_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     artifact: dict[str, Any] = {
         "node_kind": "cluster",
@@ -534,6 +1676,12 @@ def _build_cluster_output_artifact(
         "rounds_completed": rounds,
         "raw_summary": summary,
     }
+    if mcp_server_ids:
+        artifact["mcp_server_ids"] = [str(item) for item in mcp_server_ids if str(item).strip()]
+    if missing_mcp_server_ids:
+        artifact["missing_mcp_server_ids"] = [
+            str(item) for item in missing_mcp_server_ids if str(item).strip()
+        ]
     if cluster_strategy != "brainstorm":
         return artifact
 
@@ -714,9 +1862,111 @@ def build_orchestration_execution_plan(graph_json: dict[str, Any]) -> tuple[list
     provider_config = graph_json.get("provider_config") or {}
     review_config = graph_json.get("review_agent") or {}
     expanded_agents, expanded_edges = _expand_cluster_agents(agents, edges)
+    capability_summary_by_agent_id = {
+        str(item.get("agent_id") or "").strip(): dict(item)
+        for item in graph_json.get("agent_capability_summaries") or []
+        if isinstance(item, dict) and str(item.get("agent_id") or "").strip()
+    }
+    skill_catalog_by_id = {
+        _normalize_skill_key(str(item.get("skill_id") or "")): dict(item)
+        for item in graph_json.get("skill_catalog") or []
+        if isinstance(item, dict) and _normalize_skill_key(str(item.get("skill_id") or ""))
+    }
+    tool_catalog_by_id = _build_tool_catalog_lookup(graph_json)
+    mcp_catalog_by_id = _build_mcp_catalog_lookup(graph_json)
     execution_order = _topological_sort(expanded_agents, expanded_edges)
     agent_by_id = {str(agent.get("agent_id") or ""): agent for agent in expanded_agents}
-    ordered_agents = [agent_by_id[agent_id] for agent_id in execution_order if agent_id in agent_by_id]
+    team_capability_roster = _build_team_capability_roster(
+        agents=expanded_agents,
+        capability_summary_by_agent_id=capability_summary_by_agent_id,
+    )
+    orchestration_summary_brief = _build_orchestration_routing_summary(
+        graph_json.get("orchestration_summary") if isinstance(graph_json.get("orchestration_summary"), dict) else None,
+        expected_agent_count=len(agents),
+    )
+    ordered_agents: list[dict[str, Any]] = []
+    for agent_id in execution_order:
+        agent = agent_by_id.get(agent_id)
+        if not agent:
+            continue
+        enriched_agent = dict(agent)
+        summary = _resolve_agent_capability_summary(
+            agent=enriched_agent,
+            capability_summary_by_agent_id=capability_summary_by_agent_id,
+        )
+        if summary:
+            enabled_tool_ids = [str(item) for item in summary.get("enabled_tool_ids") or [] if str(item).strip()]
+            mcp_server_ids = [str(item) for item in summary.get("mcp_server_ids") or [] if str(item).strip()]
+            missing_mcp_server_ids = [
+                str(item) for item in summary.get("missing_mcp_server_ids") or [] if str(item).strip()
+            ]
+            delegation_lane_ids = [str(item) for item in summary.get("delegation_lane_ids") or [] if str(item).strip()]
+            delegation_focus = str(summary.get("delegation_focus") or "").strip()
+            delegation_contract = (
+                dict(summary.get("delegation_contract") or {})
+                if isinstance(summary.get("delegation_contract"), dict)
+                else {}
+            )
+            readiness_status = str(summary.get("readiness_status") or "").strip() or "ready"
+            readiness_blockers = [
+                str(item) for item in summary.get("readiness_blockers") or [] if str(item).strip()
+            ]
+            readiness_warnings = [
+                str(item) for item in summary.get("readiness_warnings") or [] if str(item).strip()
+            ]
+            enriched_agent["capability_brief"] = str(summary.get("capability_brief") or "")
+            enriched_agent["capability_execution_contract"] = _build_capability_execution_contract(summary)
+            enriched_agent["delegation_lane_ids"] = delegation_lane_ids
+            enriched_agent["delegation_focus"] = delegation_focus
+            enriched_agent["delegation_contract"] = delegation_contract
+            enriched_agent["structured_delegation_contract"] = _build_structured_delegation_contract(
+                delegation_contract
+            )
+            enriched_agent["readiness_status"] = readiness_status
+            enriched_agent["readiness_blockers"] = readiness_blockers
+            enriched_agent["readiness_warnings"] = readiness_warnings
+            enriched_agent["recommended_collaborators"] = [
+                dict(item) for item in summary.get("recommended_collaborators") or [] if isinstance(item, dict)
+            ]
+            enriched_agent["downstream_handoff_scores"] = [
+                dict(item) for item in summary.get("downstream_handoff_scores") or [] if isinstance(item, dict)
+            ]
+            enriched_agent["skill_guidance"] = _build_skill_guidance_block(
+                loaded_skill_ids=[str(item) for item in summary.get("loaded_skill_ids") or [] if str(item).strip()],
+                skill_catalog_by_id=skill_catalog_by_id,
+            )
+            enriched_agent["enabled_tool_ids"] = enabled_tool_ids
+            enriched_agent["mcp_server_ids"] = mcp_server_ids
+            enriched_agent["missing_mcp_server_ids"] = missing_mcp_server_ids
+            enriched_agent["tool_guidance"] = _build_tool_guidance_block(
+                enabled_tool_ids=enabled_tool_ids,
+                tool_catalog_by_id=tool_catalog_by_id,
+            )
+            enriched_agent["mcp_guidance"] = _build_mcp_guidance_block(
+                mcp_server_ids=mcp_server_ids,
+                missing_mcp_server_ids=missing_mcp_server_ids,
+                mcp_catalog_by_id=mcp_catalog_by_id,
+            )
+        enriched_agent["team_capability_roster"] = team_capability_roster
+        enriched_agent["orchestration_summary_brief"] = orchestration_summary_brief
+        enriched_agent["agent_directory"] = agent_by_id
+        enriched_agent["incoming_edges"] = [
+            dict(edge)
+            for edge in expanded_edges
+            if str(edge.get("target_agent_id") or "").strip() == str(agent_id)
+        ]
+        enriched_agent["outgoing_edges"] = [
+            dict(edge)
+            for edge in expanded_edges
+            if str(edge.get("source_agent_id") or "").strip() == str(agent_id)
+        ]
+        enriched_agent["collaboration_contract"] = _build_agent_collaboration_contract(
+            agent_id=str(agent_id),
+            agents_by_id=agent_by_id,
+            edges=expanded_edges,
+            capability_summary_by_agent_id=capability_summary_by_agent_id,
+        )
+        ordered_agents.append(enriched_agent)
     return ordered_agents, provider_config, review_config
 
 
@@ -797,7 +2047,10 @@ async def review_orchestration_output(
     normalized = review_output.strip().upper()
     approved = normalized.startswith("PASS")
     if not approved and not normalized.startswith("BLOCK"):
-        approved = True
+        review_output = (
+            "BLOCK: review agent returned an invalid decision token and requires human confirmation. "
+            f"Raw output: {review_output or '<empty>'}"
+        )
     return {
         "approved": approved,
         "review_output": review_output or ("PASS: no issues detected" if approved else "BLOCK: human review required"),
@@ -830,6 +2083,9 @@ def _build_agent_node(
         """LangGraph node representing a single canvas agent."""
         _log.info("Executing canvas agent node: %s (%s)", name, agent_id)
         continuation_context = _build_continuation_context(agent_id, state)
+        configured_enabled_tool_ids = [
+            str(item) for item in agent_config.get("enabled_tool_ids") or [] if str(item).strip()
+        ]
 
         if is_cluster_summary:
             cluster_agent_id = str(agent_config.get("cluster_agent_id") or agent_id)
@@ -900,6 +2156,14 @@ def _build_agent_node(
                 rounds=int(agent_config.get("brainstorm_rounds") or 1),
                 summary=summary,
                 prior_sections=sections,
+                mcp_server_ids=[
+                    str(item) for item in agent_config.get("mcp_server_ids") or [] if str(item).strip()
+                ],
+                missing_mcp_server_ids=[
+                    str(item)
+                    for item in agent_config.get("missing_mcp_server_ids") or []
+                    if str(item).strip()
+                ],
             )
             if "cluster_member_count" in agent_config:
                 artifacts[cluster_agent_id]["member_count"] = int(agent_config.get("cluster_member_count") or 0)
@@ -919,6 +2183,21 @@ def _build_agent_node(
             temperature=temperature,
             timeout_seconds=timeout,
         )
+        runtime_tool_support, runtime_tool_support_reason = infer_tool_calling_support(
+            model=resolved.model,
+            base_url=resolved.base_url,
+            provider_id=resolved.provider_id,
+        )
+        llm_supports_tool_binding = callable(getattr(llm, "bind_tools", None))
+        runtime_enabled_tool_ids = list(configured_enabled_tool_ids)
+        if runtime_enabled_tool_ids and not is_review and not is_cluster_summary:
+            if runtime_tool_support == "unsupported":
+                runtime_enabled_tool_ids = []
+            elif not llm_supports_tool_binding:
+                runtime_tool_support = "unsupported"
+                runtime_tool_support_reason = "This runtime adapter does not expose native tool binding."
+                runtime_enabled_tool_ids = []
+        enabled_tools = _resolve_enabled_tools(runtime_enabled_tool_ids) if not is_review and not is_cluster_summary else []
 
         if is_review:
             prior_outputs = [
@@ -931,6 +2210,18 @@ def _build_agent_node(
                 "Review the completed agent collaboration for correctness, safety, and handoff quality.\n"
                 "Return a concise review summary."
             )
+            capability_roster = str(agent_config.get("team_capability_roster") or "").strip()
+            if capability_roster:
+                review_context += (
+                    "\n\nCapability map for the collaborating team:\n"
+                    f"{capability_roster}\n"
+                )
+            orchestration_summary_brief = str(agent_config.get("orchestration_summary_brief") or "").strip()
+            if orchestration_summary_brief:
+                review_context += (
+                    "\n\nGraph orchestration brief:\n"
+                    f"{orchestration_summary_brief}\n"
+                )
             if prior_outputs:
                 review_context += "\n\nCollected agent outputs:\n" + "\n\n".join(prior_outputs)
             messages = [
@@ -955,9 +2246,110 @@ def _build_agent_node(
                 )
             )
             task_context = f"The overall user task is: {state.get('task')}\n"
+            capability_brief = str(agent_config.get("capability_brief") or "").strip()
+            if capability_brief:
+                task_context += (
+                    "\nYour approved collaboration capabilities are:\n"
+                    f"{capability_brief}\n"
+                )
+            capability_execution_contract = str(agent_config.get("capability_execution_contract") or "").strip()
+            if capability_execution_contract:
+                task_context += (
+                    "\nExecution contract for this node:\n"
+                    f"{capability_execution_contract}\n"
+                    "Treat this contract as the hard boundary between planning metadata and actually executable actions.\n"
+                )
+            delegation_lane_ids = [
+                str(item) for item in agent_config.get("delegation_lane_ids") or [] if str(item).strip()
+            ]
+            if delegation_lane_ids:
+                task_context += (
+                    "\nStructured delegation lanes for this node:\n"
+                    f"{', '.join(delegation_lane_ids)}\n"
+                )
+            delegation_focus = str(agent_config.get("delegation_focus") or "").strip()
+            if delegation_focus:
+                task_context += (
+                    "\nPreferred delegation lane for this node:\n"
+                    f"{delegation_focus}\n"
+                    "Lean into this lane when deciding whether to work directly or hand off to a teammate with a better fit.\n"
+                )
+            structured_delegation_contract = str(agent_config.get("structured_delegation_contract") or "").strip()
+            if structured_delegation_contract:
+                task_context += (
+                    "\nStructured delegation contract for this node:\n"
+                    f"{structured_delegation_contract}\n"
+                    "Use this contract to decide whether this node should coordinate, execute, verify, or close the loop itself.\n"
+                )
+            recommended_collaborators = [
+                dict(item)
+                for item in agent_config.get("recommended_collaborators") or []
+                if isinstance(item, dict) and str(item.get("agent_id") or "").strip()
+            ]
+            if recommended_collaborators:
+                task_context += (
+                    "\nBest-fit collaborators already identified from the current canvas:\n"
+                    + "\n".join(f"- {_format_delegation_partner(item)}" for item in recommended_collaborators[:3])
+                    + "\n"
+                )
+            skill_guidance = str(agent_config.get("skill_guidance") or "").strip()
+            if skill_guidance:
+                task_context += (
+                    "\nApproved skill pack guidance:\n"
+                    f"{skill_guidance}\n"
+                )
+            mcp_guidance = str(agent_config.get("mcp_guidance") or "").strip()
+            if mcp_guidance:
+                task_context += (
+                    "\nRelevant project MCP inventory for this node:\n"
+                    f"{mcp_guidance}\n"
+                    "Treat this MCP inventory as planning metadata only. "
+                    "Do not claim an MCP server was executed unless the runtime explicitly reports that execution. "
+                    "If missing MCP inventory blocks the task, call out the capability gap directly.\n"
+                )
+            orchestration_summary_brief = str(agent_config.get("orchestration_summary_brief") or "").strip()
+            if orchestration_summary_brief:
+                task_context += (
+                    "\nCurrent graph orchestration brief:\n"
+                    f"{orchestration_summary_brief}\n"
+                    "Use this brief to decide who should coordinate, where parallel fan-out is safe, and which lane should close the loop.\n"
+                )
+            capability_roster = str(agent_config.get("team_capability_roster") or "").strip()
+            if capability_roster:
+                task_context += (
+                    "\nTeam capability map:\n"
+                    f"{capability_roster}\n"
+                    "Choose handoffs that fit those capabilities instead of assuming every node can do every kind of work.\n"
+                )
+            collaboration_contract = str(agent_config.get("collaboration_contract") or "").strip()
+            if collaboration_contract:
+                task_context += (
+                    "\nYour collaboration contract on this canvas is:\n"
+                    f"{collaboration_contract}\n"
+                )
+            tool_guidance = str(agent_config.get("tool_guidance") or "").strip() if runtime_enabled_tool_ids else ""
+            if tool_guidance:
+                task_context += (
+                    "\nExecutable tools available from this node:\n"
+                    f"{tool_guidance}\n"
+                    "Only call these tools when they materially improve the answer. If a tool is not listed here, do not assume it is executable.\n"
+                )
+            elif configured_enabled_tool_ids and runtime_tool_support_reason:
+                task_context += (
+                    "\nTool execution is configured for this node, but the current runtime cannot honor native tool calls.\n"
+                    f"Reason: {runtime_tool_support_reason}\n"
+                )
             brainstorm_round_context = _build_brainstorm_round_context(agent_config=agent_config, state=state)
             if brainstorm_round_context:
                 task_context += f"\n{brainstorm_round_context}\n"
+            knowledge_context = str(state.get("knowledge_context") or "").strip()
+            if knowledge_context:
+                task_context += (
+                    "\nProject knowledge base context is available below. "
+                    "Treat it as reference material retrieved from the project's selected knowledge bases. "
+                    "Use it when relevant, but still verify assumptions from first principles.\n"
+                    f"{knowledge_context}\n"
+                )
             prior_research_context = _build_prior_research_context(agent_id=agent_id, state=state)
             if prior_research_context:
                 task_context += (
@@ -965,6 +2357,14 @@ def _build_agent_node(
                     "Use it to refine your reasoning, but still verify assumptions from first principles.\n"
                     f"{prior_research_context}\n"
                 )
+            upstream_handoff_context = _build_upstream_handoff_context(
+                agent_id=agent_id,
+                agent_directory=dict(agent_config.get("agent_directory") or {}),
+                incoming_edges=list(agent_config.get("incoming_edges") or []),
+                state=state,
+            )
+            if upstream_handoff_context:
+                task_context += f"\n{upstream_handoff_context}\n"
             if continuation_context:
                 task_context += (
                     "\nThis node is resuming from an approved partial output that was interrupted by live review. "
@@ -973,21 +2373,18 @@ def _build_agent_node(
                 )
                 if str(continuation_context.get("review_output") or "").strip():
                     task_context += f"\nReview note:\n{str(continuation_context.get('review_output') or '').strip()}\n"
-            other_outputs = []
-            for aid, output in state.get("agent_outputs", {}).items():
-                if aid != agent_id:
-                    other_outputs.append(f"Agent {aid} output:\n{output}")
-            if other_outputs:
-                task_context += "\nPrevious agents completed work:\n" + "\n".join(other_outputs)
             messages = [sys_msg, HumanMessage(content=task_context)] + state.get("messages", [])
 
         content = ""
         error_msg = None
+        tool_runs: list[dict[str, Any]] = []
         try:
             with anyio.fail_after(timeout):
-                content, _ = await _invoke_llm_with_streaming_fallback(
+                content, tool_runs, _ = await _invoke_llm_with_tool_loop(
                     llm,
                     messages,
+                    enabled_tools=enabled_tools,
+                    timeout_seconds=timeout,
                     on_stream_chunk=None if is_review else on_stream_chunk,
                     on_stream_event=None if is_review else on_stream_event,
                 )
@@ -1007,10 +2404,20 @@ def _build_agent_node(
             )
 
         new_outputs = state.get("agent_outputs", {}).copy()
+        updated_artifacts = state.get("output_artifacts", {}).copy()
         if is_review:
             new_outputs["review_agent"] = content
         else:
             new_outputs[agent_id] = content
+            updated_artifacts[agent_id] = _build_agent_output_artifact(
+                agent_config=agent_config,
+                content=content,
+                incoming_edges=list(agent_config.get("incoming_edges") or []),
+                outgoing_edges=list(agent_config.get("outgoing_edges") or []),
+                agent_directory=dict(agent_config.get("agent_directory") or {}),
+                state=state,
+                tool_runs=tool_runs,
+            )
         errors = list(state.get("errors", []))
         if error_msg:
             _log.warning(error_msg)
@@ -1019,7 +2426,7 @@ def _build_agent_node(
         return {
             "current_agent": agent_id if not is_review else "review_agent",
             "agent_outputs": new_outputs,
-            "output_artifacts": state.get("output_artifacts", {}).copy(),
+            "output_artifacts": updated_artifacts,
             "errors": errors,
             "messages": [AIMessage(content=f"[{name}] says:\n{content}")],
         }
@@ -1047,6 +2454,26 @@ def compile_orchestration_graph(
     review_config = graph_json.get("review_agent") or {}
     registry = provider_registry or get_provider_registry()
     agents, edges = _expand_cluster_agents(agents, edges)
+    capability_summary_by_agent_id = {
+        str(item.get("agent_id") or ""): dict(item)
+        for item in graph_json.get("agent_capability_summaries") or []
+        if isinstance(item, dict) and str(item.get("agent_id") or "").strip()
+    }
+    skill_catalog_by_id = {
+        _normalize_skill_key(str(item.get("skill_id") or "")): dict(item)
+        for item in graph_json.get("skill_catalog") or []
+        if isinstance(item, dict) and _normalize_skill_key(str(item.get("skill_id") or ""))
+    }
+    tool_catalog_by_id = _build_tool_catalog_lookup(graph_json)
+    mcp_catalog_by_id = _build_mcp_catalog_lookup(graph_json)
+    team_capability_roster = _build_team_capability_roster(
+        agents=agents,
+        capability_summary_by_agent_id=capability_summary_by_agent_id,
+    )
+    orchestration_summary_brief = _build_orchestration_routing_summary(
+        graph_json.get("orchestration_summary") if isinstance(graph_json.get("orchestration_summary"), dict) else None,
+        expected_agent_count=len(agents),
+    )
 
     if not agents:
         # Empty graph fallback
@@ -1059,16 +2486,93 @@ def compile_orchestration_graph(
 
     execution_order = _topological_sort(agents, edges)
     agent_by_id = {str(a["agent_id"]): a for a in agents}
-    
+
     # 1. Build Nodes
     node_names = []
     for aid in execution_order:
         agent_conf = agent_by_id.get(aid)
         if not agent_conf:
             continue
+        summary = _resolve_agent_capability_summary(
+            agent=agent_conf,
+            capability_summary_by_agent_id=capability_summary_by_agent_id,
+        )
+        enriched_agent_conf = dict(agent_conf)
+        if summary:
+            enabled_tool_ids = [str(item) for item in summary.get("enabled_tool_ids") or [] if str(item).strip()]
+            mcp_server_ids = [str(item) for item in summary.get("mcp_server_ids") or [] if str(item).strip()]
+            missing_mcp_server_ids = [
+                str(item) for item in summary.get("missing_mcp_server_ids") or [] if str(item).strip()
+            ]
+            delegation_lane_ids = [str(item) for item in summary.get("delegation_lane_ids") or [] if str(item).strip()]
+            delegation_focus = str(summary.get("delegation_focus") or "").strip()
+            delegation_contract = (
+                dict(summary.get("delegation_contract") or {})
+                if isinstance(summary.get("delegation_contract"), dict)
+                else {}
+            )
+            readiness_status = str(summary.get("readiness_status") or "").strip() or "ready"
+            readiness_blockers = [
+                str(item) for item in summary.get("readiness_blockers") or [] if str(item).strip()
+            ]
+            readiness_warnings = [
+                str(item) for item in summary.get("readiness_warnings") or [] if str(item).strip()
+            ]
+            enriched_agent_conf["capability_brief"] = str(summary.get("capability_brief") or "")
+            enriched_agent_conf["capability_execution_contract"] = _build_capability_execution_contract(summary)
+            enriched_agent_conf["delegation_lane_ids"] = delegation_lane_ids
+            enriched_agent_conf["delegation_focus"] = delegation_focus
+            enriched_agent_conf["delegation_contract"] = delegation_contract
+            enriched_agent_conf["structured_delegation_contract"] = _build_structured_delegation_contract(
+                delegation_contract
+            )
+            enriched_agent_conf["readiness_status"] = readiness_status
+            enriched_agent_conf["readiness_blockers"] = readiness_blockers
+            enriched_agent_conf["readiness_warnings"] = readiness_warnings
+            enriched_agent_conf["recommended_collaborators"] = [
+                dict(item) for item in summary.get("recommended_collaborators") or [] if isinstance(item, dict)
+            ]
+            enriched_agent_conf["downstream_handoff_scores"] = [
+                dict(item) for item in summary.get("downstream_handoff_scores") or [] if isinstance(item, dict)
+            ]
+            enriched_agent_conf["skill_guidance"] = _build_skill_guidance_block(
+                loaded_skill_ids=[str(item) for item in summary.get("loaded_skill_ids") or [] if str(item).strip()],
+                skill_catalog_by_id=skill_catalog_by_id,
+            )
+            enriched_agent_conf["enabled_tool_ids"] = enabled_tool_ids
+            enriched_agent_conf["mcp_server_ids"] = mcp_server_ids
+            enriched_agent_conf["missing_mcp_server_ids"] = missing_mcp_server_ids
+            enriched_agent_conf["tool_guidance"] = _build_tool_guidance_block(
+                enabled_tool_ids=enabled_tool_ids,
+                tool_catalog_by_id=tool_catalog_by_id,
+            )
+            enriched_agent_conf["mcp_guidance"] = _build_mcp_guidance_block(
+                mcp_server_ids=mcp_server_ids,
+                missing_mcp_server_ids=missing_mcp_server_ids,
+                mcp_catalog_by_id=mcp_catalog_by_id,
+            )
+        enriched_agent_conf["team_capability_roster"] = team_capability_roster
+        enriched_agent_conf["orchestration_summary_brief"] = orchestration_summary_brief
+        enriched_agent_conf["agent_directory"] = agent_by_id
+        enriched_agent_conf["incoming_edges"] = [
+            dict(edge)
+            for edge in edges
+            if str(edge.get("target_agent_id") or "").strip() == str(aid)
+        ]
+        enriched_agent_conf["outgoing_edges"] = [
+            dict(edge)
+            for edge in edges
+            if str(edge.get("source_agent_id") or "").strip() == str(aid)
+        ]
+        enriched_agent_conf["collaboration_contract"] = _build_agent_collaboration_contract(
+            agent_id=str(aid),
+            agents_by_id=agent_by_id,
+            edges=edges,
+            capability_summary_by_agent_id=capability_summary_by_agent_id,
+        )
         node_name = f"agent_{aid}"
         node_names.append(node_name)
-        builder.add_node(node_name, _build_agent_node(agent_conf, provider_config, default_timeout, registry))
+        builder.add_node(node_name, _build_agent_node(enriched_agent_conf, provider_config, default_timeout, registry))
 
     review_enabled = bool(review_config.get("enabled", True))
     if review_enabled:
@@ -1081,6 +2585,8 @@ def compile_orchestration_graph(
             "fallback_provider_id": review_config.get("fallback_provider_id"),
             "temperature": float(review_config.get("temperature", 0)),
             "timeout_seconds": review_config.get("timeout_seconds"),
+            "team_capability_roster": team_capability_roster,
+            "orchestration_summary_brief": orchestration_summary_brief,
         }
         builder.add_node(
             "review_agent",

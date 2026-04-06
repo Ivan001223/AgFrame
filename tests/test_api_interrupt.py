@@ -178,29 +178,20 @@ def test_interrupt_endpoints(monkeypatch: pytest.MonkeyPatch):
     assert body["interrupted"] is True
     assert body["action_required"]["payload"] == {"target": "prod"}
 
-    approve = c.post("/interrupt/s1/approve", json={"approved": True})
+    resume_ready = c.get("/interrupt/s1/resume")
+    assert resume_ready.status_code == 400
+
+    approve = c.post("/interrupt/s1/approve", json={"approved": True, "comment": "ship with guardrails"})
     assert approve.status_code == 200
     assert approve.json()["approved"] is True
-
-    refreshed = c.get("/interrupt/s1")
-    assert refreshed.status_code == 200
-    refreshed_body = refreshed.json()
-    assert refreshed_body["action_required"]["approved"] is True
+    assert approve.json()["approved_by"] == "u1"
 
     resume_ready = c.get("/interrupt/s1/resume")
     assert resume_ready.status_code == 200
     resume_payload = resume_ready.json()["resume_payload"]
     assert resume_payload["configurable"]["thread_id"] == "s1"
     assert resume_payload["configurable"]["checkpoint_ns"] == ""
-    assert resume_payload["configurable"]["checkpoint_id"] != "cp-1"
-
-    saved_call = fake_saver.saved_calls[-1]
-    assert saved_call["config"]["configurable"]["checkpoint_id"] == "cp-1"
-    assert saved_call["checkpoint"]["channel_values"]["foo"] == {"keep": True}
-    assert saved_call["checkpoint"]["versions_seen"] == {
-        "node": {"foo": "00000000000000000000000000000001.0000000000000000"}
-    }
-    assert saved_call["checkpoint"]["pending_sends"] == ["send-1"]
+    assert resume_payload["configurable"]["checkpoint_id"] == fake_saver.saved_calls[-1]["checkpoint"]["id"]
 
     class _ResumeService:
         async def resume_approved_session(self, *, session_id: str, checkpoint: dict[str, object]):
@@ -226,16 +217,34 @@ def test_interrupt_endpoints(monkeypatch: pytest.MonkeyPatch):
     assert resumed_body["messages"][-1]["role"] == "assistant"
     assert resumed_body["context"]["context_pruning"]["method"] == "heuristic"
 
+    saved_call = fake_saver.saved_calls[-1]
+    assert saved_call["config"]["configurable"]["checkpoint_id"] == "cp-1"
+    assert saved_call["checkpoint"]["id"] != "cp-1"
+    assert saved_call["checkpoint"]["channel_values"]["foo"] == {"keep": True}
+    assert saved_call["checkpoint"]["versions_seen"] == {
+        "node": {"foo": "00000000000000000000000000000001.0000000000000000"}
+    }
+    assert saved_call["checkpoint"]["pending_sends"] == ["send-1"]
+
+    refreshed = c.get("/interrupt/s1")
+    assert refreshed.status_code == 200
+    refreshed_body = refreshed.json()
+    assert refreshed_body["action_required"]["approved"] is True
+    assert refreshed_body["action_required"]["approved_by"] == "u1"
+
     s1_events = c.get("/interrupt/s1/events")
     assert s1_events.status_code == 200
-    assert [event["event_type"] for event in s1_events.json()["events"]] == [
+    s1_event_payload = s1_events.json()["events"]
+    assert [event["event_type"] for event in s1_event_payload] == [
+        "interrupt.resume_blocked",
         "interrupt.approved",
         "interrupt.resume_requested",
         "interrupt.resumed",
     ]
+    assert s1_event_payload[1]["details"]["comment"] == "ship with guardrails"
 
     _seed_checkpoint(fake_saver, session_id="s2", checkpoint_id="cp-2", checkpoint_ns="default")
-    reject = c.post("/interrupt/s2/approve", json={"approved": False})
+    reject = c.post("/interrupt/s2/approve", json={"approved": False, "comment": "hold deployment"})
     assert reject.status_code == 200
     assert reject.json()["approved"] is False
     assert fake_saver.saved_calls[-1]["config"]["configurable"]["checkpoint_id"] == "cp-2"
@@ -252,10 +261,12 @@ def test_interrupt_endpoints(monkeypatch: pytest.MonkeyPatch):
 
     s2_events = c.get("/interrupt/s2/events")
     assert s2_events.status_code == 200
-    assert [event["event_type"] for event in s2_events.json()["events"]] == [
+    s2_event_payload = s2_events.json()["events"]
+    assert [event["event_type"] for event in s2_event_payload] == [
         "interrupt.rejected",
         "interrupt.resume_blocked",
     ]
+    assert s2_event_payload[0]["details"]["comment"] == "hold deployment"
 
     _seed_checkpoint(
         fake_saver,
@@ -345,8 +356,8 @@ def test_interrupt_resume_persists_history(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(interrupt_api, "get_graph_resume_service", lambda: _ResumeService())
 
-    approve = c.post("/interrupt/persisted/approve", json={"approved": True})
-    assert approve.status_code == 200
+    approved = c.post("/interrupt/persisted/approve", json={"approved": True})
+    assert approved.status_code == 200
 
     resumed = c.post("/interrupt/persisted/resume")
     assert resumed.status_code == 200

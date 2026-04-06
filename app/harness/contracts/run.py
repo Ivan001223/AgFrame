@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -64,6 +65,48 @@ class HarnessResearchState(BaseModel):
     browser_preview_count: int = 0
     source_count: int = 0
     cluster_ids: list[str] = Field(default_factory=list)
+
+
+class HarnessWorkflowStep(BaseModel):
+    step_id: str
+    step_index: int = Field(default=0, ge=0)
+    loop_number: int = Field(default=1, ge=1)
+    label: str
+    execution_id: str | None = None
+    node_id: str | None = None
+    status: Literal["pending", "in_progress", "completed", "blocked"] = "pending"
+    kind: Literal["agent", "cluster_member", "cluster_summary"] = "agent"
+
+
+class HarnessWorkflowProgress(BaseModel):
+    enabled: bool = False
+    status: Literal["idle", "pending", "running", "blocked", "completed", "failed"] = "idle"
+    total_steps: int = 0
+    completed_steps: int = 0
+    blocked_steps: int = 0
+    review_enabled: bool = False
+    current_step_index: int | None = None
+    current_step_label: str | None = None
+    blocking_step_index: int | None = None
+    blocking_step_label: str | None = None
+    blocking_stage: str | None = None
+    blocking_reason: str | None = None
+    steps: list[HarnessWorkflowStep] = Field(default_factory=list)
+
+
+class HarnessRunChecklistItem(BaseModel):
+    item_id: str
+    content: str = Field(min_length=1, max_length=240)
+    status: Literal["pending", "in_progress", "completed"] = "pending"
+    active_form: str | None = Field(default=None, max_length=240)
+
+
+class HarnessRunChecklistSnapshot(BaseModel):
+    enabled: bool = False
+    total_items: int = 0
+    open_items: int = 0
+    completed_items: int = 0
+    items: list[HarnessRunChecklistItem] = Field(default_factory=list)
 
 
 class HarnessRuntimeState(BaseModel):

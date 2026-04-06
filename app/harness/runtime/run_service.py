@@ -3,7 +3,13 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from app.harness.contracts.run import HarnessRuntimeState
+from app.harness.contracts.run import (
+    HarnessRunChecklistItem,
+    HarnessRunChecklistSnapshot,
+    HarnessRuntimeState,
+    HarnessWorkflowProgress,
+    HarnessWorkflowStep,
+)
 from app.harness.persistence.stores import (
     HarnessApprovalStore,
     HarnessEventStore,
@@ -15,6 +21,7 @@ from app.harness.persistence.stores import (
 from app.harness.runtime.event_service import HarnessEventService
 from app.harness.runtime.policy_registry import get_policy, list_policies
 from app.harness.runtime.verification_service import VerificationService
+from app.runtime.graph.orchestration_graph import build_orchestration_execution_plan
 
 
 class HarnessRetryNotAllowedError(ValueError):
@@ -72,6 +79,257 @@ class HarnessRunService:
             return int(value) if value is not None else None
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _normalize_string_list(value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            text = str(item or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            normalized.append(text)
+        return normalized
+
+    @staticmethod
+    def _filter_graph_for_execution(
+        graph_json: dict[str, object],
+        *,
+        selected_agent_ids: list[str],
+    ) -> dict[str, object]:
+        if not selected_agent_ids:
+            return dict(graph_json)
+        selected = {agent_id for agent_id in selected_agent_ids if agent_id}
+        filtered = dict(graph_json)
+        filtered["agents"] = [
+            agent
+            for agent in graph_json.get("agents") or []
+            if isinstance(agent, dict) and str(agent.get("agent_id") or "") in selected
+        ]
+        filtered["edges"] = [
+            edge
+            for edge in graph_json.get("edges") or []
+            if (
+                isinstance(edge, dict)
+                and str(edge.get("source_agent_id") or "") in selected
+                and str(edge.get("target_agent_id") or "") in selected
+            )
+        ]
+        selected_scope_orchestration_summary = graph_json.get("selected_scope_orchestration_summary")
+        if isinstance(selected_scope_orchestration_summary, dict):
+            filtered["orchestration_summary"] = dict(selected_scope_orchestration_summary)
+        return filtered
+
+    @staticmethod
+    def _workflow_step_kind(agent_config: dict[str, object]) -> str:
+        if bool(agent_config.get("cluster_summary")):
+            return "cluster_summary"
+        if str(agent_config.get("cluster_agent_id") or "").strip():
+            return "cluster_member"
+        return "agent"
+
+    def _build_checklist_snapshot(self, *, run: dict[str, object]) -> dict[str, object] | None:
+        if str(run.get("task_type") or "") != "agent_orchestration":
+            return None
+        input_json = run.get("input_json")
+        if not isinstance(input_json, dict):
+            return HarnessRunChecklistSnapshot().model_dump()
+
+        items = input_json.get("task_checklist")
+        if not isinstance(items, list):
+            return HarnessRunChecklistSnapshot().model_dump()
+
+        normalized_items: list[HarnessRunChecklistItem] = []
+        for index, item in enumerate(items):
+            if not isinstance(item, dict):
+                continue
+            content = str(item.get("content") or "").strip()
+            if not content:
+                continue
+            active_form = str(item.get("active_form") or "").strip() or None
+            normalized_items.append(
+                HarnessRunChecklistItem(
+                    item_id=str(item.get("item_id") or f"check_{index + 1}"),
+                    content=content,
+                    status=str(item.get("status") or "pending"),
+                    active_form=active_form,
+                )
+            )
+
+        total_items = len(normalized_items)
+        completed_items = sum(1 for item in normalized_items if item.status == "completed")
+
+        return HarnessRunChecklistSnapshot(
+            enabled=total_items > 0,
+            total_items=total_items,
+            open_items=total_items - completed_items,
+            completed_items=completed_items,
+            items=normalized_items,
+        ).model_dump()
+
+    @staticmethod
+    def _first_incomplete_step_index(total_steps: int, completed_steps: set[int]) -> int | None:
+        for index in range(total_steps):
+            if index not in completed_steps:
+                return index
+        return None
+
+    def _build_workflow_progress(
+        self,
+        *,
+        run: dict[str, object],
+        latest_approval: dict[str, object] | None,
+        latest_verification: dict[str, object] | None,
+        events: list[dict[str, object]] | None,
+    ) -> dict[str, object] | None:
+        if str(run.get("task_type") or "") != "agent_orchestration":
+            return None
+        input_json = run.get("input_json")
+        if not isinstance(input_json, dict):
+            return None
+        graph_json = input_json.get("graph")
+        if not isinstance(graph_json, dict):
+            return None
+
+        selected_agent_ids = self._normalize_string_list(input_json.get("selected_agent_ids"))
+        filtered_graph = self._filter_graph_for_execution(
+            graph_json,
+            selected_agent_ids=selected_agent_ids,
+        )
+        try:
+            ordered_agents, _, review_config = build_orchestration_execution_plan(filtered_graph)
+        except Exception:
+            return None
+
+        loop_count = max(1, self._coerce_int(input_json.get("loop_count")) or 1)
+        review_enabled = bool((review_config or {}).get("enabled", True))
+
+        steps: list[HarnessWorkflowStep] = []
+        step_index = 0
+        for loop_number in range(1, loop_count + 1):
+            for agent_config in ordered_agents:
+                execution_id = str(agent_config.get("agent_id") or "").strip() or None
+                node_id = (
+                    str(agent_config.get("cluster_agent_id") or agent_config.get("agent_id") or "").strip() or None
+                )
+                label = str(agent_config.get("name") or node_id or f"step {step_index + 1}")
+                steps.append(
+                    HarnessWorkflowStep(
+                        step_id=f"workflow_step_{step_index}",
+                        step_index=step_index,
+                        loop_number=loop_number,
+                        label=label,
+                        execution_id=execution_id,
+                        node_id=node_id,
+                        kind=self._workflow_step_kind(agent_config),
+                    )
+                )
+                step_index += 1
+
+        total_steps = len(steps)
+        if total_steps == 0:
+            return HarnessWorkflowProgress(review_enabled=review_enabled).model_dump()
+
+        run_status = str(run.get("status") or "").strip()
+        verification_status = str((latest_verification or {}).get("status") or "").strip()
+        approval_status = str((latest_approval or {}).get("status") or "").strip()
+        approval_action_type = str((latest_approval or {}).get("action_type") or "").strip()
+        approval_payload = (
+            dict(latest_approval.get("payload_json") or {})
+            if isinstance(latest_approval, dict)
+            else {}
+        )
+
+        completed_step_indices: set[int] = set()
+        if run_status == "completed" or verification_status == "pass":
+            completed_step_indices = set(range(total_steps))
+        else:
+            for event in events or []:
+                if str(event.get("event_type") or "") != "orchestration.step_completed":
+                    continue
+                details = event.get("details_json")
+                if not isinstance(details, dict):
+                    continue
+                completed_index = self._coerce_int(details.get("step_index"))
+                if completed_index is None or completed_index < 0 or completed_index >= total_steps:
+                    continue
+                completed_step_indices.add(completed_index)
+
+        blocked_step_index = None
+        if approval_action_type == "orchestration_review":
+            candidate = self._coerce_int(approval_payload.get("step_index"))
+            if candidate is not None and 0 <= candidate < total_steps:
+                blocked_step_index = candidate
+
+        current_step_index = None
+        workflow_status = "idle"
+        if run_status == "completed" or verification_status == "pass":
+            workflow_status = "completed"
+        elif approval_action_type == "orchestration_review" and approval_status in {"pending", "rejected"}:
+            workflow_status = "blocked"
+            current_step_index = blocked_step_index
+        elif run_status in {"running", "approved", "resumed", "verifying"} or str(run.get("current_step") or "") == "executing_graph":
+            workflow_status = "running"
+            current_step_index = self._first_incomplete_step_index(total_steps, completed_step_indices)
+        elif run_status == "failed":
+            workflow_status = "blocked" if blocked_step_index is not None else "failed"
+            current_step_index = (
+                blocked_step_index
+                if blocked_step_index is not None
+                else self._first_incomplete_step_index(total_steps, completed_step_indices)
+            )
+        elif run_status in {"created", "queued", "waiting_approval"}:
+            workflow_status = "pending"
+            current_step_index = self._first_incomplete_step_index(total_steps, completed_step_indices)
+
+        serialized_steps: list[dict[str, object]] = []
+        for step in steps:
+            status = "completed" if step.step_index in completed_step_indices else "pending"
+            if status != "completed" and current_step_index == step.step_index:
+                if workflow_status == "running":
+                    status = "in_progress"
+                elif workflow_status == "blocked":
+                    status = "blocked"
+            serialized_steps.append(step.model_copy(update={"status": status}).model_dump())
+
+        current_step_label = None
+        if current_step_index is not None and 0 <= current_step_index < len(serialized_steps):
+            current_step_label = str(serialized_steps[current_step_index].get("label") or "") or None
+
+        blocking_step_index = current_step_index if workflow_status == "blocked" else None
+        blocking_step_label = current_step_label if workflow_status == "blocked" else None
+        blocking_stage = (
+            str(approval_payload.get("review_stage") or "").strip() or None
+            if workflow_status == "blocked"
+            else None
+        )
+        blocking_reason = None
+        if workflow_status == "blocked":
+            blocking_reason = (
+                str((latest_approval or {}).get("comment") or "").strip()
+                or str(approval_payload.get("review_output") or "").strip()
+                or str((latest_approval or {}).get("reason") or "").strip()
+                or None
+            )
+
+        return HarnessWorkflowProgress(
+            enabled=True,
+            status=workflow_status,
+            total_steps=total_steps,
+            completed_steps=sum(1 for step in serialized_steps if step.get("status") == "completed"),
+            blocked_steps=sum(1 for step in serialized_steps if step.get("status") == "blocked"),
+            review_enabled=review_enabled,
+            current_step_index=current_step_index,
+            current_step_label=current_step_label,
+            blocking_step_index=blocking_step_index,
+            blocking_step_label=blocking_step_label,
+            blocking_stage=blocking_stage,
+            blocking_reason=blocking_reason,
+            steps=[HarnessWorkflowStep.model_validate(step) for step in serialized_steps],
+        ).model_dump()
 
     def _build_runtime_state(
         self,
@@ -771,6 +1029,39 @@ class HarnessRunService:
         self.sync_runtime_state(run_id, run=run, latest_approval=approval, transition_type="approval_requested")
         return approval
 
+    def create_resolved_approval(
+        self,
+        *,
+        run_id: str,
+        action_type: str,
+        reason: str | None,
+        payload_json: dict[str, object],
+        requested_by: str | None,
+        status: str,
+        resolved_by: str,
+        comment: str | None,
+    ) -> dict[str, object] | None:
+        if self.approval_store is None:
+            return None
+        created = self.approval_store.create_approval(
+            approval_id=f"ha_{uuid.uuid4()}",
+            run_id=run_id,
+            action_type=action_type,
+            reason=reason,
+            payload_json=payload_json,
+            status=str(status or "approved"),
+            requested_by=requested_by,
+        )
+        created_id = str(created.get("approval_id") or "").strip()
+        if not created_id:
+            return created
+        return self.update_approval(
+            created_id,
+            status=str(status or "approved"),
+            resolved_by=resolved_by,
+            comment=comment,
+        )
+
     def record_event(
         self,
         run_id: str,
@@ -851,6 +1142,13 @@ class HarnessRunService:
             events=list(detail["events"] or []),
             transition_type="detail_sync",
         )
+        detail["workflow_progress"] = self._build_workflow_progress(
+            run=detail,
+            latest_approval=detail["latest_approval"],
+            latest_verification=detail["latest_verification"],
+            events=list(detail["events"] or []),
+        )
+        detail["checklist_snapshot"] = self._build_checklist_snapshot(run=detail)
         return detail
 
     def list_runs(self, *, user_id: str, limit: int = 50) -> list[dict[str, object]]:
@@ -887,6 +1185,13 @@ class HarnessRunService:
                     transition_type="list_sync",
                 )
             )
+            summary["workflow_progress"] = self._build_workflow_progress(
+                run=summary,
+                latest_approval=summary["latest_approval"],
+                latest_verification=summary["latest_verification"],
+                events=None,
+            )
+            summary["checklist_snapshot"] = self._build_checklist_snapshot(run=summary)
             summaries.append(summary)
         return summaries
 

@@ -23,9 +23,14 @@ async def get_arq_pool() -> ArqRedis:
     return _pool
 
 
-async def enqueue_ingest_pdf(task_id: str, file_path: str, user_id: str = None) -> str:
+async def enqueue_ingest_pdf(
+    task_id: str,
+    file_path: str,
+    user_id: str = None,
+    knowledge_base_id: str | None = None,
+) -> str:
     pool = await get_arq_pool()
-    job = await pool.enqueue_job("ingest_pdf", task_id, file_path, user_id)
+    job = await pool.enqueue_job("ingest_pdf", task_id, file_path, user_id, knowledge_base_id)
     return str(job.job_id)
 
 

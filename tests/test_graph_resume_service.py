@@ -1,6 +1,7 @@
 import pytest
 
-from app.runtime.graph.graph import _check_approval
+from app.infrastructure.config.settings import settings
+from app.runtime.graph.graph import _after_generate_key, _check_approval, run_app
 from app.runtime.graph.resume_service import GraphResumeService
 
 
@@ -8,6 +9,37 @@ class _Snapshot:
     def __init__(self, values: dict[str, object], config: dict[str, object]):
         self.values = values
         self.config = config
+
+
+def test_run_app_includes_approval_nodes_even_when_flag_defaults_off():
+    graph = run_app().get_graph()
+
+    assert "human_interrupt" in graph.nodes
+    assert "check_approval" in graph.nodes
+
+
+def test_after_generate_routes_to_interrupt_before_self_correction(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(settings.feature_flags, "enable_self_correction", True)
+
+    decision = _after_generate_key({"context": {"require_human_approval": True}})
+
+    assert decision == "interrupt"
+
+
+def test_after_generate_routes_to_grader_without_approval(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(settings.feature_flags, "enable_self_correction", True)
+
+    decision = _after_generate_key({"context": {}})
+
+    assert decision == "grade"
+
+
+def test_after_generate_routes_to_end_when_self_correction_disabled(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(settings.feature_flags, "enable_self_correction", False)
+
+    decision = _after_generate_key({"context": {}})
+
+    assert decision == "end"
 
 
 def test_check_approval_routes_approved_when_interrupt_cleared():

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -99,3 +100,69 @@ def test_workbench_invoke_persists_history_and_normalizes_identity(monkeypatch: 
         {"role": "user", "content": "hi"},
         {"role": "assistant", "content": "hello"},
     ]
+
+
+def test_workbench_invoke_returns_interrupted_session_without_auto_approval(monkeypatch: pytest.MonkeyPatch):
+    saved: dict[str, Any] = {}
+
+    class _State:
+        values = {
+            "messages": [
+                {"role": "user", "content": "ship it"},
+                {"role": "assistant", "content": "approval pending"},
+            ],
+            "context": {"context_pruning": {"method": "interrupt"}},
+            "interrupted": True,
+        }
+
+    class _GraphApp:
+        async def ainvoke(self, input_value: dict[str, Any], config: dict[str, Any]):
+            return {"ok": True}
+
+        async def aget_state(self, config: dict[str, Any]):
+            return _State()
+
+    def _persist_session_messages(
+        *,
+        user_id: str,
+        session_id: str,
+        messages: list[dict[str, Any]],
+        background_tasks: Any = None,
+        title: str | None = None,
+    ):
+        saved["user_id"] = user_id
+        saved["session_id"] = session_id
+        saved["messages"] = messages
+        saved["title"] = title
+        return {"id": session_id, "messages": messages}
+
+    monkeypatch.setattr(chat_api, "get_chat_graph_app", lambda: _GraphApp())
+    monkeypatch.setattr(chat_api, "persist_session_messages", _persist_session_messages)
+
+    app = FastAPI()
+    app.include_router(chat_api.router)
+    app.dependency_overrides[chat_api.get_current_active_user] = lambda: _U(username="u1")
+    client = TestClient(app)
+
+    response = client.post(
+        "/chat/workbench-invoke",
+        json={
+            "input": {
+                "messages": [{"role": "user", "content": "ship it"}],
+                "context": {"session_id": "s-auto", "require_human_approval": True},
+            },
+            "config": {"configurable": {"thread_id": "s-auto"}},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session_id"] == "s-auto"
+    assert body["interrupted"] is True
+    assert body["reply"] == "approval pending"
+    assert body["messages"][-1] == {"role": "assistant", "content": "approval pending"}
+    assert body["context"]["context_pruning"]["method"] == "interrupt"
+
+    assert saved["user_id"] == "u1"
+    assert saved["session_id"] == "s-auto"
+    assert saved["messages"][-1]["content"] == "approval pending"

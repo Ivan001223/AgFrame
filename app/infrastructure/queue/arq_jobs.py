@@ -30,6 +30,7 @@ from app.runtime.graph.orchestration_graph import (
 from app.runtime.graph.resume_service import GraphResumeService
 from app.runtime.llm.provider_registry import ModelProviderRegistry
 from app.server.session_history import persist_session_messages
+from app.skills.registry import build_fallback_skill_descriptor, get_skill_descriptor
 from app.skills.research.enhanced_search import (
     enhanced_search_response,
     enhanced_web_search,
@@ -59,8 +60,647 @@ def _normalize_ingest_result(result: Any) -> dict[str, Any]:
     }
 
 
+def _add_knowledge_base_with_optional_library(
+    file_path: str,
+    user_id: str | None,
+    knowledge_base_id: str | None,
+) -> Any:
+    rag_engine = get_rag_engine()
+    try:
+        return rag_engine.add_knowledge_base(
+            file_path,
+            user_id=user_id,
+            knowledge_base_id=knowledge_base_id,
+        )
+    except TypeError as exc:
+        if "knowledge_base_id" not in str(exc):
+            raise
+        return rag_engine.add_knowledge_base(file_path, user_id=user_id)
+
+
 def _normalize_skill_key(value: str) -> str:
     return "".join(ch.lower() if ch.isalnum() else "_" for ch in value.strip()).strip("_")
+
+
+def _normalize_string_list(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        item = str(value or "").strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
+def _build_skill_catalog_lookup(graph: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    lookup: dict[str, dict[str, Any]] = {}
+    for item in graph.get("skill_catalog") or []:
+        if not isinstance(item, dict):
+            continue
+        skill_id = _normalize_skill_key(str(item.get("skill_id") or ""))
+        if not skill_id:
+            continue
+        lookup[skill_id] = dict(item)
+    return lookup
+
+
+def _build_skill_requirement_detail(skill_id: str, *, skill_catalog_lookup: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    normalized = _normalize_skill_key(skill_id)
+    catalog_item = skill_catalog_lookup.get(normalized)
+    if catalog_item:
+        return {
+            "skill_id": normalized,
+            "title": str(catalog_item.get("title") or normalized).strip(),
+            "description": str(catalog_item.get("description") or "").strip() or None,
+            "prompt_hint": str(catalog_item.get("prompt_hint") or "").strip() or None,
+            "source": str(catalog_item.get("source") or "").strip() or None,
+            "suggested_tool_ids": [
+                str(tool_id).strip()
+                for tool_id in catalog_item.get("suggested_tool_ids") or []
+                if str(tool_id).strip()
+            ],
+            "suggested_mcp_server_ids": [
+                str(server_id).strip()
+                for server_id in catalog_item.get("suggested_mcp_server_ids") or []
+                if str(server_id).strip()
+            ],
+        }
+
+    descriptor = get_skill_descriptor(normalized) or build_fallback_skill_descriptor(normalized)
+    return {
+        "skill_id": normalized,
+        "title": descriptor.title,
+        "description": descriptor.description or None,
+        "prompt_hint": descriptor.prompt_hint or None,
+        "source": f"app/skills/{descriptor.skill_id}",
+        "suggested_tool_ids": list(descriptor.suggested_tool_ids),
+        "suggested_mcp_server_ids": list(descriptor.suggested_mcp_server_ids),
+    }
+
+
+def _normalize_task_checklist(values: Any) -> list[dict[str, str]]:
+    if not isinstance(values, list):
+        return []
+    normalized: list[dict[str, str]] = []
+    for index, value in enumerate(values):
+        if not isinstance(value, dict):
+            continue
+        content = str(value.get("content") or "").strip()
+        if not content:
+            continue
+        status = str(value.get("status") or "pending").strip() or "pending"
+        if status not in {"pending", "in_progress", "completed"}:
+            status = "pending"
+        active_form = str(value.get("active_form") or "").strip() or content
+        normalized.append(
+            {
+                "item_id": str(value.get("item_id") or f"check_{index + 1}"),
+                "content": content,
+                "status": status,
+                "active_form": active_form,
+            }
+        )
+    return normalized
+
+
+def _format_task_checklist_context(values: Any) -> str:
+    checklist = _normalize_task_checklist(values)
+    if not checklist:
+        return ""
+    status_label = {
+        "pending": "[pending]",
+        "in_progress": "[in progress]",
+        "completed": "[completed]",
+    }
+    lines = ["Execution checklist:"]
+    for item in checklist:
+        status = str(item.get("status") or "pending")
+        content = str(
+            item.get("active_form")
+            if status == "in_progress"
+            else item.get("content")
+            or ""
+        ).strip()
+        if not content:
+            continue
+        lines.append(f"- {status_label.get(status, '[pending]')} {content}")
+    if len(lines) == 1:
+        return ""
+    lines.append("Keep the checklist in mind when planning handoffs, ordering work, and deciding what remains unfinished.")
+    return "\n".join(lines)
+
+
+def _task_checklist_preview(values: Any, *, limit: int = 3) -> list[str]:
+    checklist = _normalize_task_checklist(values)
+    preview: list[str] = []
+    for item in checklist:
+        if str(item.get("status") or "pending") == "completed":
+            continue
+        content = str(item.get("active_form") or item.get("content") or "").strip()
+        if not content:
+            continue
+        preview.append(content)
+        if len(preview) >= limit:
+            break
+    return preview
+
+
+def _snapshot_orchestration_state(state: dict[str, Any], *, fallback_task: str = "") -> dict[str, Any]:
+    payload = {
+        "task": str(state.get("task") or fallback_task),
+        "agent_outputs": dict(state.get("agent_outputs") or {}),
+        "output_artifacts": dict(state.get("output_artifacts") or {}),
+        "current_agent": str(state.get("current_agent") or ""),
+        "loop_index": int(state.get("loop_index") or 0),
+        "errors": list(state.get("errors") or []),
+    }
+    knowledge_base_ids = _normalize_string_list(state.get("knowledge_base_ids"))
+    if knowledge_base_ids:
+        payload["knowledge_base_ids"] = knowledge_base_ids
+    knowledge_context = str(state.get("knowledge_context") or "").strip()
+    if knowledge_context:
+        payload["knowledge_context"] = knowledge_context
+    return payload
+
+
+def _trim_prompt_context(text: str, *, max_chars: int) -> str:
+    content = str(text or "").strip()
+    if len(content) <= max_chars:
+        return content
+    return content[: max(max_chars - 3, 1)].rstrip() + "..."
+
+
+def _dedupe_trimmed_string_list(values: Any, *, limit: int = 4, max_chars: int = 180) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    output: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = " ".join(str(value or "").strip().split())
+        if not normalized:
+            continue
+        normalized = _trim_prompt_context(normalized, max_chars=max_chars)
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(normalized)
+        if len(output) >= limit:
+            break
+    return output
+
+
+def _extract_handoff_summary_for_approval(content: str, *, max_chars: int = 280) -> str:
+    paragraphs = [
+        " ".join(part.strip().split())
+        for part in re.split(r"\n\s*\n", str(content or "").strip())
+        if str(part).strip()
+    ]
+    if not paragraphs:
+        return ""
+    return _trim_prompt_context(paragraphs[0], max_chars=max_chars)
+
+
+def _extract_action_items_for_approval(content: str) -> list[str]:
+    candidates: list[str] = []
+    for raw_line in str(content or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        lower = line.lower()
+        if re.match(r"^([-*]|\d+[.)])\s+", line):
+            candidates.append(re.sub(r"^([-*]|\d+[.)])\s+", "", line).strip())
+            continue
+        if lower.startswith(("next:", "next step:", "action:", "actions:", "todo:", "follow-up:", "follow up:")):
+            candidates.append(line.split(":", 1)[1].strip() if ":" in line else line)
+    return _dedupe_trimmed_string_list(candidates, limit=4, max_chars=180)
+
+
+def _extract_open_questions_for_approval(content: str) -> list[str]:
+    candidates: list[str] = []
+    for raw_line in str(content or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        lower = line.lower()
+        if lower.startswith("question:"):
+            candidates.append(line.split(":", 1)[1].strip())
+            continue
+        if line.endswith("?"):
+            candidates.append(line)
+    return _dedupe_trimmed_string_list(candidates, limit=4, max_chars=180)
+
+
+def _extract_risk_flags_for_approval(content: str) -> list[str]:
+    candidates: list[str] = []
+    for raw_line in str(content or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        lower = line.lower()
+        if (
+            lower.startswith(("risk:", "risks:", "blocker:", "blockers:", "unknown:", "uncertain:", "constraint:", "constraints:"))
+            or "blocked by" in lower
+            or "at risk" in lower
+        ):
+            candidates.append(line)
+    return _dedupe_trimmed_string_list(candidates, limit=4, max_chars=180)
+
+
+def _build_downstream_handoff_snapshot(agent_conf: dict[str, Any], *, limit: int = 4) -> list[dict[str, str]]:
+    downstream_handoffs: list[dict[str, str]] = []
+    agent_directory = dict(agent_conf.get("agent_directory") or {})
+    for edge in list(agent_conf.get("outgoing_edges") or []):
+        if not isinstance(edge, dict):
+            continue
+        target_agent_id = str(edge.get("target_agent_id") or "").strip()
+        if not target_agent_id:
+            continue
+        target_agent = dict(agent_directory.get(target_agent_id) or {})
+        downstream_handoffs.append(
+            {
+                "target_agent_id": target_agent_id,
+                "target_agent_name": str(target_agent.get("name") or target_agent_id).strip(),
+                "interaction": str(edge.get("interaction") or "handoff").strip() or "handoff",
+            }
+        )
+        if len(downstream_handoffs) >= limit:
+            break
+    return downstream_handoffs
+
+
+def _build_consumed_handoff_snapshot(
+    agent_conf: dict[str, Any],
+    *,
+    state: dict[str, Any] | None,
+    limit: int = 4,
+) -> list[dict[str, Any]]:
+    if not isinstance(state, dict):
+        return []
+
+    consumed_handoffs: list[dict[str, Any]] = []
+    agent_directory = dict(agent_conf.get("agent_directory") or {})
+    outputs = dict(state.get("agent_outputs") or {})
+    artifacts = dict(state.get("output_artifacts") or {})
+
+    for edge in list(agent_conf.get("incoming_edges") or []):
+        if not isinstance(edge, dict):
+            continue
+        source_agent_id = str(edge.get("source_agent_id") or "").strip()
+        if not source_agent_id:
+            continue
+        source_agent = dict(agent_directory.get(source_agent_id) or {})
+        source_output_key = str(source_agent.get("cluster_agent_id") or source_agent.get("agent_id") or source_agent_id).strip()
+        source_name = str(source_agent.get("name") or source_agent_id).strip()
+        interaction = str(edge.get("interaction") or "handoff").strip() or "handoff"
+        source_output = str(outputs.get(source_output_key) or "").strip()
+        source_artifact = dict(artifacts.get(source_output_key) or {})
+
+        handoff: dict[str, Any] = {
+            "source_agent_id": source_agent_id,
+            "source_agent_name": source_name,
+            "interaction": interaction,
+        }
+        artifact_summary = _trim_prompt_context(str(source_artifact.get("handoff_summary") or "").strip(), max_chars=220)
+        if artifact_summary:
+            handoff["artifact_summary"] = artifact_summary
+        elif str(source_artifact.get("node_kind") or "") == "cluster":
+            winning_strategy = _trim_prompt_context(str(source_artifact.get("winning_strategy") or "").strip(), max_chars=220)
+            if winning_strategy:
+                handoff["artifact_summary"] = winning_strategy
+        if source_output:
+            handoff["output_preview"] = _trim_prompt_context(source_output, max_chars=400)
+            handoff["output_char_count"] = len(source_output)
+
+        if len(handoff) <= 3:
+            continue
+        consumed_handoffs.append(handoff)
+        if len(consumed_handoffs) >= limit:
+            break
+
+    return consumed_handoffs
+
+
+def _coerce_non_negative_int(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _build_partial_output_artifact_snapshot(
+    agent_conf: dict[str, Any],
+    partial_output: str,
+    *,
+    state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    content = str(partial_output or "").strip()
+    if not content:
+        return {}
+    downstream_handoffs = _build_downstream_handoff_snapshot(agent_conf)
+    consumed_handoffs = _build_consumed_handoff_snapshot(agent_conf, state=state)
+    snapshot: dict[str, Any] = {
+        "node_kind": "agent",
+        "agent_id": str(agent_conf.get("cluster_agent_id") or agent_conf.get("agent_id") or "").strip(),
+        "agent_name": str(agent_conf.get("cluster_name") or agent_conf.get("name") or "agent").strip(),
+        "role": str(agent_conf.get("role") or "specialist").strip() or "specialist",
+        "handoff_summary": _extract_handoff_summary_for_approval(content),
+        "action_items": _extract_action_items_for_approval(content),
+        "open_questions": _extract_open_questions_for_approval(content),
+        "risk_flags": _extract_risk_flags_for_approval(content),
+        "output_preview": _trim_prompt_context(content, max_chars=600),
+        "output_char_count": len(content),
+        "final_output": len(downstream_handoffs) == 0,
+    }
+    mcp_server_ids = _normalize_string_list(agent_conf.get("mcp_server_ids"))
+    missing_mcp_server_ids = _normalize_string_list(agent_conf.get("missing_mcp_server_ids"))
+    allowed_tool_ids = _normalize_string_list(agent_conf.get("allowed_tool_ids"))
+    denied_tool_ids = _normalize_string_list(agent_conf.get("denied_tool_ids"))
+    allowed_mcp_server_ids = _normalize_string_list(agent_conf.get("allowed_mcp_server_ids"))
+    denied_mcp_server_ids = _normalize_string_list(agent_conf.get("denied_mcp_server_ids"))
+    readiness_status = str(agent_conf.get("readiness_status") or "").strip()
+    readiness_blockers = _normalize_string_list(agent_conf.get("readiness_blockers"))
+    readiness_warnings = _normalize_string_list(agent_conf.get("readiness_warnings"))
+    if mcp_server_ids:
+        snapshot["mcp_server_ids"] = mcp_server_ids[:6]
+    if missing_mcp_server_ids:
+        snapshot["missing_mcp_server_ids"] = missing_mcp_server_ids[:6]
+    if allowed_tool_ids:
+        snapshot["allowed_tool_ids"] = allowed_tool_ids[:6]
+    if denied_tool_ids:
+        snapshot["denied_tool_ids"] = denied_tool_ids[:6]
+    if allowed_mcp_server_ids:
+        snapshot["allowed_mcp_server_ids"] = allowed_mcp_server_ids[:6]
+    if denied_mcp_server_ids:
+        snapshot["denied_mcp_server_ids"] = denied_mcp_server_ids[:6]
+    if readiness_status:
+        snapshot["readiness_status"] = readiness_status
+    if readiness_blockers:
+        snapshot["readiness_blockers"] = readiness_blockers[:4]
+    if readiness_warnings:
+        snapshot["readiness_warnings"] = readiness_warnings[:4]
+    if downstream_handoffs:
+        snapshot["downstream_handoffs"] = downstream_handoffs
+    if consumed_handoffs:
+        snapshot["consumed_handoffs"] = consumed_handoffs
+    return snapshot
+
+
+def _snapshot_research_payload_for_approval(research_payload: dict[str, Any]) -> dict[str, Any]:
+    snapshot: dict[str, Any] = {}
+    queries = _dedupe_trimmed_string_list(research_payload.get("queries"), limit=5, max_chars=160)
+    if queries:
+        snapshot["queries"] = queries
+
+    digest = _trim_prompt_context(str(research_payload.get("digest") or "").strip(), max_chars=600)
+    if digest:
+        snapshot["digest"] = digest
+
+    blocked = bool(research_payload.get("blocked"))
+    if blocked:
+        snapshot["blocked"] = True
+
+    review_output = _trim_prompt_context(str(research_payload.get("review_output") or "").strip(), max_chars=400)
+    if review_output:
+        snapshot["review_output"] = review_output
+
+    for field_name, fallback_field in (
+        ("result_count", None),
+        ("paper_count", "papers"),
+        ("browser_preview_count", "browser_previews"),
+        ("source_count", "sources"),
+    ):
+        if fallback_field is None:
+            count_value = _coerce_non_negative_int(research_payload.get(field_name))
+        else:
+            raw_list = research_payload.get(fallback_field)
+            count_value = len(raw_list) if isinstance(raw_list, list) else _coerce_non_negative_int(research_payload.get(field_name))
+        if count_value is not None:
+            snapshot[field_name] = count_value
+
+    memory_payload = research_payload.get("memory")
+    if isinstance(memory_payload, dict):
+        memory_snapshot = {
+            "stored": bool(memory_payload.get("stored")),
+        }
+        reason = _trim_prompt_context(str(memory_payload.get("reason") or "").strip(), max_chars=200)
+        if reason:
+            memory_snapshot["reason"] = reason
+        snapshot["memory"] = memory_snapshot
+
+    error_message = _trim_prompt_context(str(research_payload.get("error") or "").strip(), max_chars=300)
+    if error_message:
+        snapshot["error"] = error_message
+
+    return snapshot
+
+
+def _snapshot_output_artifact_for_approval(artifact: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(artifact, dict) or not artifact:
+        return {}
+
+    node_kind = str(artifact.get("node_kind") or "agent").strip() or "agent"
+    if node_kind == "cluster":
+        snapshot: dict[str, Any] = {
+            "node_kind": "cluster",
+            "cluster_agent_id": str(artifact.get("cluster_agent_id") or "").strip(),
+            "cluster_name": str(artifact.get("cluster_name") or artifact.get("cluster_agent_id") or "cluster").strip(),
+            "cluster_strategy": str(artifact.get("cluster_strategy") or "").strip() or None,
+            "member_count": _coerce_non_negative_int(artifact.get("member_count")),
+            "winning_vote": str(artifact.get("winning_vote") or "").strip() or None,
+            "winning_strategy": _trim_prompt_context(str(artifact.get("winning_strategy") or "").strip(), max_chars=280) or None,
+            "next_step": _trim_prompt_context(str(artifact.get("next_step") or "").strip(), max_chars=280) or None,
+            "dominant_risks": _trim_prompt_context(str(artifact.get("dominant_risks") or "").strip(), max_chars=280) or None,
+        }
+        research_payload = artifact.get("research")
+        if isinstance(research_payload, dict):
+            research_snapshot = _snapshot_research_payload_for_approval(research_payload)
+            if research_snapshot:
+                snapshot["research"] = research_snapshot
+        return {key: value for key, value in snapshot.items() if value not in (None, "", [], {})}
+
+    snapshot = {
+        "node_kind": "agent",
+        "agent_id": str(artifact.get("agent_id") or "").strip(),
+        "agent_name": str(artifact.get("agent_name") or artifact.get("agent_id") or "agent").strip(),
+        "role": str(artifact.get("role") or "specialist").strip() or "specialist",
+        "handoff_summary": _trim_prompt_context(str(artifact.get("handoff_summary") or "").strip(), max_chars=280) or None,
+        "action_items": _dedupe_trimmed_string_list(artifact.get("action_items"), limit=4, max_chars=180),
+        "open_questions": _dedupe_trimmed_string_list(artifact.get("open_questions"), limit=4, max_chars=180),
+        "risk_flags": _dedupe_trimmed_string_list(artifact.get("risk_flags"), limit=4, max_chars=180),
+        "output_preview": _trim_prompt_context(str(artifact.get("output_preview") or "").strip(), max_chars=600) or None,
+        "output_char_count": _coerce_non_negative_int(artifact.get("output_char_count")),
+        "final_output": bool(artifact.get("final_output")),
+    }
+    mcp_server_ids = _normalize_string_list(artifact.get("mcp_server_ids"))
+    missing_mcp_server_ids = _normalize_string_list(artifact.get("missing_mcp_server_ids"))
+    allowed_tool_ids = _normalize_string_list(artifact.get("allowed_tool_ids"))
+    denied_tool_ids = _normalize_string_list(artifact.get("denied_tool_ids"))
+    allowed_mcp_server_ids = _normalize_string_list(artifact.get("allowed_mcp_server_ids"))
+    denied_mcp_server_ids = _normalize_string_list(artifact.get("denied_mcp_server_ids"))
+    readiness_status = str(artifact.get("readiness_status") or "").strip()
+    readiness_blockers = _dedupe_trimmed_string_list(artifact.get("readiness_blockers"), limit=4, max_chars=180)
+    readiness_warnings = _dedupe_trimmed_string_list(artifact.get("readiness_warnings"), limit=4, max_chars=180)
+    if mcp_server_ids:
+        snapshot["mcp_server_ids"] = mcp_server_ids[:6]
+    if missing_mcp_server_ids:
+        snapshot["missing_mcp_server_ids"] = missing_mcp_server_ids[:6]
+    if allowed_tool_ids:
+        snapshot["allowed_tool_ids"] = allowed_tool_ids[:6]
+    if denied_tool_ids:
+        snapshot["denied_tool_ids"] = denied_tool_ids[:6]
+    if allowed_mcp_server_ids:
+        snapshot["allowed_mcp_server_ids"] = allowed_mcp_server_ids[:6]
+    if denied_mcp_server_ids:
+        snapshot["denied_mcp_server_ids"] = denied_mcp_server_ids[:6]
+    if readiness_status:
+        snapshot["readiness_status"] = readiness_status
+    if readiness_blockers:
+        snapshot["readiness_blockers"] = readiness_blockers
+    if readiness_warnings:
+        snapshot["readiness_warnings"] = readiness_warnings
+
+    downstream_handoffs: list[dict[str, str]] = []
+    for handoff in list(artifact.get("downstream_handoffs") or []):
+        if not isinstance(handoff, dict):
+            continue
+        target_agent_id = str(handoff.get("target_agent_id") or "").strip()
+        target_agent_name = str(handoff.get("target_agent_name") or target_agent_id).strip()
+        interaction = str(handoff.get("interaction") or "handoff").strip() or "handoff"
+        if not target_agent_id and not target_agent_name:
+            continue
+        downstream_handoffs.append(
+            {
+                "target_agent_id": target_agent_id,
+                "target_agent_name": target_agent_name,
+                "interaction": interaction,
+            }
+        )
+        if len(downstream_handoffs) >= 4:
+            break
+    if downstream_handoffs:
+        snapshot["downstream_handoffs"] = downstream_handoffs
+
+    consumed_handoffs: list[dict[str, Any]] = []
+    for handoff in list(artifact.get("consumed_handoffs") or []):
+        if not isinstance(handoff, dict):
+            continue
+        source_agent_id = str(handoff.get("source_agent_id") or "").strip()
+        source_agent_name = str(handoff.get("source_agent_name") or source_agent_id).strip()
+        interaction = str(handoff.get("interaction") or "handoff").strip() or "handoff"
+        if not source_agent_id and not source_agent_name:
+            continue
+        normalized_handoff: dict[str, Any] = {
+            "source_agent_id": source_agent_id,
+            "source_agent_name": source_agent_name,
+            "interaction": interaction,
+        }
+        artifact_summary = _trim_prompt_context(str(handoff.get("artifact_summary") or "").strip(), max_chars=220)
+        if artifact_summary:
+            normalized_handoff["artifact_summary"] = artifact_summary
+        output_preview = _trim_prompt_context(str(handoff.get("output_preview") or "").strip(), max_chars=400)
+        if output_preview:
+            normalized_handoff["output_preview"] = output_preview
+        output_char_count = _coerce_non_negative_int(handoff.get("output_char_count"))
+        if output_char_count is not None:
+            normalized_handoff["output_char_count"] = output_char_count
+        consumed_handoffs.append(normalized_handoff)
+        if len(consumed_handoffs) >= 4:
+            break
+    if consumed_handoffs:
+        snapshot["consumed_handoffs"] = consumed_handoffs
+
+    tool_runs: list[dict[str, Any]] = []
+    for tool_run in list(artifact.get("tool_runs") or []):
+        if not isinstance(tool_run, dict):
+            continue
+        tool_id = str(tool_run.get("tool_id") or "").strip()
+        if not tool_id:
+            continue
+        normalized_tool_run: dict[str, Any] = {
+            "tool_id": tool_id,
+            "status": str(tool_run.get("status") or "success").strip() or "success",
+        }
+        call_id = str(tool_run.get("call_id") or "").strip()
+        if call_id:
+            normalized_tool_run["call_id"] = call_id
+        args_preview = _trim_prompt_context(str(tool_run.get("args_preview") or "").strip(), max_chars=220)
+        if args_preview:
+            normalized_tool_run["args_preview"] = args_preview
+        result_preview = _trim_prompt_context(str(tool_run.get("result_preview") or "").strip(), max_chars=300)
+        if result_preview:
+            normalized_tool_run["result_preview"] = result_preview
+        result_char_count = _coerce_non_negative_int(tool_run.get("result_char_count"))
+        if result_char_count is not None:
+            normalized_tool_run["result_char_count"] = result_char_count
+        tool_runs.append(normalized_tool_run)
+        if len(tool_runs) >= 4:
+            break
+    if tool_runs:
+        snapshot["tool_runs"] = tool_runs
+
+    return {key: value for key, value in snapshot.items() if value not in (None, "", [], {})}
+
+
+def _attach_approval_artifact_snapshot(
+    review_payload: dict[str, Any],
+    *,
+    artifact: dict[str, Any] | None = None,
+    agent_conf: dict[str, Any] | None = None,
+    partial_output: str | None = None,
+    state: dict[str, Any] | None = None,
+    artifact_source: str,
+) -> dict[str, Any]:
+    artifact_snapshot = _snapshot_output_artifact_for_approval(dict(artifact or {}))
+    if not artifact_snapshot and agent_conf is not None and str(partial_output or "").strip():
+        artifact_snapshot = _build_partial_output_artifact_snapshot(
+            agent_conf,
+            str(partial_output or ""),
+            state=state,
+        )
+    if artifact_snapshot:
+        review_payload["artifact_snapshot"] = artifact_snapshot
+        review_payload["artifact_source"] = artifact_source
+    return review_payload
+
+
+def _format_orchestration_knowledge_context(docs: list[Any]) -> tuple[str, list[dict[str, Any]]]:
+    sections: list[str] = []
+    sources: list[dict[str, Any]] = []
+    for index, doc in enumerate(list(docs or [])[:3], start=1):
+        content = str(getattr(doc, "page_content", "") or "").strip()
+        if not content:
+            continue
+        metadata = dict(getattr(doc, "metadata", {}) or {})
+        knowledge_base_name = str(metadata.get("knowledge_base_name") or "").strip()
+        knowledge_base_id = str(metadata.get("knowledge_base_id") or "").strip()
+        source = str(metadata.get("source") or metadata.get("source_path") or "").strip()
+        page_num = metadata.get("page_num")
+        label_parts: list[str] = []
+        if knowledge_base_name:
+            label_parts.append(f"Knowledge base: {knowledge_base_name}")
+        elif knowledge_base_id:
+            label_parts.append(f"Knowledge base id: {knowledge_base_id}")
+        if source:
+            label_parts.append(f"Source: {source}")
+        if page_num not in (None, ""):
+            label_parts.append(f"Page: {page_num}")
+        label = "; ".join(label_parts) or f"Retrieved context {index}"
+        sections.append(f"[Knowledge source {index}] {label}\n{_trim_prompt_context(content, max_chars=1200)}")
+        sources.append(
+            {
+                "knowledge_base_id": knowledge_base_id or None,
+                "knowledge_base_name": knowledge_base_name or None,
+                "source": source or None,
+                "page_num": page_num,
+            }
+        )
+    return "\n\n".join(sections).strip(), sources
 
 
 def _filter_graph_for_execution(graph: dict[str, Any], selected_agent_ids: list[str]) -> dict[str, Any]:
@@ -80,7 +720,410 @@ def _filter_graph_for_execution(graph: dict[str, Any], selected_agent_ids: list[
         and str(edge.get("source_agent_id") or "") in selected
         and str(edge.get("target_agent_id") or "") in selected
     ]
+    selected_scope_orchestration_summary = graph.get("selected_scope_orchestration_summary")
+    if isinstance(selected_scope_orchestration_summary, dict):
+        filtered["orchestration_summary"] = dict(selected_scope_orchestration_summary)
     return filtered
+
+
+def _build_capability_snapshot(
+    graph: dict[str, Any],
+    *,
+    active_agent_ids: list[str],
+    handoff_scope: str = "all_agents",
+) -> dict[str, Any]:
+    normalized_active_agent_ids = [
+        str(agent_id).strip() for agent_id in active_agent_ids if str(agent_id).strip()
+    ]
+    resolved_handoff_scope = "selected_agents" if str(handoff_scope).strip() == "selected_agents" else "all_agents"
+    selected = set(normalized_active_agent_ids) if resolved_handoff_scope == "selected_agents" else set()
+    agent_by_id = {
+        str(agent.get("agent_id") or "").strip(): dict(agent)
+        for agent in graph.get("agents") or []
+        if isinstance(agent, dict) and str(agent.get("agent_id") or "").strip()
+    }
+    summary_by_id = {
+        str(summary.get("agent_id") or "").strip(): dict(summary)
+        for summary in graph.get("agent_capability_summaries") or []
+        if isinstance(summary, dict) and str(summary.get("agent_id") or "").strip()
+    }
+
+    def _normalize_target_fit_list(value: Any) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        for item in value or []:
+            if not isinstance(item, dict):
+                continue
+            agent_id = str(item.get("agent_id") or "").strip()
+            agent_name = str(item.get("agent_name") or agent_id).strip()
+            if not agent_id or not agent_name:
+                continue
+            if selected and agent_id not in selected:
+                continue
+            payload: dict[str, Any] = {
+                "agent_id": agent_id,
+                "agent_name": agent_name,
+                "score": _coerce_non_negative_int(item.get("score")) or 0,
+                "fit": str(item.get("fit") or "weak").strip() or "weak",
+            }
+            rationale = str(item.get("rationale") or "").strip()
+            if rationale:
+                payload["rationale"] = rationale
+            overlap_lane_ids = _normalize_string_list(item.get("overlap_lane_ids"))
+            complementary_lane_ids = _normalize_string_list(item.get("complementary_lane_ids"))
+            if overlap_lane_ids:
+                payload["overlap_lane_ids"] = overlap_lane_ids
+            if complementary_lane_ids:
+                payload["complementary_lane_ids"] = complementary_lane_ids
+            if item.get("edge_present") is not None:
+                payload["edge_present"] = bool(item.get("edge_present"))
+            interaction = str(item.get("interaction") or "").strip()
+            if interaction:
+                payload["interaction"] = interaction
+            normalized.append(payload)
+        return normalized
+
+    def _normalize_coordination_preview_list(value: Any) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in value or []:
+            if not isinstance(item, dict):
+                continue
+            agent_id = str(item.get("agent_id") or "").strip()
+            agent_name = str(item.get("agent_name") or agent_id).strip()
+            if not agent_id or not agent_name or agent_id in seen:
+                continue
+            if selected and agent_id not in selected:
+                continue
+            seen.add(agent_id)
+            normalized.append(
+                {
+                    "agent_id": agent_id,
+                    "agent_name": agent_name,
+                }
+            )
+        return normalized
+
+    def _normalize_skill_detail_list(value: Any) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in value or []:
+            if not isinstance(item, dict):
+                continue
+            skill_id = _normalize_skill_key(str(item.get("skill_id") or ""))
+            title = str(item.get("title") or skill_id).strip()
+            source = str(item.get("source") or f"app/skills/{skill_id}").strip()
+            if not skill_id or not title or not source or skill_id in seen:
+                continue
+            seen.add(skill_id)
+            normalized.append(
+                {
+                    "skill_id": skill_id,
+                    "title": title,
+                    "description": str(item.get("description") or "").strip() or None,
+                    "source": source,
+                    "status": str(item.get("status") or "available").strip() or "available",
+                    "prompt_hint": str(item.get("prompt_hint") or "").strip() or None,
+                    "suggested_tool_ids": _normalize_string_list(item.get("suggested_tool_ids")),
+                    "suggested_mcp_server_ids": _normalize_string_list(item.get("suggested_mcp_server_ids")),
+                }
+            )
+        return normalized
+
+    def _normalize_mcp_server_detail_list(value: Any) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in value or []:
+            if not isinstance(item, dict):
+                continue
+            server_id = _normalize_skill_key(str(item.get("server_id") or ""))
+            title = str(item.get("title") or server_id).strip()
+            if not server_id or not title or server_id in seen:
+                continue
+            seen.add(server_id)
+            normalized.append(
+                {
+                    "server_id": server_id,
+                    "title": title,
+                    "description": str(item.get("description") or "").strip() or None,
+                    "status": str(item.get("status") or "disabled").strip() or "disabled",
+                    "command_preview": str(item.get("command_preview") or "").strip() or None,
+                }
+            )
+        return normalized
+
+    def _normalize_role_profile_suggestion(value: Any) -> dict[str, Any] | None:
+        if not isinstance(value, dict):
+            return None
+        profile_id = str(value.get("profile_id") or "generalist").strip() or "generalist"
+        normalized = {
+            "profile_id": profile_id,
+            "suggested_skill_ids": _normalize_string_list(value.get("suggested_skill_ids")),
+            "available_skill_ids": _normalize_string_list(value.get("available_skill_ids")),
+            "missing_skill_ids": _normalize_string_list(value.get("missing_skill_ids")),
+            "suggested_tool_ids": _normalize_string_list(value.get("suggested_tool_ids")),
+            "suggested_mcp_server_ids": _normalize_string_list(value.get("suggested_mcp_server_ids")),
+            "restrictive_tool_ids": _normalize_string_list(value.get("restrictive_tool_ids")),
+            "restrictive_mcp_server_ids": _normalize_string_list(value.get("restrictive_mcp_server_ids")),
+        }
+        return normalized
+
+    def _derive_readiness_payload(summary: dict[str, Any]) -> dict[str, Any]:
+        loaded_skill_ids = _normalize_string_list(summary.get("loaded_skill_ids"))
+        missing_skill_ids = _normalize_string_list(summary.get("missing_skill_ids"))
+        configured_allowed_tool_ids = _normalize_string_list(summary.get("configured_allowed_tool_ids"))
+        disabled_tool_ids = _normalize_string_list(summary.get("disabled_tool_ids"))
+        provider_limited_tool_ids = _normalize_string_list(summary.get("provider_limited_tool_ids"))
+        configured_allowed_mcp_server_ids = _normalize_string_list(summary.get("configured_allowed_mcp_server_ids"))
+        missing_mcp_server_ids = _normalize_string_list(summary.get("missing_mcp_server_ids"))
+        unknown_allowed_tool_ids = _normalize_string_list(summary.get("unknown_allowed_tool_ids"))
+        unknown_allowed_mcp_server_ids = _normalize_string_list(summary.get("unknown_allowed_mcp_server_ids"))
+        tool_execution_support_reason = str(summary.get("tool_execution_support_reason") or "").strip()
+
+        blockers: list[str] = []
+        warnings: list[str] = []
+        if missing_skill_ids:
+            blockers.append(
+                "Missing approved skills before this node can run: "
+                + ", ".join(missing_skill_ids)
+            )
+
+        has_explicit_capability_requirements = bool(
+            loaded_skill_ids
+            or missing_skill_ids
+            or configured_allowed_tool_ids
+            or configured_allowed_mcp_server_ids
+        )
+        if has_explicit_capability_requirements and missing_mcp_server_ids:
+            warnings.append(
+                "Relevant MCP servers are not enabled in project inventory: "
+                + ", ".join(missing_mcp_server_ids)
+            )
+        if has_explicit_capability_requirements and provider_limited_tool_ids:
+            line = (
+                "Current provider route cannot execute these tools directly: "
+                + ", ".join(provider_limited_tool_ids)
+            )
+            if tool_execution_support_reason:
+                line += f" ({tool_execution_support_reason})"
+            warnings.append(line)
+        if has_explicit_capability_requirements and disabled_tool_ids:
+            warnings.append(
+                "Some relevant tools stay disabled until feature flags change: "
+                + ", ".join(disabled_tool_ids)
+            )
+        if unknown_allowed_tool_ids:
+            warnings.append("Node policy references unknown tool ids: " + ", ".join(unknown_allowed_tool_ids))
+        if unknown_allowed_mcp_server_ids:
+            warnings.append("Node policy references unknown MCP ids: " + ", ".join(unknown_allowed_mcp_server_ids))
+
+        status = str(summary.get("readiness_status") or "").strip()
+        if status not in {"ready", "limited", "blocked"}:
+            status = "blocked" if blockers else "limited" if warnings else "ready"
+
+        return {
+            "readiness_status": status,
+            "readiness_blockers": _normalize_string_list(summary.get("readiness_blockers")) or blockers,
+            "readiness_warnings": _normalize_string_list(summary.get("readiness_warnings")) or warnings,
+        }
+
+    def _derive_availability_payload(summary: dict[str, Any]) -> dict[str, Any]:
+        missing_required_skill_ids = _normalize_string_list(summary.get("missing_required_skill_ids"))
+        missing_required_tool_ids = _normalize_string_list(summary.get("missing_required_tool_ids"))
+        missing_required_mcp_server_ids = _normalize_string_list(summary.get("missing_required_mcp_server_ids"))
+        requires_tool_calling = bool(summary.get("requires_tool_calling"))
+        tool_execution_support = str(summary.get("tool_execution_support") or "").strip()
+        tool_execution_support_reason = str(summary.get("tool_execution_support_reason") or "").strip()
+
+        blockers: list[str] = []
+        warnings: list[str] = []
+        if missing_required_skill_ids:
+            blockers.append(
+                "Definition requires approved skills that are not yet in the project pool: "
+                + ", ".join(missing_required_skill_ids)
+            )
+        if missing_required_tool_ids:
+            blockers.append(
+                "Definition requires tools that are not currently enabled for this node: "
+                + ", ".join(missing_required_tool_ids)
+            )
+        if missing_required_mcp_server_ids:
+            blockers.append(
+                "Definition requires enabled MCP servers that are not currently available: "
+                + ", ".join(missing_required_mcp_server_ids)
+            )
+        if requires_tool_calling:
+            if tool_execution_support == "unsupported":
+                line = "Definition requires a provider route with direct tool-calling support"
+                if tool_execution_support_reason:
+                    line += f" ({tool_execution_support_reason})"
+                blockers.append(line)
+            elif tool_execution_support != "supported":
+                line = "Definition expects direct tool-calling support, but the current provider route is not verified"
+                if tool_execution_support_reason:
+                    line += f" ({tool_execution_support_reason})"
+                warnings.append(line)
+
+        status = str(summary.get("availability_status") or "").strip()
+        if status not in {"available", "limited", "unavailable"}:
+            status = "unavailable" if blockers else "limited" if warnings else "available"
+
+        return {
+            "availability_status": status,
+            "availability_blockers": _normalize_string_list(summary.get("availability_blockers")) or blockers,
+            "availability_warnings": _normalize_string_list(summary.get("availability_warnings")) or warnings,
+        }
+
+    def _derive_execution_contract_payload(summary: dict[str, Any]) -> dict[str, Any]:
+        approved_skill_ids = _normalize_string_list(summary.get("loaded_skill_ids"))
+        suggested_skill_ids = _normalize_string_list(summary.get("suggested_skill_ids"))
+        executable_tool_ids = _normalize_string_list(summary.get("enabled_tool_ids"))
+        planning_only_tool_ids = _normalize_string_list(summary.get("provider_limited_tool_ids"))
+        disabled_tool_ids = _normalize_string_list(summary.get("disabled_tool_ids"))
+        planning_only_mcp_server_ids = _normalize_string_list(summary.get("mcp_server_ids"))
+        missing_mcp_server_ids = _normalize_string_list(summary.get("missing_mcp_server_ids"))
+        tool_execution_support = str(summary.get("tool_execution_support") or "").strip()
+        if tool_execution_support == "unsupported" and executable_tool_ids:
+            planning_only_tool_ids = list(dict.fromkeys([*planning_only_tool_ids, *executable_tool_ids]))
+            executable_tool_ids = []
+        if executable_tool_ids and planning_only_tool_ids:
+            tool_access_mode = "mixed"
+        elif executable_tool_ids:
+            tool_access_mode = "direct_execution"
+        elif planning_only_tool_ids:
+            tool_access_mode = "planning_only"
+        else:
+            tool_access_mode = "none"
+        mcp_access_mode = "planning_only" if planning_only_mcp_server_ids else "none"
+        return {
+            "skill_execution_mode": "guidance_only",
+            "approved_skill_ids": approved_skill_ids,
+            "suggested_skill_ids": suggested_skill_ids,
+            "tool_access_mode": tool_access_mode,
+            "executable_tool_ids": executable_tool_ids,
+            "planning_only_tool_ids": planning_only_tool_ids,
+            "disabled_tool_ids": disabled_tool_ids,
+            "mcp_access_mode": mcp_access_mode,
+            "planning_only_mcp_server_ids": planning_only_mcp_server_ids,
+            "missing_mcp_server_ids": missing_mcp_server_ids,
+        }
+
+    def _derive_delegation_contract_payload(summary: dict[str, Any]) -> dict[str, Any]:
+        contract = dict(summary.get("delegation_contract") or {}) if isinstance(summary.get("delegation_contract"), dict) else {}
+        primary_role_mode = str(contract.get("primary_role_mode") or "generalist").strip() or "generalist"
+        work_strategy = str(contract.get("work_strategy") or "flexible").strip() or "flexible"
+        return {
+            "primary_role_mode": primary_role_mode,
+            "supporting_role_modes": _normalize_string_list(contract.get("supporting_role_modes")),
+            "work_strategy": work_strategy,
+            "should_coordinate_parallel_work": bool(contract.get("should_coordinate_parallel_work")),
+            "should_produce_final_output": bool(contract.get("should_produce_final_output")),
+            "primary_focus": str(contract.get("primary_focus") or "").strip() or None,
+            "upstream_agents": _normalize_coordination_preview_list(contract.get("upstream_agents")),
+            "downstream_agents": _normalize_coordination_preview_list(contract.get("downstream_agents")),
+            "preferred_collaborators": _normalize_coordination_preview_list(contract.get("preferred_collaborators")),
+            "weak_handoff_targets": _normalize_coordination_preview_list(contract.get("weak_handoff_targets")),
+            "watchouts": _normalize_string_list(contract.get("watchouts")),
+        }
+
+    agent_capabilities: list[dict[str, Any]] = []
+    for agent_id in normalized_active_agent_ids:
+        summary = dict(summary_by_id.get(agent_id) or {})
+        agent = agent_by_id.get(agent_id, {})
+        readiness_payload = _derive_readiness_payload(summary)
+        availability_payload = _derive_availability_payload(summary)
+        execution_contract_payload = _derive_execution_contract_payload(summary)
+        delegation_contract_payload = _derive_delegation_contract_payload(summary)
+        agent_capabilities.append(
+            {
+                "agent_id": agent_id,
+                "agent_name": str(agent.get("name") or agent_id).strip(),
+                "role": str(agent.get("role") or "specialist").strip() or "specialist",
+                "delegation_focus": str(summary.get("delegation_focus") or "").strip() or None,
+                "delegation_lane_ids": _normalize_string_list(summary.get("delegation_lane_ids")),
+                "loaded_skill_ids": _normalize_string_list(summary.get("loaded_skill_ids")),
+                "missing_skill_ids": _normalize_string_list(summary.get("missing_skill_ids")),
+                "missing_skill_details": _normalize_skill_detail_list(summary.get("missing_skill_details")),
+                "suggested_skill_ids": _normalize_string_list(summary.get("suggested_skill_ids")),
+                "loaded_skill_hints": _normalize_string_list(summary.get("loaded_skill_hints")),
+                "required_skill_ids": _normalize_string_list(summary.get("required_skill_ids")),
+                "missing_required_skill_ids": _normalize_string_list(summary.get("missing_required_skill_ids")),
+                "required_tool_ids": _normalize_string_list(summary.get("required_tool_ids")),
+                "missing_required_tool_ids": _normalize_string_list(summary.get("missing_required_tool_ids")),
+                "configured_allowed_tool_ids": _normalize_string_list(summary.get("configured_allowed_tool_ids")),
+                "configured_denied_tool_ids": _normalize_string_list(summary.get("configured_denied_tool_ids")),
+                "enabled_tool_ids": _normalize_string_list(summary.get("enabled_tool_ids")),
+                "disabled_tool_ids": _normalize_string_list(summary.get("disabled_tool_ids")),
+                "policy_added_tool_ids": _normalize_string_list(summary.get("policy_added_tool_ids")),
+                "policy_blocked_tool_ids": _normalize_string_list(summary.get("policy_blocked_tool_ids")),
+                "unknown_allowed_tool_ids": _normalize_string_list(summary.get("unknown_allowed_tool_ids")),
+                "requires_tool_calling": bool(summary.get("requires_tool_calling")),
+                "provider_limited_tool_ids": _normalize_string_list(summary.get("provider_limited_tool_ids")),
+                "tool_execution_support": str(summary.get("tool_execution_support") or "").strip() or None,
+                "tool_execution_support_reason": str(summary.get("tool_execution_support_reason") or "").strip() or None,
+                "required_mcp_server_ids": _normalize_string_list(summary.get("required_mcp_server_ids")),
+                "missing_required_mcp_server_ids": _normalize_string_list(summary.get("missing_required_mcp_server_ids")),
+                "configured_allowed_mcp_server_ids": _normalize_string_list(
+                    summary.get("configured_allowed_mcp_server_ids")
+                ),
+                "configured_denied_mcp_server_ids": _normalize_string_list(
+                    summary.get("configured_denied_mcp_server_ids")
+                ),
+                "mcp_server_ids": _normalize_string_list(summary.get("mcp_server_ids")),
+                "missing_mcp_server_ids": _normalize_string_list(summary.get("missing_mcp_server_ids")),
+                "missing_mcp_server_details": _normalize_mcp_server_detail_list(
+                    summary.get("missing_mcp_server_details")
+                ),
+                "policy_added_mcp_server_ids": _normalize_string_list(summary.get("policy_added_mcp_server_ids")),
+                "policy_blocked_mcp_server_ids": _normalize_string_list(
+                    summary.get("policy_blocked_mcp_server_ids")
+                ),
+                "unknown_allowed_mcp_server_ids": _normalize_string_list(
+                    summary.get("unknown_allowed_mcp_server_ids")
+                ),
+                "recommended_collaborators": _normalize_target_fit_list(summary.get("recommended_collaborators")),
+                "downstream_handoff_scores": _normalize_target_fit_list(summary.get("downstream_handoff_scores")),
+                "availability_status": availability_payload["availability_status"],
+                "availability_blockers": availability_payload["availability_blockers"],
+                "availability_warnings": availability_payload["availability_warnings"],
+                "readiness_status": readiness_payload["readiness_status"],
+                "readiness_blockers": readiness_payload["readiness_blockers"],
+                "readiness_warnings": readiness_payload["readiness_warnings"],
+                "provider_route": str(summary.get("provider_route") or "").strip() or None,
+                "review_mode": str(summary.get("review_mode") or "").strip() or None,
+                "capability_brief": str(summary.get("capability_brief") or "").strip() or None,
+                "execution_contract": execution_contract_payload,
+                "delegation_contract": delegation_contract_payload,
+                "role_profile_suggestion": _normalize_role_profile_suggestion(
+                    summary.get("role_profile_suggestion")
+                ),
+            }
+        )
+
+    mcp_server_catalog: list[dict[str, Any]] = []
+    for item in graph.get("mcp_server_catalog") or []:
+        if not isinstance(item, dict):
+            continue
+        server_id = str(item.get("server_id") or "").strip()
+        if not server_id:
+            continue
+        mcp_server_catalog.append(
+            {
+                "server_id": server_id,
+                "title": str(item.get("title") or server_id).strip(),
+                "status": str(item.get("status") or "enabled").strip() or "enabled",
+            }
+        )
+
+    capability_snapshot: dict[str, Any] = {
+        "active_agent_ids": normalized_active_agent_ids,
+        "agent_capabilities": agent_capabilities,
+        "handoff_diagnostic_scope": resolved_handoff_scope,
+    }
+    if mcp_server_catalog:
+        capability_snapshot["mcp_server_catalog"] = mcp_server_catalog
+    if resolved_handoff_scope == "selected_agents":
+        capability_snapshot["captured_from_selected_agents"] = True
+    return capability_snapshot
 
 
 def _build_provider_registry(*, user_id: str | None) -> ModelProviderRegistry:
@@ -90,17 +1133,132 @@ def _build_provider_registry(*, user_id: str | None) -> ModelProviderRegistry:
     return registry
 
 
+def _record_auto_review_decision(
+    service: Any,
+    *,
+    run_id: str,
+    reason: str | None,
+    payload_json: dict[str, Any],
+    requested_by: str | None,
+    review_agent_name: str,
+    comment: str | None,
+) -> Any:
+    resolved = _maybe_call(
+        service,
+        "create_resolved_approval",
+        run_id=run_id,
+        action_type="orchestration_review",
+        reason=reason,
+        payload_json=payload_json,
+        requested_by=requested_by,
+        status="rejected",
+        resolved_by=review_agent_name,
+        comment=comment,
+    )
+    if resolved is not None:
+        return resolved
+
+    created = _maybe_call(
+        service,
+        "create_approval_request",
+        run_id=run_id,
+        action_type="orchestration_review",
+        reason=reason,
+        payload_json=payload_json,
+        requested_by=requested_by,
+    )
+    approval_id = str((created or {}).get("approval_id") or "").strip() if isinstance(created, dict) else ""
+    if approval_id:
+        updated = _maybe_call(
+            service,
+            "update_approval",
+            approval_id,
+            status="rejected",
+            resolved_by=review_agent_name,
+            comment=comment,
+        )
+        if updated is not None:
+            return updated
+    return created
+
+
+def _record_review_notification(
+    service: Any,
+    *,
+    run_id: str,
+    verdict: str,
+    title: str,
+    message: str | None,
+    reviewer: str | None,
+    review_stage: str | None = None,
+    agent_id: str | None = None,
+    agent_name: str | None = None,
+) -> Any:
+    return _maybe_call(
+        service,
+        "record_event",
+        run_id,
+        event_type="run.notification_ready",
+        details={
+            "notification_type": "review_verdict",
+            "delivery_status": "ready",
+            "verdict": str(verdict or "").strip() or "unknown",
+            "title": str(title or "").strip() or "Run update ready",
+            "message": str(message or "").strip() or None,
+            "reviewer": str(reviewer or "").strip() or None,
+            "review_stage": str(review_stage or "").strip() or None,
+            "agent_id": str(agent_id or "").strip() or None,
+            "agent_name": str(agent_name or "").strip() or None,
+        },
+    )
+
+
+def _finalize_auto_review_rejection(
+    service: Any,
+    verification_service: VerificationService,
+    *,
+    run_id: str,
+    active_agent_ids: list[str],
+    loop_count: int,
+    review_agent_enabled: bool,
+    error_code: str,
+    error_message: str,
+    review_details: dict[str, Any],
+    agent_outputs: dict[str, str] | None = None,
+    output_artifacts: dict[str, dict[str, Any]] | None = None,
+    recovery_mode: str | None = None,
+    capability_snapshot: dict[str, Any] | None = None,
+    selected_agent_ids: list[str] | None = None,
+) -> bool:
+    verification = verification_service.build_agent_orchestration_result(
+        ok=False,
+        active_agent_ids=active_agent_ids,
+        blocked_agents=[],
+        loop_count=loop_count,
+        review_agent_enabled=review_agent_enabled,
+        error_code=error_code,
+        error_message=error_message,
+        agent_outputs=agent_outputs,
+        output_artifacts=output_artifacts,
+        recovery_mode=recovery_mode,
+        review_details=review_details,
+        capability_snapshot=capability_snapshot,
+        handoff_scope="selected_agents" if selected_agent_ids else "all_agents",
+        selected_agent_ids=selected_agent_ids,
+    )
+    if callable(getattr(service, "create_verification", None)) and callable(getattr(service, "mark_rejected", None)):
+        _maybe_call(service, "mark_verifying", run_id)
+        _maybe_call(service, "create_verification", run_id, verification)
+        _maybe_call(service, "mark_rejected", run_id)
+        return False
+    _maybe_call(service, "complete_with_verification", run_id, verification)
+    return False
+
+
 def _serialize_orchestration_resume_state(state: dict[str, Any], next_step_index: int) -> dict[str, Any]:
     return {
         "next_step_index": next_step_index,
-        "state": {
-            "task": str(state.get("task") or ""),
-            "agent_outputs": dict(state.get("agent_outputs") or {}),
-            "output_artifacts": dict(state.get("output_artifacts") or {}),
-            "current_agent": str(state.get("current_agent") or ""),
-            "loop_index": int(state.get("loop_index") or 0),
-            "errors": list(state.get("errors") or []),
-        },
+        "state": _snapshot_orchestration_state(state),
     }
 
 
@@ -201,6 +1359,12 @@ def _restore_orchestration_state(task: str, resume_payload: dict[str, Any] | Non
         "loop_index": int(state_payload.get("loop_index") or 0),
         "errors": list(state_payload.get("errors") or []),
     }
+    knowledge_base_ids = _normalize_string_list(state_payload.get("knowledge_base_ids"))
+    if knowledge_base_ids:
+        restored["knowledge_base_ids"] = knowledge_base_ids
+    knowledge_context = str(state_payload.get("knowledge_context") or "").strip()
+    if knowledge_context:
+        restored["knowledge_context"] = knowledge_context
     continuation = payload.get("continuation")
     if isinstance(continuation, dict) and continuation:
         restored["continuation"] = dict(continuation)
@@ -673,7 +1837,11 @@ def _persist_cluster_research_memory(
 
 
 async def ingest_pdf(
-    ctx: dict[str, Any], task_id: str, file_path: str, user_id: str = None
+    ctx: dict[str, Any],
+    task_id: str,
+    file_path: str,
+    user_id: str = None,
+    knowledge_base_id: str | None = None,
 ) -> bool:
     logger = bind_logger(_log, session_id=task_id, node="ingest_pdf")
     started_at = int(time.time())
@@ -708,7 +1876,11 @@ async def ingest_pdf(
         # 传递 user_id 给 RAG 引擎
         result = await anyio.to_thread.run_sync(
             lambda: _normalize_ingest_result(
-                get_rag_engine().add_knowledge_base(file_path, user_id=user_id)
+                _add_knowledge_base_with_optional_library(
+                    file_path,
+                    user_id=user_id,
+                    knowledge_base_id=knowledge_base_id,
+                )
             )
         )
         finished_at = int(time.time())
@@ -809,9 +1981,16 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
             input_json = run.get("input_json") or {}
             file_path = str(input_json.get("file_path") or "")
             user_id = str(run.get("user_id") or "") or None
+            knowledge_base_id = str(input_json.get("knowledge_base_id") or "").strip() or None
 
             result = await anyio.to_thread.run_sync(
-                lambda: _normalize_ingest_result(get_rag_engine().add_knowledge_base(file_path, user_id=user_id))
+                lambda: _normalize_ingest_result(
+                    _add_knowledge_base_with_optional_library(
+                        file_path,
+                        user_id=user_id,
+                        knowledge_base_id=knowledge_base_id,
+                    )
+                )
             )
             verification = verification_service.build_document_ingest_result(
                 ok=bool(result.get("ok")),
@@ -835,6 +2014,7 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
             loop_count = int(input_json.get("loop_count") or 1) if isinstance(input_json, dict) else 1
             review_agent = graph.get("review_agent") if isinstance(graph.get("review_agent"), dict) else {}
             review_agent_enabled = bool(review_agent.get("enabled", True))
+            skill_catalog_lookup = _build_skill_catalog_lookup(graph)
             loaded_skill_ids = {
                 _normalize_skill_key(str(item.get("skill_id") or ""))
                 for item in graph.get("skill_pool") or []
@@ -851,6 +2031,11 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                 )
             ]
             active_agent_ids = [str(agent.get("agent_id") or "") for agent in active_agents]
+            capability_snapshot = _build_capability_snapshot(
+                graph,
+                active_agent_ids=active_agent_ids,
+                handoff_scope="selected_agents" if selected_agent_ids else "all_agents",
+            )
             if not active_agents:
                 verification = verification_service.build_agent_orchestration_result(
                     ok=False,
@@ -860,6 +2045,9 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                     review_agent_enabled=review_agent_enabled,
                     error_code="missing_active_agents",
                     error_message="no agents selected for orchestration",
+                    capability_snapshot={},
+                    handoff_scope="selected_agents" if selected_agent_ids else "all_agents",
+                    selected_agent_ids=[str(agent_id) for agent_id in selected_agent_ids],
                 )
                 service.complete_with_verification(run_id, verification)
                 return False
@@ -886,7 +2074,16 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                     for skill_id in (agent.get("skill_ids") or [])
                     if str(skill_id).strip()
                 ]
+                required_skill_details = [
+                    _build_skill_requirement_detail(skill_id, skill_catalog_lookup=skill_catalog_lookup)
+                    for skill_id in required_skills
+                ]
                 missing_skills = [skill_id for skill_id in required_skills if skill_id not in loaded_skill_ids]
+                missing_skill_details = [
+                    detail
+                    for detail in required_skill_details
+                    if str(detail.get("skill_id") or "") in set(missing_skills)
+                ]
                 _maybe_call(
                     service,
                     "record_event",
@@ -897,14 +2094,18 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                         "agent_name": str(agent.get("name") or agent_id),
                         "role": str(agent.get("role") or "specialist"),
                         "skill_ids": required_skills,
+                        "skill_details": required_skill_details,
                         "missing_skills": missing_skills,
+                        "missing_skill_details": missing_skill_details,
                     },
                 )
                 if missing_skills:
                     blocked_agents.append(
                         {
                             "agent_id": agent_id,
+                            "agent_name": str(agent.get("name") or agent_id),
                             "missing_skills": missing_skills,
+                            "missing_skill_details": missing_skill_details,
                         }
                     )
 
@@ -917,13 +2118,36 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                     review_agent_enabled=review_agent_enabled,
                     error_code="missing_skill_approval",
                     error_message="one or more agents are blocked by missing skills",
+                    capability_snapshot=capability_snapshot,
+                    handoff_scope="selected_agents" if selected_agent_ids else "all_agents",
+                    selected_agent_ids=[str(agent_id) for agent_id in selected_agent_ids],
                 )
                 service.complete_with_verification(run_id, verification)
                 return False
 
             task_str = str(input_json.get("task") or "") or str(input_json.get("project_name") or "")
+            task_checklist = _normalize_task_checklist(input_json.get("task_checklist") if isinstance(input_json, dict) else None)
+            checklist_context = _format_task_checklist_context(task_checklist)
+            if checklist_context:
+                task_str = f"{task_str}\n\n{checklist_context}".strip() if task_str.strip() else checklist_context
+                _maybe_call(
+                    service,
+                    "record_event",
+                    run_id,
+                    event_type="orchestration.checklist_loaded",
+                    details={
+                        "checklist_count": len(task_checklist),
+                        "open_item_count": len(
+                            [item for item in task_checklist if str(item.get("status") or "pending") != "completed"]
+                        ),
+                        "open_items_preview": _task_checklist_preview(task_checklist),
+                    },
+                )
             default_timeout = int(input_json.get("timeout_seconds") or 60)
             recovery_mode = str(metadata_json.get("review_recovery_mode") or "").strip() or None
+            knowledge_base_ids = _normalize_string_list(input_json.get("knowledge_base_ids") if isinstance(input_json, dict) else None)
+            if not knowledge_base_ids:
+                knowledge_base_ids = _normalize_string_list(graph.get("knowledge_base_ids") if isinstance(graph, dict) else None)
             execution_graph = _filter_graph_for_execution(graph, selected_agent_ids)
             provider_registry = _build_provider_registry(user_id=user_id)
             ordered_agents, provider_config, review_config = build_orchestration_execution_plan(execution_graph)
@@ -937,6 +2161,56 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
             )
             stream_continuation_pending = approved_resume and resume_continue_mode == "accept_partial_stream_output"
             initial_state, next_step_index = _restore_orchestration_state(task_str, resume_payload if isinstance(resume_payload, dict) else None)
+            if knowledge_base_ids:
+                initial_state["knowledge_base_ids"] = knowledge_base_ids
+            if knowledge_base_ids and task_str.strip() and not str(initial_state.get("knowledge_context") or "").strip():
+                try:
+                    knowledge_docs = await anyio.to_thread.run_sync(
+                        lambda: get_rag_engine().retrieve_context(
+                            task_str,
+                            user_id=user_id,
+                            knowledge_base_ids=knowledge_base_ids,
+                        )
+                    )
+                    knowledge_context, knowledge_sources = _format_orchestration_knowledge_context(
+                        list(knowledge_docs or [])
+                    )
+                    if knowledge_context:
+                        initial_state["knowledge_context"] = knowledge_context
+                        _maybe_call(
+                            service,
+                            "record_event",
+                            run_id,
+                            event_type="orchestration.knowledge_context_loaded",
+                            details={
+                                "knowledge_base_ids": knowledge_base_ids,
+                                "source_count": len(knowledge_sources),
+                                "sources": knowledge_sources,
+                            },
+                        )
+                    else:
+                        _maybe_call(
+                            service,
+                            "record_event",
+                            run_id,
+                            event_type="orchestration.knowledge_context_unavailable",
+                            details={
+                                "knowledge_base_ids": knowledge_base_ids,
+                                "reason": "no_matching_context",
+                            },
+                        )
+                except Exception as exc:
+                    _maybe_call(
+                        service,
+                        "record_event",
+                        run_id,
+                        event_type="orchestration.knowledge_context_unavailable",
+                        details={
+                            "knowledge_base_ids": knowledge_base_ids,
+                            "reason": "knowledge_retrieval_failed",
+                            "error": str(exc),
+                        },
+                    )
             if approved_resume and not stream_continuation_pending:
                 input_json = dict(input_json)
                 input_json.pop("orchestration_resume", None)
@@ -982,15 +2256,8 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                 step = execution_steps[step_index]
                 agent_conf = step["agent_config"]
                 final_state["loop_index"] = int(step["loop_number"]) - 1
-                previous_state = {
-                    "messages": [],
-                    "task": str(final_state.get("task") or task_str),
-                    "agent_outputs": dict(final_state.get("agent_outputs") or {}),
-                    "output_artifacts": dict(final_state.get("output_artifacts") or {}),
-                    "current_agent": str(final_state.get("current_agent") or ""),
-                    "loop_index": int(final_state.get("loop_index") or 0),
-                    "errors": list(final_state.get("errors") or []),
-                }
+                previous_state = _snapshot_orchestration_state(final_state, fallback_task=task_str)
+                previous_state["messages"] = []
                 stream_review_state = {
                     "last_reviewed_chars": 0,
                     "check_count": 0,
@@ -1089,31 +2356,92 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                             "partial_length": len(partial_content),
                         },
                     )
+                    review_payload = {
+                        "agent_id": agent_output_key,
+                        "agent_name": agent_name,
+                        "review_output": str(blocked_payload.get("review_output") or ""),
+                        "step_index": step_index,
+                        "loop_number": int(step["loop_number"]),
+                        "review_stage": "agent_output_stream",
+                        "check_count": int(blocked_payload.get("check_count") or 0),
+                        "segment_index": int(blocked_payload.get("segment_index") or 0),
+                        "segment_count": int(blocked_payload.get("segment_count") or 0),
+                        "segment_start_char": int(blocked_payload.get("segment_start_char") or 0),
+                        "segment_end_char": int(blocked_payload.get("segment_end_char") or 0),
+                        "last_reviewed_char": int(blocked_payload.get("last_reviewed_char") or 0),
+                        "segment_preview": str(blocked_payload.get("segment_preview") or ""),
+                        "partial_output": partial_content[-1000:],
+                    }
+                    review_payload = _attach_approval_artifact_snapshot(
+                        review_payload,
+                        agent_conf=agent_conf,
+                        partial_output=partial_content,
+                        state=previous_state,
+                        artifact_source="partial_stream",
+                    )
+                    _record_auto_review_decision(
+                        service,
+                        run_id=run_id,
+                        reason=f"Review agent blocked streaming output from {agent_name}",
+                        payload_json=review_payload,
+                        requested_by=user_id,
+                        review_agent_name=str(review_agent.get("name") or "review_agent"),
+                        comment=str(blocked_payload.get("review_output") or "") or None,
+                    )
+                    _record_review_notification(
+                        service,
+                        run_id=run_id,
+                        verdict="rejected",
+                        title=f"Review blocked output from {agent_name}",
+                        message=str(blocked_payload.get("review_output") or "") or None,
+                        reviewer=str(review_agent.get("name") or "review_agent"),
+                        review_stage="agent_output_stream",
+                        agent_id=agent_output_key,
+                        agent_name=agent_name,
+                    )
                     _maybe_call(
                         service,
-                        "create_approval_request",
-                        run_id=run_id,
-                        action_type="orchestration_review",
-                        reason=f"Review agent blocked streaming output from {agent_name}",
-                        payload_json={
+                        "patch_runtime_state",
+                        run_id,
+                        review={
+                            "stage": "agent_output_stream",
+                            "status": "rejected",
                             "agent_id": agent_output_key,
                             "agent_name": agent_name,
                             "review_output": str(blocked_payload.get("review_output") or ""),
-                            "step_index": step_index,
-                            "loop_number": int(step["loop_number"]),
-                            "review_stage": "agent_output_stream",
                             "check_count": int(blocked_payload.get("check_count") or 0),
                             "segment_index": int(blocked_payload.get("segment_index") or 0),
                             "segment_count": int(blocked_payload.get("segment_count") or 0),
                             "segment_start_char": int(blocked_payload.get("segment_start_char") or 0),
                             "segment_end_char": int(blocked_payload.get("segment_end_char") or 0),
                             "last_reviewed_char": int(blocked_payload.get("last_reviewed_char") or 0),
-                            "segment_preview": str(blocked_payload.get("segment_preview") or ""),
-                            "partial_output": partial_content[-1000:],
                         },
-                        requested_by=user_id,
+                        continuation={
+                            "enabled": True,
+                            "mode": "continue_with_partial_stream_output",
+                            "status": "rejected",
+                            "agent_id": agent_output_key,
+                            "agent_name": agent_name,
+                            "step_index": int(step_index),
+                            "prefix_length": len(partial_content),
+                        },
                     )
-                    return False
+                    return _finalize_auto_review_rejection(
+                        service,
+                        verification_service,
+                        run_id=run_id,
+                        active_agent_ids=active_agent_ids,
+                        loop_count=loop_count,
+                        review_agent_enabled=review_agent_enabled,
+                        error_code="review_rejected",
+                        error_message=f"Review agent blocked streaming output from {agent_name}",
+                        review_details=review_payload,
+                        agent_outputs=dict(previous_state.get("agent_outputs") or {}),
+                        output_artifacts=dict(previous_state.get("output_artifacts") or {}),
+                        recovery_mode=recovery_mode,
+                        capability_snapshot=capability_snapshot,
+                        selected_agent_ids=selected_agent_ids,
+                    )
                 agent_output_key = str(agent_conf.get("cluster_agent_id") or agent_conf.get("agent_id") or "")
                 agent_name = str(agent_conf.get("cluster_name") or agent_conf.get("name") or agent_output_key)
                 if stream_continuation_pending:
@@ -1272,22 +2600,39 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                             input_json = dict(input_json)
                             input_json["orchestration_resume"] = serialized_resume
                             _maybe_call(service, "update_run_input_json", run_id, input_json)
-                            _maybe_call(
+                            review_payload = {
+                                "agent_id": agent_output_key,
+                                "agent_name": agent_name,
+                                "review_output": str(research_review_result.get("review_output") or ""),
+                                "step_index": step_index,
+                                "loop_number": int(step["loop_number"]),
+                                "review_stage": "cluster_research",
+                                "research_queries": list(research_payload.get("queries") or []),
+                            }
+                            review_payload = _attach_approval_artifact_snapshot(
+                                review_payload,
+                                artifact=dict(rollback_artifacts.get(agent_output_key) or {}),
+                                artifact_source="research_artifact",
+                            )
+                            _record_auto_review_decision(
                                 service,
-                                "create_approval_request",
                                 run_id=run_id,
-                                action_type="orchestration_review",
                                 reason=f"Review agent blocked research evidence from {agent_name}",
-                                payload_json={
-                                    "agent_id": agent_output_key,
-                                    "agent_name": agent_name,
-                                    "review_output": str(research_review_result.get("review_output") or ""),
-                                    "step_index": step_index,
-                                    "loop_number": int(step["loop_number"]),
-                                    "review_stage": "cluster_research",
-                                    "research_queries": list(research_payload.get("queries") or []),
-                                },
+                                payload_json=review_payload,
                                 requested_by=user_id,
+                                review_agent_name=str(review_agent.get("name") or "review_agent"),
+                                comment=str(research_review_result.get("review_output") or "") or None,
+                            )
+                            _record_review_notification(
+                                service,
+                                run_id=run_id,
+                                verdict="rejected",
+                                title=f"Review blocked research evidence from {agent_name}",
+                                message=str(research_review_result.get("review_output") or "") or None,
+                                reviewer=str(review_agent.get("name") or "review_agent"),
+                                review_stage="cluster_research",
+                                agent_id=agent_output_key,
+                                agent_name=agent_name,
                             )
                             _maybe_call(
                                 service,
@@ -1295,13 +2640,27 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                                 run_id,
                                 review={
                                     "stage": "cluster_research",
-                                    "status": "pending",
+                                    "status": "rejected",
                                     "agent_id": agent_output_key,
                                     "agent_name": agent_name,
                                     "review_output": str(research_review_result.get("review_output") or ""),
                                 },
                             )
-                            return False
+                            return _finalize_auto_review_rejection(
+                                service,
+                                verification_service,
+                                run_id=run_id,
+                                active_agent_ids=active_agent_ids,
+                                loop_count=loop_count,
+                                review_agent_enabled=review_agent_enabled,
+                                error_code="review_rejected",
+                                error_message=f"Review agent blocked research evidence from {agent_name}",
+                                review_details=review_payload,
+                                agent_outputs=dict(rollback_outputs),
+                                output_artifacts=dict(rollback_artifacts),
+                                recovery_mode=recovery_mode,
+                                selected_agent_ids=selected_agent_ids,
+                            )
                 _maybe_call(
                     service,
                     "record_event",
@@ -1353,28 +2712,45 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                         input_json = dict(input_json)
                         input_json["orchestration_resume"] = serialized_resume
                         _maybe_call(service, "update_run_input_json", run_id, input_json)
-                        _maybe_call(
+                        review_payload = {
+                            "agent_id": agent_output_key,
+                            "agent_name": agent_name,
+                            "review_output": str(blocked_segment.get("review_output") or ""),
+                            "step_index": step_index,
+                            "loop_number": int(step["loop_number"]),
+                            "review_stage": "agent_output_segment",
+                            "check_count": int(segmented_review.get("segments_reviewed") or 0),
+                            "segment_index": int(blocked_segment.get("segment_index") or 0),
+                            "segment_count": int(segmented_review.get("segment_count") or 0),
+                            "segment_start_char": int(blocked_segment.get("start_char") or 0),
+                            "segment_end_char": int(blocked_segment.get("end_char") or 0),
+                            "last_reviewed_char": int(blocked_segment.get("end_char") or 0),
+                            "segment_preview": str(blocked_segment.get("content") or "")[:400],
+                        }
+                        review_payload = _attach_approval_artifact_snapshot(
+                            review_payload,
+                            artifact=agent_artifact,
+                            artifact_source="output_artifact",
+                        )
+                        _record_auto_review_decision(
                             service,
-                            "create_approval_request",
                             run_id=run_id,
-                            action_type="orchestration_review",
                             reason=f"Review agent blocked streamed output from {agent_name}",
-                            payload_json={
-                                "agent_id": agent_output_key,
-                                "agent_name": agent_name,
-                                "review_output": str(blocked_segment.get("review_output") or ""),
-                                "step_index": step_index,
-                                "loop_number": int(step["loop_number"]),
-                                "review_stage": "agent_output_segment",
-                                "check_count": int(segmented_review.get("segments_reviewed") or 0),
-                                "segment_index": int(blocked_segment.get("segment_index") or 0),
-                                "segment_count": int(segmented_review.get("segment_count") or 0),
-                                "segment_start_char": int(blocked_segment.get("start_char") or 0),
-                                "segment_end_char": int(blocked_segment.get("end_char") or 0),
-                                "last_reviewed_char": int(blocked_segment.get("end_char") or 0),
-                                "segment_preview": str(blocked_segment.get("content") or "")[:400],
-                            },
+                            payload_json=review_payload,
                             requested_by=user_id,
+                            review_agent_name=str(review_agent.get("name") or "review_agent"),
+                            comment=str(blocked_segment.get("review_output") or "") or None,
+                        )
+                        _record_review_notification(
+                            service,
+                            run_id=run_id,
+                            verdict="rejected",
+                            title=f"Review blocked an output segment from {agent_name}",
+                            message=str(blocked_segment.get("review_output") or "") or None,
+                            reviewer=str(review_agent.get("name") or "review_agent"),
+                            review_stage="agent_output_segment",
+                            agent_id=agent_output_key,
+                            agent_name=agent_name,
                         )
                         _maybe_call(
                             service,
@@ -1382,7 +2758,7 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                             run_id,
                             review={
                                 "stage": "agent_output_segment",
-                                "status": "pending",
+                                "status": "rejected",
                                 "agent_id": agent_output_key,
                                 "agent_name": agent_name,
                                 "review_output": str(blocked_segment.get("review_output") or ""),
@@ -1394,7 +2770,22 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                                 "last_reviewed_char": int(blocked_segment.get("end_char") or 0),
                             },
                         )
-                        return False
+                        return _finalize_auto_review_rejection(
+                            service,
+                            verification_service,
+                            run_id=run_id,
+                            active_agent_ids=active_agent_ids,
+                            loop_count=loop_count,
+                            review_agent_enabled=review_agent_enabled,
+                            error_code="review_rejected",
+                            error_message=f"Review agent blocked streamed output from {agent_name}",
+                            review_details=review_payload,
+                            agent_outputs=dict(previous_state.get("agent_outputs") or {}),
+                            output_artifacts=dict(previous_state.get("output_artifacts") or {}),
+                            recovery_mode=recovery_mode,
+                            capability_snapshot=capability_snapshot,
+                            selected_agent_ids=selected_agent_ids,
+                        )
 
                     review_result = await review_orchestration_output(
                         review_config=review_config,
@@ -1424,22 +2815,67 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                         input_json = dict(input_json)
                         input_json["orchestration_resume"] = serialized_resume
                         _maybe_call(service, "update_run_input_json", run_id, input_json)
+                        review_payload = {
+                            "agent_id": agent_output_key,
+                            "agent_name": agent_name,
+                            "review_output": str(review_result.get("review_output") or ""),
+                            "step_index": step_index,
+                            "loop_number": int(step["loop_number"]),
+                            "review_stage": "agent_output_final",
+                        }
+                        review_payload = _attach_approval_artifact_snapshot(
+                            review_payload,
+                            artifact=agent_artifact,
+                            artifact_source="output_artifact",
+                        )
+                        _record_auto_review_decision(
+                            service,
+                            run_id=run_id,
+                            reason=f"Review agent blocked output from {agent_name}",
+                            payload_json=review_payload,
+                            requested_by=user_id,
+                            review_agent_name=str(review_agent.get("name") or "review_agent"),
+                            comment=str(review_result.get("review_output") or "") or None,
+                        )
+                        _record_review_notification(
+                            service,
+                            run_id=run_id,
+                            verdict="rejected",
+                            title=f"Review blocked output from {agent_name}",
+                            message=str(review_result.get("review_output") or "") or None,
+                            reviewer=str(review_agent.get("name") or "review_agent"),
+                            review_stage="agent_output_final",
+                            agent_id=agent_output_key,
+                            agent_name=agent_name,
+                        )
                         _maybe_call(
                             service,
-                            "create_approval_request",
-                            run_id=run_id,
-                            action_type="orchestration_review",
-                            reason=f"Review agent blocked output from {agent_name}",
-                            payload_json={
+                            "patch_runtime_state",
+                            run_id,
+                            review={
+                                "stage": "agent_output_final",
+                                "status": "rejected",
                                 "agent_id": agent_output_key,
                                 "agent_name": agent_name,
                                 "review_output": str(review_result.get("review_output") or ""),
-                                "step_index": step_index,
-                                "loop_number": int(step["loop_number"]),
                             },
-                            requested_by=user_id,
                         )
-                        return False
+                        return _finalize_auto_review_rejection(
+                            service,
+                            verification_service,
+                            run_id=run_id,
+                            active_agent_ids=active_agent_ids,
+                            loop_count=loop_count,
+                            review_agent_enabled=review_agent_enabled,
+                            error_code="review_rejected",
+                            error_message=f"Review agent blocked output from {agent_name}",
+                            review_details=review_payload,
+                            agent_outputs=dict(final_state.get("agent_outputs") or {}),
+                            output_artifacts=dict(final_state.get("output_artifacts") or {}),
+                            recovery_mode=recovery_mode,
+                            capability_snapshot=capability_snapshot,
+                            selected_agent_ids=selected_agent_ids,
+                        )
 
             agent_outputs = final_state.get("agent_outputs", {})
             output_artifacts = final_state.get("output_artifacts", {})
@@ -1458,6 +2894,18 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                     "recovery_mode": recovery_mode,
                 },
             )
+            _record_review_notification(
+                service,
+                run_id=run_id,
+                verdict="approved" if not bool(errors) else "failed",
+                title="Run ready for follow-up",
+                message=(
+                    "Review cleared this orchestration run."
+                    if not bool(errors)
+                    else "; ".join(errors) or "The orchestration run finished with execution errors."
+                ),
+                reviewer=str(review_agent.get("name") or "review_agent") if review_agent_enabled else "system",
+            )
 
             verification = verification_service.build_agent_orchestration_result(
                 ok=not bool(errors),
@@ -1470,6 +2918,9 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                 agent_outputs=agent_outputs,
                 output_artifacts=output_artifacts,
                 recovery_mode=recovery_mode,
+                capability_snapshot=capability_snapshot,
+                handoff_scope="selected_agents" if selected_agent_ids else "all_agents",
+                selected_agent_ids=[str(agent_id) for agent_id in selected_agent_ids],
             )
             service.complete_with_verification(run_id, verification)
             return not bool(errors)
@@ -1558,6 +3009,13 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                 review_agent_enabled=bool(review_agent.get("enabled", True)),
                 error_code="task_exception",
                 error_message=str(exc),
+                capability_snapshot=_build_capability_snapshot(
+                    graph,
+                    active_agent_ids=[str(agent_id) for agent_id in selected_agent_ids],
+                    handoff_scope="selected_agents" if selected_agent_ids else "all_agents",
+                ),
+                handoff_scope="selected_agents" if selected_agent_ids else "all_agents",
+                selected_agent_ids=[str(agent_id) for agent_id in selected_agent_ids],
             )
         else:
             verification = verification_service.build_document_ingest_result(

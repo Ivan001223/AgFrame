@@ -6,10 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from pydantic import BaseModel, Field
 
 from app.infrastructure.database.models import User
-from app.runtime.graph.resume_service import (
-    extract_last_assistant_reply,
-    serialize_graph_messages,
-)
+from app.runtime.graph.resume_service import extract_last_assistant_reply, serialize_graph_messages
 from app.server.api.auth import get_current_active_user
 from app.server.chat_runtime import apply_request_runtime_config, get_chat_graph_app
 from app.server.session_history import persist_session_messages
@@ -84,6 +81,7 @@ async def workbench_invoke(
         latest_values = dict(latest_state.values or {})
     elif isinstance(invoke_result, dict):
         latest_values = dict(invoke_result)
+
     messages = serialize_graph_messages(latest_values.get("messages"))
     if not messages:
         messages = _normalize_client_messages(graph_input.get("messages"))

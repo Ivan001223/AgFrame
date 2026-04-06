@@ -146,7 +146,35 @@ def test_get_run_detail_and_list_runs_include_latest_approval_and_verification()
         "task_type": "agent_orchestration",
         "status": "approved",
         "policy_id": "agent_orchestration:v1",
-        "input_json": {"task": "Run a reviewed orchestration"},
+        "input_json": {
+            "task": "Run a reviewed orchestration",
+            "selected_agent_ids": ["agent-a", "agent-b"],
+            "loop_count": 1,
+            "task_checklist": [
+                {"item_id": "check_1", "content": "Audit the current orchestration flow", "status": "completed"},
+                {
+                    "item_id": "check_2",
+                    "content": "Implement the safer rollout path",
+                    "status": "in_progress",
+                    "active_form": "Implementing the safer rollout path",
+                },
+                {"item_id": "check_3", "content": "Verify the final behavior", "status": "pending"},
+            ],
+            "graph": {
+                "agents": [
+                    {"agent_id": "agent-a", "name": "Agent A", "model": "dev-stub"},
+                    {"agent_id": "agent-b", "name": "Agent B", "model": "dev-stub"},
+                ],
+                "edges": [
+                    {
+                        "source_agent_id": "agent-a",
+                        "target_agent_id": "agent-b",
+                        "interaction": "handoff",
+                    }
+                ],
+                "review_agent": {"enabled": True, "name": "Reviewer"},
+            },
+        },
         "metadata_json": {"review_recovery_mode": "continue_with_partial_stream_output"},
         "current_step": "resume_graph",
         "retry_count": 0,
@@ -276,6 +304,147 @@ def test_get_run_detail_and_list_runs_include_latest_approval_and_verification()
     assert listing[0]["runtime_state"]["continuation"]["status"] == "completed"
     assert listing[0]["runtime_state"]["continuation"]["resumed_at"] == 2
     assert listing[0]["runtime_state"]["research"]["paper_count"] == 2
+    assert detail["workflow_progress"]["enabled"] is True
+    assert detail["workflow_progress"]["status"] == "completed"
+    assert detail["workflow_progress"]["total_steps"] == 2
+    assert detail["workflow_progress"]["completed_steps"] == 2
+    assert detail["workflow_progress"]["steps"][0]["label"] == "Agent A"
+    assert detail["workflow_progress"]["steps"][1]["label"] == "Agent B"
+    assert detail["checklist_snapshot"]["enabled"] is True
+    assert detail["checklist_snapshot"]["total_items"] == 3
+    assert detail["checklist_snapshot"]["open_items"] == 2
+    assert detail["checklist_snapshot"]["completed_items"] == 1
+    assert detail["checklist_snapshot"]["items"][1]["active_form"] == "Implementing the safer rollout path"
+    assert listing[0]["workflow_progress"]["status"] == "completed"
+    assert listing[0]["workflow_progress"]["completed_steps"] == 2
+    assert listing[0]["checklist_snapshot"]["enabled"] is True
+    assert listing[0]["checklist_snapshot"]["total_items"] == 3
+    assert listing[0]["checklist_snapshot"]["open_items"] == 2
+    assert listing[0]["checklist_snapshot"]["items"][2]["content"] == "Verify the final behavior"
+
+
+def test_get_run_detail_marks_blocked_workflow_step_from_review_approval():
+    run = {
+        "run_id": "hr-1",
+        "user_id": "u1",
+        "session_id": None,
+        "task_type": "agent_orchestration",
+        "status": "waiting_approval",
+        "policy_id": "agent_orchestration:v1",
+        "input_json": {
+            "task": "Coordinate work",
+            "selected_agent_ids": ["agent_a", "agent_b"],
+            "loop_count": 1,
+            "graph": {
+                "agents": [
+                    {"agent_id": "agent_a", "name": "Agent A", "model": "dev-stub"},
+                    {"agent_id": "agent_b", "name": "Agent B", "model": "dev-stub"},
+                ],
+                "edges": [
+                    {
+                        "source_agent_id": "agent_a",
+                        "target_agent_id": "agent_b",
+                        "interaction": "handoff",
+                    }
+                ],
+                "review_agent": {"enabled": True, "name": "Reviewer"},
+            },
+        },
+        "metadata_json": None,
+        "current_step": "executing_graph",
+        "retry_count": 0,
+        "resume_count": 0,
+        "approval_required": False,
+        "verification_status": None,
+        "created_at": 1,
+        "updated_at": 1,
+        "finished_at": None,
+    }
+
+    class _RunStore:
+        def get_run(self, run_id: str):
+            return dict(run) if run_id == "hr-1" else None
+
+    class _ApprovalStore:
+        def get_latest_by_run(self, run_id: str):
+            return {
+                "approval_id": "ha-1",
+                "run_id": run_id,
+                "status": "pending",
+                "action_type": "orchestration_review",
+                "reason": "Awaiting review decision",
+                "comment": "Please inspect this node output.",
+                "payload_json": {
+                    "agent_id": "agent_b",
+                    "agent_name": "Agent B",
+                    "review_stage": "agent_output_stream",
+                    "step_index": 1,
+                    "review_output": "Human confirmation required.",
+                },
+            }
+
+    class _EventStore:
+        def list_events(
+            self,
+            *,
+            user_id: str | None = None,
+            session_id: str | None = None,
+            run_id: str | None = None,
+            limit: int = 100,
+        ):
+            return [
+                {
+                    "event_id": "he-1",
+                    "run_id": run_id,
+                    "event_type": "orchestration.step_completed",
+                    "details_json": {"step_index": 0, "agent_id": "agent_a", "agent_name": "Agent A"},
+                    "created_at": 1,
+                }
+            ]
+
+    service = HarnessRunService(
+        run_store=_RunStore(),
+        approval_store=_ApprovalStore(),
+        event_store=_EventStore(),
+    )
+
+    detail = service.get_run_detail("hr-1")
+
+    assert detail is not None
+    assert detail["workflow_progress"]["status"] == "blocked"
+    assert detail["workflow_progress"]["completed_steps"] == 1
+    assert detail["workflow_progress"]["blocking_step_index"] == 1
+    assert detail["workflow_progress"]["blocking_stage"] == "agent_output_stream"
+    assert detail["workflow_progress"]["steps"][0]["status"] == "completed"
+    assert detail["workflow_progress"]["steps"][1]["status"] == "blocked"
+
+
+def test_filter_graph_for_execution_uses_selected_scope_orchestration_summary():
+    filtered = HarnessRunService._filter_graph_for_execution(
+        {
+            "agents": [
+                {"agent_id": "agent_a", "name": "Agent A"},
+                {"agent_id": "agent_b", "name": "Agent B"},
+            ],
+            "edges": [
+                {"source_agent_id": "agent_a", "target_agent_id": "agent_b", "interaction": "handoff"},
+            ],
+            "orchestration_summary": {
+                "total_agent_count": 2,
+                "start_agents": [{"agent_id": "agent_a", "agent_name": "Agent A"}],
+            },
+            "selected_scope_orchestration_summary": {
+                "total_agent_count": 1,
+                "start_agents": [{"agent_id": "agent_b", "agent_name": "Agent B"}],
+            },
+        },
+        selected_agent_ids=["agent_b"],
+    )
+
+    assert [agent["agent_id"] for agent in filtered["agents"]] == ["agent_b"]
+    assert filtered["edges"] == []
+    assert filtered["orchestration_summary"]["total_agent_count"] == 1
+    assert filtered["orchestration_summary"]["start_agents"][0]["agent_id"] == "agent_b"
 
 
 def test_sync_runtime_state_persists_first_class_runtime_model():

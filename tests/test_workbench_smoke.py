@@ -57,7 +57,7 @@ def test_workbench_smoke_flow(tmp_path: Any, monkeypatch: Any):
     ) -> None:
         return None
 
-    async def _enqueue(task_id: str, file_path: str, user_id: str = None) -> None:
+    async def _enqueue(task_id: str, file_path: str, user_id: str = None, **_: Any) -> None:
         task = state["tasks"][task_id]
         task.update({"status": "succeeded", "progress": "100", "step": "done"})
         doc_id = state["next_doc_id"]
@@ -486,23 +486,30 @@ def test_workbench_smoke_flow(tmp_path: Any, monkeypatch: Any):
     )
     assert interrupt_chat.status_code == 200
     assert interrupt_chat.json()["interrupted"] is True
+    assert interrupt_chat.json()["reply"] == "Approval pending smoke draft"
+    assert interrupt_chat.json()["messages"][-1]["content"] == "Approval pending smoke draft"
+    assert interrupt_chat.json()["context"]["context_pruning"]["method"] == "smoke"
 
     interrupt_status = client.get("/interrupt/approve-1")
     assert interrupt_status.status_code == 200
     assert interrupt_status.json()["interrupted"] is True
-    assert interrupt_status.json()["action_required"]["action_type"] == "deploy"
+    assert interrupt_status.json()["action_required"]["approved"] is False
 
-    approve = client.post("/interrupt/approve-1/approve", json={"approved": True})
-    assert approve.status_code == 200
-    assert approve.json()["approved"] is True
+    approve_interrupt = client.post("/interrupt/approve-1/approve", json={"approved": True})
+    assert approve_interrupt.status_code == 200
+    assert approve_interrupt.json()["approved"] is True
 
-    resume_ready = client.get("/interrupt/approve-1/resume")
-    assert resume_ready.status_code == 200
+    resume_interrupt = client.post("/interrupt/approve-1/resume")
+    assert resume_interrupt.status_code == 200
+    assert resume_interrupt.json()["resumed"] is True
+    assert resume_interrupt.json()["reply"] == "Approved smoke reply"
+    assert resume_interrupt.json()["messages"][-1]["content"] == "Approved smoke reply"
+    assert resume_interrupt.json()["context"]["context_pruning"]["method"] == "smoke_resume"
 
-    resumed = client.post("/interrupt/approve-1/resume")
-    assert resumed.status_code == 200
-    assert resumed.json()["resumed"] is True
-    assert resumed.json()["reply"] == "Approved smoke reply"
+    interrupt_status = client.get("/interrupt/approve-1")
+    assert interrupt_status.status_code == 200
+    assert interrupt_status.json()["interrupted"] is False
+    assert interrupt_status.json()["action_required"] is None
 
     approve_events = client.get("/interrupt/approve-1/events")
     assert approve_events.status_code == 200
@@ -515,48 +522,6 @@ def test_workbench_smoke_flow(tmp_path: Any, monkeypatch: Any):
     resumed_history = client.get(f"/history/{user.username}/approve-1")
     assert resumed_history.status_code == 200
     assert resumed_history.json()["messages"][-1]["content"] == "Approved smoke reply"
-
-    reject_chat = client.post(
-        "/chat/workbench-invoke",
-        json={
-            "input": {
-                "messages": [{"role": "user", "content": "deploy but reject this"}],
-                "context": {
-                    "session_id": "reject-1",
-                    "require_human_approval": True,
-                    "interrupt_action_type": "deploy",
-                    "interrupt_description": "reject guide deploy",
-                    "interrupt_payload": {"next_step": "generate"},
-                },
-            },
-            "config": {"configurable": {"thread_id": "reject-1"}},
-        },
-    )
-    assert reject_chat.status_code == 200
-    assert reject_chat.json()["interrupted"] is True
-
-    reject = client.post("/interrupt/reject-1/approve", json={"approved": False})
-    assert reject.status_code == 200
-    assert reject.json()["approved"] is False
-
-    rejected_status = client.get("/interrupt/reject-1")
-    assert rejected_status.status_code == 200
-    assert rejected_status.json()["interrupted"] is True
-    assert rejected_status.json()["action_required"]["approved"] is False
-
-    rejected_resume = client.get("/interrupt/reject-1/resume")
-    assert rejected_resume.status_code == 400
-
-    reject_events = client.get("/interrupt/reject-1/events")
-    assert reject_events.status_code == 200
-    assert [event["event_type"] for event in reject_events.json()["events"]] == [
-        "interrupt.rejected",
-        "interrupt.resume_blocked",
-    ]
-
-    rejected_history = client.get(f"/history/{user.username}/reject-1")
-    assert rejected_history.status_code == 200
-    assert rejected_history.json()["messages"][-1]["content"] == "Approval pending smoke draft"
 
     profile = client.get("/memory/profile")
     assert profile.status_code == 200

@@ -1,4 +1,6 @@
 import pytest
+from langchain_core.documents import Document
+from langchain_core.messages import AIMessage
 
 from app.infrastructure.queue import arq_jobs
 from app.runtime.llm.provider_registry import ModelProviderRegistry, RegisteredProvider
@@ -10,6 +12,267 @@ def test_chunk_output_for_review_preserves_overlap():
     assert [chunk["content"] for chunk in chunks] == ["abcd", "defg", "ghij"]
     assert chunks[1]["start_char"] == 3
     assert chunks[2]["start_char"] == 6
+
+
+def test_serialize_orchestration_resume_state_preserves_knowledge_context():
+    payload = arq_jobs._serialize_orchestration_resume_state(
+        {
+            "task": "Coordinate work",
+            "agent_outputs": {"agent_a": "done"},
+            "output_artifacts": {},
+            "current_agent": "agent_a",
+            "loop_index": 1,
+            "errors": [],
+            "knowledge_base_ids": ["kb-1", "kb-1", "kb-2"],
+            "knowledge_context": "Knowledge excerpt",
+        },
+        2,
+    )
+
+    restored, next_step_index = arq_jobs._restore_orchestration_state("fallback", payload)
+
+    assert next_step_index == 2
+    assert restored["knowledge_base_ids"] == ["kb-1", "kb-2"]
+    assert restored["knowledge_context"] == "Knowledge excerpt"
+
+
+def test_build_partial_output_artifact_snapshot_includes_mcp_inventory_and_policy():
+    snapshot = arq_jobs._build_partial_output_artifact_snapshot(
+        {
+            "agent_id": "agent_a",
+            "name": "Agent A",
+            "allowed_tool_ids": ["write_file"],
+            "denied_tool_ids": ["web_search"],
+            "allowed_mcp_server_ids": ["github"],
+            "denied_mcp_server_ids": ["browser"],
+            "mcp_server_ids": ["fetch"],
+            "missing_mcp_server_ids": ["github"],
+        },
+        "Summary\n- Next action",
+    )
+
+    assert snapshot["allowed_tool_ids"] == ["write_file"]
+    assert snapshot["denied_tool_ids"] == ["web_search"]
+    assert snapshot["allowed_mcp_server_ids"] == ["github"]
+    assert snapshot["denied_mcp_server_ids"] == ["browser"]
+    assert snapshot["mcp_server_ids"] == ["fetch"]
+    assert snapshot["missing_mcp_server_ids"] == ["github"]
+
+
+def test_build_capability_snapshot_records_agent_lanes_and_mcp_inventory():
+    snapshot = arq_jobs._build_capability_snapshot(
+        {
+            "agents": [
+                {"agent_id": "agent_a", "name": "Researcher", "role": "research"},
+                {"agent_id": "agent_b", "name": "Builder", "role": "implementation"},
+            ],
+            "agent_capability_summaries": [
+                {
+                    "agent_id": "agent_a",
+                    "delegation_focus": "external research, source comparison, and evidence gathering",
+                    "delegation_lane_ids": ["research"],
+                    "loaded_skill_ids": ["research"],
+                    "required_skill_ids": ["research"],
+                    "required_tool_ids": ["web_search"],
+                    "missing_required_tool_ids": ["web_search"],
+                    "requires_tool_calling": True,
+                    "tool_execution_support": "unsupported",
+                    "tool_execution_support_reason": "This runtime adapter does not expose native tool binding.",
+                    "missing_skill_details": [
+                        {
+                            "skill_id": "rag",
+                            "title": "RAG",
+                            "source": "app/skills/rag",
+                            "prompt_hint": "Ground answers in project evidence.",
+                            "suggested_tool_ids": ["knowledge_retriever"],
+                            "suggested_mcp_server_ids": ["filesystem"],
+                        }
+                    ],
+                    "configured_allowed_tool_ids": ["web_search"],
+                    "configured_denied_tool_ids": ["read_document"],
+                    "enabled_tool_ids": ["web_search"],
+                    "policy_added_tool_ids": ["web_search"],
+                    "policy_blocked_tool_ids": ["read_document"],
+                    "unknown_allowed_tool_ids": ["unknown_tool"],
+                    "configured_allowed_mcp_server_ids": ["fetch"],
+                    "configured_denied_mcp_server_ids": ["browser"],
+                    "mcp_server_ids": ["fetch"],
+                    "missing_mcp_server_ids": ["github"],
+                    "missing_mcp_server_details": [
+                        {
+                            "server_id": "github",
+                            "title": "GitHub",
+                            "status": "disabled",
+                            "command_preview": "npx -y @modelcontextprotocol/server-github",
+                        }
+                    ],
+                    "policy_added_mcp_server_ids": ["fetch"],
+                    "policy_blocked_mcp_server_ids": ["browser"],
+                    "unknown_allowed_mcp_server_ids": ["unknown_server"],
+                    "required_mcp_server_ids": ["github"],
+                    "missing_required_mcp_server_ids": ["github"],
+                    "availability_status": "unavailable",
+                    "availability_blockers": [
+                        "Definition requires enabled MCP servers that are not currently available: github"
+                    ],
+                    "delegation_contract": {
+                        "primary_role_mode": "research",
+                        "supporting_role_modes": ["implementation"],
+                        "work_strategy": "gather_then_handoff",
+                        "should_coordinate_parallel_work": False,
+                        "should_produce_final_output": False,
+                        "primary_focus": "external research, source comparison, and evidence gathering",
+                        "upstream_agents": [],
+                        "downstream_agents": [
+                            {"agent_id": "agent_b", "agent_name": "Builder"},
+                        ],
+                        "preferred_collaborators": [
+                            {"agent_id": "agent_b", "agent_name": "Builder"},
+                        ],
+                        "weak_handoff_targets": [],
+                        "watchouts": ["Relevant MCP inventory is missing: github"],
+                    },
+                    "role_profile_suggestion": {
+                        "profile_id": "research",
+                        "suggested_skill_ids": ["research", "rag"],
+                        "available_skill_ids": ["research"],
+                        "missing_skill_ids": ["rag"],
+                        "suggested_tool_ids": ["web_search", "knowledge_retriever"],
+                        "suggested_mcp_server_ids": ["fetch", "filesystem"],
+                        "restrictive_tool_ids": [],
+                        "restrictive_mcp_server_ids": [],
+                    },
+                    "recommended_collaborators": [
+                        {
+                            "agent_id": "agent_b",
+                            "agent_name": "Builder",
+                            "score": 61,
+                            "fit": "strong",
+                            "rationale": "adds implementation lane coverage",
+                            "complementary_lane_ids": ["implementation"],
+                        }
+                    ],
+                }
+            ],
+            "mcp_server_catalog": [
+                {"server_id": "fetch", "title": "Fetch", "status": "enabled"},
+                {"server_id": "github", "title": "GitHub", "status": "disabled"},
+            ],
+        },
+        active_agent_ids=["agent_a", "agent_b"],
+        handoff_scope="all_agents",
+    )
+
+    assert snapshot["active_agent_ids"] == ["agent_a", "agent_b"]
+    assert snapshot["handoff_diagnostic_scope"] == "all_agents"
+    assert snapshot["agent_capabilities"][0]["agent_name"] == "Researcher"
+    assert snapshot["agent_capabilities"][0]["delegation_focus"] == "external research, source comparison, and evidence gathering"
+    assert snapshot["agent_capabilities"][0]["delegation_lane_ids"] == ["research"]
+    assert snapshot["agent_capabilities"][0]["configured_allowed_tool_ids"] == ["web_search"]
+    assert snapshot["agent_capabilities"][0]["policy_blocked_tool_ids"] == ["read_document"]
+    assert snapshot["agent_capabilities"][0]["unknown_allowed_tool_ids"] == ["unknown_tool"]
+    assert snapshot["agent_capabilities"][0]["required_tool_ids"] == ["web_search"]
+    assert snapshot["agent_capabilities"][0]["missing_required_tool_ids"] == ["web_search"]
+    assert snapshot["agent_capabilities"][0]["requires_tool_calling"] is True
+    assert snapshot["agent_capabilities"][0]["tool_execution_support"] == "unsupported"
+    assert snapshot["agent_capabilities"][0]["missing_skill_details"][0]["skill_id"] == "rag"
+    assert snapshot["agent_capabilities"][0]["missing_skill_details"][0]["suggested_tool_ids"] == ["knowledge_retriever"]
+    assert snapshot["agent_capabilities"][0]["mcp_server_ids"] == ["fetch"]
+    assert snapshot["agent_capabilities"][0]["configured_allowed_mcp_server_ids"] == ["fetch"]
+    assert snapshot["agent_capabilities"][0]["missing_mcp_server_details"][0]["server_id"] == "github"
+    assert snapshot["agent_capabilities"][0]["required_mcp_server_ids"] == ["github"]
+    assert snapshot["agent_capabilities"][0]["missing_required_mcp_server_ids"] == ["github"]
+    assert snapshot["agent_capabilities"][0]["availability_status"] == "unavailable"
+    assert "Definition requires enabled MCP servers" in snapshot["agent_capabilities"][0]["availability_blockers"][0]
+    assert snapshot["agent_capabilities"][0]["readiness_status"] == "limited"
+    assert "Relevant MCP servers are not enabled" in snapshot["agent_capabilities"][0]["readiness_warnings"][0]
+    assert snapshot["agent_capabilities"][0]["unknown_allowed_mcp_server_ids"] == ["unknown_server"]
+    assert snapshot["agent_capabilities"][0]["recommended_collaborators"][0]["agent_id"] == "agent_b"
+    assert snapshot["agent_capabilities"][0]["execution_contract"]["skill_execution_mode"] == "guidance_only"
+    assert snapshot["agent_capabilities"][0]["execution_contract"]["tool_access_mode"] == "planning_only"
+    assert snapshot["agent_capabilities"][0]["execution_contract"]["planning_only_tool_ids"] == ["web_search"]
+    assert snapshot["agent_capabilities"][0]["execution_contract"]["mcp_access_mode"] == "planning_only"
+    assert snapshot["agent_capabilities"][0]["execution_contract"]["planning_only_mcp_server_ids"] == ["fetch"]
+    assert snapshot["agent_capabilities"][0]["delegation_contract"]["primary_role_mode"] == "research"
+    assert snapshot["agent_capabilities"][0]["delegation_contract"]["work_strategy"] == "gather_then_handoff"
+    assert snapshot["agent_capabilities"][0]["delegation_contract"]["downstream_agents"][0]["agent_id"] == "agent_b"
+    assert snapshot["agent_capabilities"][0]["delegation_contract"]["watchouts"] == [
+        "Relevant MCP inventory is missing: github"
+    ]
+    assert snapshot["agent_capabilities"][0]["role_profile_suggestion"]["profile_id"] == "research"
+    assert snapshot["agent_capabilities"][0]["role_profile_suggestion"]["missing_skill_ids"] == ["rag"]
+    assert snapshot["mcp_server_catalog"][1]["status"] == "disabled"
+
+
+def test_build_capability_snapshot_filters_collaborators_for_selected_scope():
+    snapshot = arq_jobs._build_capability_snapshot(
+        {
+            "agents": [
+                {"agent_id": "agent_a", "name": "Researcher", "role": "research"},
+                {"agent_id": "agent_b", "name": "Builder", "role": "implementation"},
+            ],
+            "agent_capability_summaries": [
+                {
+                    "agent_id": "agent_a",
+                    "recommended_collaborators": [
+                        {
+                            "agent_id": "agent_b",
+                            "agent_name": "Builder",
+                            "score": 61,
+                            "fit": "strong",
+                            "rationale": "adds implementation lane coverage",
+                        }
+                    ],
+                    "downstream_handoff_scores": [
+                        {
+                            "agent_id": "agent_b",
+                            "agent_name": "Builder",
+                            "score": 27,
+                            "fit": "weak",
+                            "rationale": "current handoff is underpowered",
+                            "edge_present": True,
+                            "interaction": "handoff",
+                        }
+                    ],
+                }
+            ],
+        },
+        active_agent_ids=["agent_a"],
+        handoff_scope="selected_agents",
+    )
+
+    assert snapshot["handoff_diagnostic_scope"] == "selected_agents"
+    assert snapshot["captured_from_selected_agents"] is True
+    assert snapshot["agent_capabilities"][0]["recommended_collaborators"] == []
+    assert snapshot["agent_capabilities"][0]["downstream_handoff_scores"] == []
+
+
+def test_filter_graph_for_execution_uses_selected_scope_orchestration_summary():
+    filtered = arq_jobs._filter_graph_for_execution(
+        {
+            "agents": [
+                {"agent_id": "agent_a", "name": "Agent A"},
+                {"agent_id": "agent_b", "name": "Agent B"},
+            ],
+            "edges": [
+                {"source_agent_id": "agent_a", "target_agent_id": "agent_b", "interaction": "handoff"},
+            ],
+            "orchestration_summary": {
+                "total_agent_count": 2,
+                "start_agents": [{"agent_id": "agent_a", "agent_name": "Agent A"}],
+            },
+            "selected_scope_orchestration_summary": {
+                "total_agent_count": 1,
+                "start_agents": [{"agent_id": "agent_b", "agent_name": "Agent B"}],
+            },
+        },
+        ["agent_b"],
+    )
+
+    assert [agent["agent_id"] for agent in filtered["agents"]] == ["agent_b"]
+    assert filtered["edges"] == []
+    assert filtered["orchestration_summary"]["total_agent_count"] == 1
+    assert filtered["orchestration_summary"]["start_agents"][0]["agent_id"] == "agent_b"
 
 
 @pytest.mark.anyio
@@ -189,6 +452,7 @@ async def test_run_harness_task_marks_failed_for_unsupported_task(monkeypatch):
 @pytest.mark.anyio
 async def test_run_harness_task_completes_agent_orchestration(monkeypatch):
     events = []
+    verifications = []
 
     class _RunService:
         def get_run(self, run_id: str):
@@ -223,6 +487,7 @@ async def test_run_harness_task_completes_agent_orchestration(monkeypatch):
             events.append(("event", event_type, details))
 
         def complete_with_verification(self, run_id: str, verification_result: dict[str, object]):
+            verifications.append(verification_result)
             events.append(("completed", verification_result["status"], verification_result["artifacts"]["loop_count"]))
 
     monkeypatch.setattr(arq_jobs, "build_run_service", lambda: _RunService())
@@ -239,6 +504,11 @@ async def test_run_harness_task_completes_agent_orchestration(monkeypatch):
     )
     monkeypatch.setattr(arq_jobs, "_build_provider_registry", lambda user_id=None: registry)
 
+    async def _approved_review(**kwargs):
+        return {"approved": True, "review_output": "PASS"}
+
+    monkeypatch.setattr(arq_jobs, "review_orchestration_output", _approved_review)
+
     ok = await arq_jobs.run_harness_task({}, "hr-orch")
 
     assert ok is True
@@ -248,8 +518,196 @@ async def test_run_harness_task_completes_agent_orchestration(monkeypatch):
     assert any(event[1] == "orchestration.review_completed" for event in events if event[0] == "event")
     completed_event = next(event for event in events if event[0] == "event" and event[1] == "orchestration.completed")
     assert set(completed_event[2]["agent_outputs"]) == {"agent_a"}
-    assert completed_event[2]["output_artifacts"] == {}
+    assert "agent_a" in completed_event[2]["output_artifacts"]
+    assert completed_event[2]["output_artifacts"]["agent_a"]["node_kind"] == "agent"
     assert events[-1] == ("completed", "pass", 2)
+    assert verifications[0]["artifacts"]["capability_snapshot"]["active_agent_ids"] == ["agent_a"]
+    assert verifications[0]["artifacts"]["capability_snapshot"]["agent_capabilities"][0]["agent_id"] == "agent_a"
+
+
+@pytest.mark.anyio
+async def test_run_harness_task_injects_project_knowledge_context(monkeypatch):
+    events = []
+    rag_calls = []
+    captured_messages = []
+
+    class _RunService:
+        def get_run(self, run_id: str):
+            return {
+                "run_id": run_id,
+                "task_type": "agent_orchestration",
+                "input_json": {
+                    "selected_agent_ids": ["agent_a"],
+                    "loop_count": 1,
+                    "task": "Coordinate work",
+                    "knowledge_base_ids": ["kb-ops"],
+                    "graph": {
+                        "agents": [{"agent_id": "agent_a", "name": "Agent A", "skill_ids": [], "model": "dev-stub"}],
+                        "edges": [],
+                        "skill_pool": [],
+                        "review_agent": {"enabled": False},
+                    },
+                },
+                "user_id": "u1",
+                "status": "queued",
+            }
+
+        def mark_running(self, run_id: str):
+            events.append(("running", run_id))
+
+        def set_current_step(self, run_id: str, step: str):
+            events.append(("step", step))
+
+        def record_event(self, run_id: str, *, event_type: str, actor=None, details=None):
+            events.append(("event", event_type, details))
+
+        def complete_with_verification(self, run_id: str, verification_result: dict[str, object]):
+            events.append(("completed", verification_result["status"]))
+
+    class _Rag:
+        def retrieve_context(self, query: str, k: int = 3, fetch_k: int = 20, user_id: str = None, knowledge_base_ids: list[str] | None = None):
+            rag_calls.append(
+                {
+                    "query": query,
+                    "user_id": user_id,
+                    "knowledge_base_ids": list(knowledge_base_ids or []),
+                    "k": k,
+                    "fetch_k": fetch_k,
+                }
+            )
+            return [
+                Document(
+                    page_content="Use the incident playbook before making infrastructure changes.",
+                    metadata={
+                        "source": "/tmp/incident-playbook.md",
+                        "knowledge_base_id": "kb-ops",
+                        "knowledge_base_name": "Ops KB",
+                        "page_num": 2,
+                    },
+                )
+            ]
+
+    class _FakeLLM:
+        async def ainvoke(self, messages):
+            captured_messages.extend(messages)
+            return type("Resp", (), {"content": "done"})()
+
+    registry = ModelProviderRegistry()
+    registry.register(
+        RegisteredProvider(
+            provider_id="default",
+            name="Default",
+            base_url="https://example.test",
+            api_key="key",
+            models=["dev-stub"],
+            is_default=True,
+        )
+    )
+
+    monkeypatch.setattr(arq_jobs, "build_run_service", lambda: _RunService())
+    monkeypatch.setattr(arq_jobs, "_build_provider_registry", lambda user_id=None: registry)
+    monkeypatch.setattr(arq_jobs, "get_rag_engine", lambda: _Rag())
+    monkeypatch.setattr("app.runtime.graph.orchestration_graph.get_llm_for_provider", lambda **kwargs: _FakeLLM())
+
+    ok = await arq_jobs.run_harness_task({}, "hr-orch-kb")
+
+    assert ok is True
+    assert rag_calls[0]["query"] == "Coordinate work"
+    assert rag_calls[0]["user_id"] == "u1"
+    assert rag_calls[0]["knowledge_base_ids"] == ["kb-ops"]
+    prompt = "\n\n".join(str(message.content) for message in captured_messages)
+    assert "Project knowledge base context is available below." in prompt
+    assert "Use the incident playbook before making infrastructure changes." in prompt
+    assert "Ops KB" in prompt
+    assert "/tmp/incident-playbook.md" in prompt
+    knowledge_event = next(event for event in events if event[0] == "event" and event[1] == "orchestration.knowledge_context_loaded")
+    assert knowledge_event[2]["knowledge_base_ids"] == ["kb-ops"]
+    assert knowledge_event[2]["source_count"] == 1
+
+
+@pytest.mark.anyio
+async def test_run_harness_task_injects_execution_checklist_into_prompt(monkeypatch):
+    events = []
+    captured_messages = []
+
+    class _RunService:
+        def get_run(self, run_id: str):
+            return {
+                "run_id": run_id,
+                "task_type": "agent_orchestration",
+                "input_json": {
+                    "selected_agent_ids": ["agent_a"],
+                    "loop_count": 1,
+                    "task": "Coordinate work",
+                    "task_checklist": [
+                        {"item_id": "check_1", "content": "Audit the current orchestration flow", "status": "completed"},
+                        {
+                            "item_id": "check_2",
+                            "content": "Implement the safer rollout path",
+                            "status": "in_progress",
+                            "active_form": "Implementing the safer rollout path",
+                        },
+                        {"item_id": "check_3", "content": "Verify the final behavior", "status": "pending"},
+                    ],
+                    "graph": {
+                        "agents": [{"agent_id": "agent_a", "name": "Agent A", "skill_ids": [], "model": "dev-stub"}],
+                        "edges": [],
+                        "skill_pool": [],
+                        "review_agent": {"enabled": False},
+                    },
+                },
+                "user_id": "u1",
+                "status": "queued",
+            }
+
+        def mark_running(self, run_id: str):
+            events.append(("running", run_id))
+
+        def set_current_step(self, run_id: str, step: str):
+            events.append(("step", step))
+
+        def record_event(self, run_id: str, *, event_type: str, actor=None, details=None):
+            events.append(("event", event_type, details))
+
+        def complete_with_verification(self, run_id: str, verification_result: dict[str, object]):
+            events.append(("completed", verification_result["status"]))
+
+    class _FakeLLM:
+        async def ainvoke(self, messages):
+            captured_messages.extend(messages)
+            return type("Resp", (), {"content": "done"})()
+
+    registry = ModelProviderRegistry()
+    registry.register(
+        RegisteredProvider(
+            provider_id="default",
+            name="Default",
+            base_url="https://example.test",
+            api_key="key",
+            models=["dev-stub"],
+            is_default=True,
+        )
+    )
+
+    monkeypatch.setattr(arq_jobs, "build_run_service", lambda: _RunService())
+    monkeypatch.setattr(arq_jobs, "_build_provider_registry", lambda user_id=None: registry)
+    monkeypatch.setattr("app.runtime.graph.orchestration_graph.get_llm_for_provider", lambda **kwargs: _FakeLLM())
+
+    ok = await arq_jobs.run_harness_task({}, "hr-orch-checklist")
+
+    assert ok is True
+    prompt = "\n\n".join(str(message.content) for message in captured_messages)
+    assert "Execution checklist:" in prompt
+    assert "[completed] Audit the current orchestration flow" in prompt
+    assert "[in progress] Implementing the safer rollout path" in prompt
+    assert "[pending] Verify the final behavior" in prompt
+    checklist_event = next(event for event in events if event[0] == "event" and event[1] == "orchestration.checklist_loaded")
+    assert checklist_event[2]["checklist_count"] == 3
+    assert checklist_event[2]["open_item_count"] == 2
+    assert checklist_event[2]["open_items_preview"] == [
+        "Implementing the safer rollout path",
+        "Verify the final behavior",
+    ]
 
 
 @pytest.mark.anyio
@@ -478,12 +936,32 @@ async def test_run_harness_task_pauses_agent_orchestration_on_review_block(monke
                 "run_id": run_id,
                 "task_type": "agent_orchestration",
                 "input_json": {
-                    "selected_agent_ids": ["agent_a"],
+                    "selected_agent_ids": ["agent_a", "agent_b"],
                     "loop_count": 1,
                     "task": "Coordinate work",
                     "graph": {
-                        "agents": [{"agent_id": "agent_a", "name": "Agent A", "skill_ids": ["research"], "model": "dev-stub"}],
-                        "edges": [],
+                        "agents": [
+                            {"agent_id": "agent_a", "name": "Planner", "skill_ids": ["research"], "model": "dev-stub"},
+                            {"agent_id": "agent_b", "name": "Builder", "skill_ids": [], "model": "dev-stub"},
+                        ],
+                        "edges": [{"source_agent_id": "agent_a", "target_agent_id": "agent_b", "interaction": "handoff"}],
+                        "tool_catalog": [
+                            {"tool_id": "get_current_time", "title": "Get Current Time", "description": "Read the current system time."},
+                        ],
+                        "agent_capability_summaries": [
+                            {
+                                "agent_id": "agent_a",
+                                "loaded_skill_ids": ["research"],
+                                "enabled_tool_ids": [],
+                                "capability_brief": "Approved skills: research.",
+                            },
+                            {
+                                "agent_id": "agent_b",
+                                "loaded_skill_ids": [],
+                                "enabled_tool_ids": ["get_current_time"],
+                                "capability_brief": "Enabled tools: get_current_time.",
+                            },
+                        ],
                         "skill_pool": [{"skill_id": "research"}],
                         "review_agent": {"enabled": True, "name": "Reviewer", "model": "dev-stub"},
                     },
@@ -527,16 +1005,99 @@ async def test_run_harness_task_pauses_agent_orchestration_on_review_block(monke
     monkeypatch.setattr(arq_jobs, "_build_provider_registry", lambda user_id=None: registry)
 
     async def _blocked_review(**kwargs):
-        return {"approved": False, "review_output": "BLOCK: unsafe output"}
+        output = str(kwargs.get("output") or "")
+        if "unsafe" in output:
+            return {"approved": False, "review_output": "BLOCK: unsafe output"}
+        return {"approved": True, "review_output": "PASS"}
 
     monkeypatch.setattr(arq_jobs, "review_orchestration_output", _blocked_review)
+
+    class _FinalOnlyLLM:
+        def bind_tools(self, tools):
+            self.tools = list(tools)
+            return self
+
+        async def ainvoke(self, messages):
+            system_text = "\n".join(str(message.content) for message in messages if getattr(message, "type", "") == "system")
+            if "You are Planner" in system_text:
+                return AIMessage(content="Planner handoff summary")
+            if any(getattr(message, "type", "") == "tool" for message in messages):
+                return AIMessage(content="unsafe final output")
+            return AIMessage(
+                content="",
+                tool_calls=[{"name": "get_current_time", "args": {}, "id": "call_1", "type": "tool_call"}],
+            )
+
+    monkeypatch.setattr("app.runtime.graph.orchestration_graph.get_llm_for_provider", lambda **kwargs: _FinalOnlyLLM())
 
     ok = await arq_jobs.run_harness_task({}, "hr-orch-blocked")
 
     assert ok is False
     assert any(event[0] == "approval" and event[1] == "orchestration_review" for event in events)
+    approval_event = next(event for event in events if event[0] == "approval")
+    assert approval_event[2]["review_stage"] == "agent_output_final"
+    assert approval_event[2]["artifact_source"] == "output_artifact"
+    assert approval_event[2]["artifact_snapshot"]["agent_name"] == "Builder"
+    assert approval_event[2]["artifact_snapshot"]["final_output"] is True
+    assert approval_event[2]["artifact_snapshot"]["consumed_handoffs"][0]["source_agent_name"] == "Planner"
+    assert approval_event[2]["artifact_snapshot"]["tool_runs"][0]["tool_id"] == "get_current_time"
     assert "orchestration_resume" in saved_inputs["input_json"]
     assert "rollback_state" in saved_inputs["input_json"]["orchestration_resume"]
+
+
+@pytest.mark.anyio
+async def test_run_harness_task_reports_missing_skill_capability_details(monkeypatch):
+    events = []
+    verifications = []
+
+    class _RunService:
+        def get_run(self, run_id: str):
+            return {
+                "run_id": run_id,
+                "task_type": "agent_orchestration",
+                "input_json": {
+                    "selected_agent_ids": ["agent_a"],
+                    "loop_count": 1,
+                    "task": "Coordinate work",
+                    "graph": {
+                        "agents": [{"agent_id": "agent_a", "name": "Agent A", "skill_ids": ["research"], "model": "dev-stub"}],
+                        "edges": [],
+                        "skill_pool": [],
+                        "review_agent": {"enabled": False},
+                    },
+                },
+                "user_id": "u1",
+                "status": "queued",
+            }
+
+        def mark_running(self, run_id: str):
+            events.append(("running", run_id))
+
+        def set_current_step(self, run_id: str, step: str):
+            events.append(("step", step))
+
+        def record_event(self, run_id: str, *, event_type: str, actor=None, details=None):
+            events.append(("event", event_type, details))
+
+        def complete_with_verification(self, run_id: str, verification_result: dict[str, object]):
+            verifications.append(verification_result)
+            events.append(("completed", verification_result["status"]))
+
+    monkeypatch.setattr(arq_jobs, "build_run_service", lambda: _RunService())
+
+    ok = await arq_jobs.run_harness_task({}, "hr-missing-skill")
+
+    assert ok is False
+    ready_event = next(event for event in events if event[0] == "event" and event[1] == "orchestration.agent_ready")
+    assert ready_event[2]["missing_skills"] == ["research"]
+    assert ready_event[2]["missing_skill_details"][0]["title"] == "Research"
+    assert "external evidence" in str(ready_event[2]["missing_skill_details"][0]["prompt_hint"] or "")
+    assert "web_search" in ready_event[2]["missing_skill_details"][0]["suggested_tool_ids"]
+
+    blocked_agents = verifications[0]["artifacts"]["blocked_agents"]
+    assert blocked_agents[0]["agent_name"] == "Agent A"
+    assert blocked_agents[0]["missing_skill_details"][0]["skill_id"] == "research"
+    assert verifications[0]["artifacts"]["error_code"] == "missing_skill_approval"
 
 
 @pytest.mark.anyio
@@ -626,6 +1187,9 @@ async def test_run_harness_task_pauses_agent_orchestration_on_segment_review_blo
     assert approval_event[2]["review_stage"] == "agent_output_segment"
     assert approval_event[2]["segment_count"] >= 2
     assert approval_event[2]["segment_preview"]
+    assert approval_event[2]["artifact_source"] == "output_artifact"
+    assert approval_event[2]["artifact_snapshot"]["agent_name"] == "Agent A"
+    assert approval_event[2]["artifact_snapshot"]["output_preview"]
     assert "orchestration_resume" in saved_inputs["input_json"]
 
 
@@ -720,6 +1284,9 @@ async def test_run_harness_task_pauses_agent_orchestration_on_stream_review_bloc
     assert approval_event[2]["review_stage"] == "agent_output_stream"
     assert approval_event[2]["partial_output"]
     assert approval_event[2]["segment_preview"]
+    assert approval_event[2]["artifact_source"] == "partial_stream"
+    assert approval_event[2]["artifact_snapshot"]["agent_name"] == "Agent A"
+    assert approval_event[2]["artifact_snapshot"]["output_preview"]
     assert "rollback_state" in saved_inputs["input_json"]["orchestration_resume"]
 
 
@@ -1055,6 +1622,10 @@ async def test_run_harness_task_pauses_on_blocked_cluster_research_evidence(monk
     approval_event = next(event for event in events if event[0] == "approval")
     assert approval_event[2]["review_stage"] == "cluster_research"
     assert approval_event[2]["research_queries"]
+    assert approval_event[2]["artifact_source"] == "research_artifact"
+    assert approval_event[2]["artifact_snapshot"]["cluster_name"] == "Brainstorm Cluster"
+    assert approval_event[2]["artifact_snapshot"]["research"]["blocked"] is True
+    assert approval_event[2]["artifact_snapshot"]["research"]["review_output"] == "BLOCK: unverified external evidence"
     rollback_artifact = saved_inputs["input_json"]["orchestration_resume"]["rollback_state"]["output_artifacts"]["cluster_a"]
     assert rollback_artifact["research"]["blocked"] is True
     assert rollback_artifact["research"]["review_output"] == "BLOCK: unverified external evidence"

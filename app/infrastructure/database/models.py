@@ -181,6 +181,41 @@ class Document(Base):
     )
 
 
+class KnowledgeBase(Base):
+    __tablename__ = "knowledge_base"
+
+    knowledge_base_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    __table_args__ = (
+        Index("idx_knowledge_base_user_updated", "user_id", "updated_at"),
+    )
+
+
+class KnowledgeBaseDocument(Base):
+    __tablename__ = "knowledge_base_document"
+
+    doc_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("document.doc_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    knowledge_base_id: Mapped[str] = mapped_column(
+        String(128),
+        ForeignKey("knowledge_base.knowledge_base_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    __table_args__ = (
+        Index("idx_knowledge_base_document_kb", "knowledge_base_id"),
+    )
+
+
 class DocContent(Base):
     """
     文档内容表 (Parent Chunks)

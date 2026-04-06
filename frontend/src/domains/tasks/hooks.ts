@@ -38,6 +38,9 @@ export type TaskIncidentDTO = {
 export type TaskDetailDTO = {
   task_id: string;
   status: string;
+  progress?: number | string;
+  step?: string;
+  message?: string;
   filename?: string;
   created_at?: number | string;
   error?: string;
@@ -96,7 +99,13 @@ export function useTaskDetailQuery(taskId: string) {
     enabled: !!taskId,
     refetchInterval: (query) => {
       const task = query.state.data;
-      if (task && (task.status === 'queued' || task.status === 'running')) {
+      if (
+        task &&
+        (task.status === 'queued' ||
+          task.status === 'running' ||
+          task.status === 'processing' ||
+          task.status === 'indexing')
+      ) {
         return 3000; // Fast poll for active tasks
       }
       return false; // Stop polling when finished

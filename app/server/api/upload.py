@@ -4,11 +4,11 @@ import time
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.infrastructure.config.settings import settings
 from app.infrastructure.database.schema import ensure_schema_if_possible
-from app.infrastructure.database.stores import MySQLDocStore
+from app.infrastructure.database.stores import KnowledgeBaseDocumentStore, KnowledgeBaseStore, MySQLDocStore
 from app.infrastructure.database.models import User
 from app.infrastructure.queue.client import enqueue_ingest_pdf
 from app.infrastructure.queue.redis_client import (
@@ -42,9 +42,18 @@ def _extract_uploaded_image_text(file_path: str) -> str:
 @router.post("/upload")
 async def upload_documents(
     files: list[UploadFile] = File(...),
+    knowledge_base_id: str | None = Form(default=None),
     current_user: Annotated[User, Depends(get_current_active_user)] = None,
 ):
     user_id = current_user.username if current_user else "unknown"
+    selected_knowledge_base_id = str(knowledge_base_id or "").strip() or None
+
+    if selected_knowledge_base_id and ensure_schema_if_possible():
+        selected_knowledge_base = KnowledgeBaseStore().get_knowledge_base(selected_knowledge_base_id)
+        if selected_knowledge_base is None:
+            raise HTTPException(status_code=404, detail="Knowledge base not found")
+        if current_user and current_user.role != "admin" and str(selected_knowledge_base.get("user_id") or "") != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to use this knowledge base")
 
     # 物理路径隔离：data/documents/{user_id}/
     upload_dir = os.path.join(settings.storage_local.documents_dir, user_id)
@@ -77,6 +86,11 @@ async def upload_documents(
                     checksum=checksum,
                 )
                 if existing:
+                    if selected_knowledge_base_id:
+                        KnowledgeBaseDocumentStore().assign_document(
+                            doc_id=int(existing["doc_id"]),
+                            knowledge_base_id=selected_knowledge_base_id,
+                        )
                     try:
                         os.remove(file_path)
                     except OSError:
@@ -87,6 +101,7 @@ async def upload_documents(
                             "status": "duplicate",
                             "message": "Document already exists",
                             "existing_doc_id": existing["doc_id"],
+                            "knowledge_base_id": selected_knowledge_base_id,
                         }
                     )
                     continue
@@ -141,12 +156,23 @@ async def upload_documents(
                     "retry_count": 0,
                     "retryable": "false",
                     "operation_key": operation_key,
+                    "knowledge_base_id": selected_knowledge_base_id,
                 },
             )
             # 传 user_id 给队列任务，以便写入 Document 表时关联用户
-            await enqueue_ingest_pdf(task_id, file_path, user_id=user_id)
+            await enqueue_ingest_pdf(
+                task_id,
+                file_path,
+                user_id=user_id,
+                knowledge_base_id=selected_knowledge_base_id,
+            )
             results.append(
-                {"filename": safe_name, "status": "queued", "task_id": task_id}
+                {
+                    "filename": safe_name,
+                    "status": "queued",
+                    "task_id": task_id,
+                    "knowledge_base_id": selected_knowledge_base_id,
+                }
             )
         except Exception as e:
             results.append(

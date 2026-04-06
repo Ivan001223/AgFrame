@@ -46,6 +46,9 @@ def test_retrieve_context_restores_parents_from_rrf_candidates(monkeypatch):
                     "doc_id": 7,
                     "page_num": 1,
                     "content": "full parent chunk content",
+                    "source_path": "/tmp/source.md",
+                    "knowledge_base_id": "kb-1",
+                    "knowledge_base_name": "Project KB",
                 }
             ]
 
@@ -57,5 +60,8 @@ def test_retrieve_context_restores_parents_from_rrf_candidates(monkeypatch):
     assert docs[0].page_content == "full parent chunk content"
     assert docs[0].metadata["parent_chunk_id"] == 42
     assert docs[0].metadata["retrieval_rrf_score"] == 1.5
+    assert docs[0].metadata["source"] == "/tmp/source.md"
+    assert docs[0].metadata["knowledge_base_id"] == "kb-1"
+    assert docs[0].metadata["knowledge_base_name"] == "Project KB"
     _, _, filter_dict = engine._hybrid_retriever.calls[0]
     assert filter_dict == {"user_id": "u1"}

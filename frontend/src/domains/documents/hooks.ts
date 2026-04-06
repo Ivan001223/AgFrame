@@ -12,6 +12,8 @@ export type DocumentDTO = {
   created_at: number;
   parent_chunk_count: number;
   embedding_count: number;
+  knowledge_base_id?: string | null;
+  knowledge_base_name?: string | null;
   preview?: Array<{
     content: string;
     chunk_index?: number;
@@ -20,7 +22,13 @@ export type DocumentDTO = {
 
 export const DOCUMENT_KEYS = {
   all: ['documents'] as const,
-  detail: (id: string | number) => ['documents', id] as const,
+  detail: (id: string | number) => ['documents', String(id)] as const,
+};
+
+export type UploadDocumentRequest = {
+  file: File;
+  knowledgeBaseId?: string | null;
+  onProgress?: (progress: number) => void;
 };
 
 // 1. Fetch all documents
@@ -59,6 +67,23 @@ export function useDeleteDocumentMutation() {
   });
 }
 
+export function useAssignDocumentKnowledgeBaseMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ docId, knowledgeBaseId }: { docId: number; knowledgeBaseId?: string | null }) =>
+      apiClient<DocumentDTO>(`/documents/${docId}/knowledge-base`, {
+        method: 'PUT',
+        body: JSON.stringify({ knowledge_base_id: knowledgeBaseId ?? null }),
+      }),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: DOCUMENT_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: DOCUMENT_KEYS.detail(variables.docId) });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-bases'] });
+    },
+  });
+}
+
 // 4. Reindex a document
 export function useReindexDocumentMutation() {
   const queryClient = useQueryClient();
@@ -82,36 +107,58 @@ export function useUploadDocumentMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (file: File) => {
+    mutationFn: async ({ file, knowledgeBaseId, onProgress }: UploadDocumentRequest) => {
+      const token = getStoredToken();
       const formData = new FormData();
       formData.append('files', file);
-      const token = getStoredToken();
-
-      // Note: We bypass apiClient here to prevent it from setting Content-Type: application/json
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
-      const response = await fetch(`${baseUrl}/upload`, {
-        method: 'POST',
-        headers: {
-          ...(token && { Authorization: `Bearer ${token}` }),
-        },
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error('Upload failed');
+      if (knowledgeBaseId) {
+        formData.append('knowledge_base_id', knowledgeBaseId);
       }
 
-      return response.json() as Promise<{
+      return new Promise<{
         results: Array<{
           status: string;
           task_id?: string;
           existing_doc_id?: number;
+          knowledge_base_id?: string | null;
           message?: string;
         }>;
-      }>;
+      }>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${API_BASE_URL}/upload`);
+
+        if (token) {
+          xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        }
+
+        xhr.upload.onprogress = (event) => {
+          if (!event.lengthComputable || !onProgress) {
+            return;
+          }
+          onProgress(Math.round((event.loaded / event.total) * 100));
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              resolve(JSON.parse(xhr.responseText));
+            } catch {
+              reject(new Error('Upload failed'));
+            }
+            return;
+          }
+
+          reject(new Error('Upload failed'));
+        };
+
+        xhr.onerror = () => reject(new Error('Upload failed'));
+        xhr.onabort = () => reject(new Error('Upload aborted'));
+        xhr.send(formData);
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: DOCUMENT_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-bases'] });
     },
   });
 }

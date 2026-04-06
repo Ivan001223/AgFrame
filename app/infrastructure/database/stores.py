@@ -16,6 +16,8 @@ from app.infrastructure.database.models import (
     DocContent,
     DocEmbedding,
     Document,
+    KnowledgeBase,
+    KnowledgeBaseDocument,
     UserMemoryEmbedding,
     UserMemoryItem,
     UserProfile,
@@ -330,6 +332,167 @@ class MySQLProfileStore:
                 session.add(UserProfile(user_id=user_id, profile_json=profile, version=int(version), updated_at=now))
 
 
+class KnowledgeBaseStore:
+    def list_knowledge_bases(self, user_id: str, *, include_all_users: bool = False) -> list[dict[str, Any]]:
+        with get_session() as session:
+            document_count_sq = (
+                select(func.count(KnowledgeBaseDocument.doc_id))
+                .where(KnowledgeBaseDocument.knowledge_base_id == KnowledgeBase.knowledge_base_id)
+                .scalar_subquery()
+            )
+            stmt = (
+                select(
+                    KnowledgeBase.knowledge_base_id,
+                    KnowledgeBase.user_id,
+                    KnowledgeBase.name,
+                    KnowledgeBase.description,
+                    KnowledgeBase.created_at,
+                    KnowledgeBase.updated_at,
+                    document_count_sq.label("document_count"),
+                )
+                .order_by(KnowledgeBase.updated_at.desc(), KnowledgeBase.created_at.desc())
+            )
+            if not include_all_users:
+                stmt = stmt.where(KnowledgeBase.user_id == user_id)
+            rows = session.execute(stmt).all()
+            return [
+                {
+                    "knowledge_base_id": str(row.knowledge_base_id),
+                    "user_id": str(row.user_id),
+                    "name": str(row.name),
+                    "description": row.description,
+                    "created_at": int(row.created_at),
+                    "updated_at": int(row.updated_at),
+                    "document_count": int(row.document_count or 0),
+                }
+                for row in rows
+            ]
+
+    def get_knowledge_base(self, knowledge_base_id: str) -> dict[str, Any] | None:
+        with get_session() as session:
+            document_count_sq = (
+                select(func.count(KnowledgeBaseDocument.doc_id))
+                .where(KnowledgeBaseDocument.knowledge_base_id == KnowledgeBase.knowledge_base_id)
+                .scalar_subquery()
+            )
+            row = session.execute(
+                select(
+                    KnowledgeBase.knowledge_base_id,
+                    KnowledgeBase.user_id,
+                    KnowledgeBase.name,
+                    KnowledgeBase.description,
+                    KnowledgeBase.created_at,
+                    KnowledgeBase.updated_at,
+                    document_count_sq.label("document_count"),
+                ).where(KnowledgeBase.knowledge_base_id == knowledge_base_id)
+            ).one_or_none()
+            if row is None:
+                return None
+            return {
+                "knowledge_base_id": str(row.knowledge_base_id),
+                "user_id": str(row.user_id),
+                "name": str(row.name),
+                "description": row.description,
+                "created_at": int(row.created_at),
+                "updated_at": int(row.updated_at),
+                "document_count": int(row.document_count or 0),
+            }
+
+    def create_knowledge_base(
+        self,
+        *,
+        knowledge_base_id: str,
+        user_id: str,
+        name: str,
+        description: str | None,
+    ) -> dict[str, Any]:
+        now = int(time.time())
+        row = KnowledgeBase(
+            knowledge_base_id=knowledge_base_id,
+            user_id=user_id,
+            name=name,
+            description=description,
+            created_at=now,
+            updated_at=now,
+        )
+        with get_session() as session:
+            session.add(row)
+            session.flush()
+        created = self.get_knowledge_base(knowledge_base_id)
+        return created if created is not None else {
+            "knowledge_base_id": knowledge_base_id,
+            "user_id": user_id,
+            "name": name,
+            "description": description,
+            "created_at": now,
+            "updated_at": now,
+            "document_count": 0,
+        }
+
+    def update_knowledge_base(self, knowledge_base_id: str, **changes: object) -> dict[str, Any] | None:
+        if not changes:
+            return self.get_knowledge_base(knowledge_base_id)
+        payload = dict(changes)
+        payload["updated_at"] = int(time.time())
+        with get_session() as session:
+            session.execute(
+                update(KnowledgeBase).where(KnowledgeBase.knowledge_base_id == knowledge_base_id).values(**payload)
+            )
+        return self.get_knowledge_base(knowledge_base_id)
+
+    def delete_knowledge_base(self, knowledge_base_id: str) -> bool:
+        with get_session() as session:
+            res = session.execute(delete(KnowledgeBase).where(KnowledgeBase.knowledge_base_id == knowledge_base_id))
+            return bool(res.rowcount)
+
+
+class KnowledgeBaseDocumentStore:
+    def assign_document(self, *, doc_id: int, knowledge_base_id: str) -> dict[str, Any]:
+        now = int(time.time())
+        with get_session() as session:
+            row = session.get(KnowledgeBaseDocument, int(doc_id))
+            if row is None:
+                row = KnowledgeBaseDocument(
+                    doc_id=int(doc_id),
+                    knowledge_base_id=knowledge_base_id,
+                    created_at=now,
+                )
+                session.add(row)
+                session.flush()
+            else:
+                row.knowledge_base_id = knowledge_base_id
+                session.flush()
+        assignment = self.get_assignment(doc_id=int(doc_id))
+        return assignment if assignment is not None else {
+            "doc_id": int(doc_id),
+            "knowledge_base_id": knowledge_base_id,
+        }
+
+    def clear_document(self, *, doc_id: int) -> bool:
+        with get_session() as session:
+            res = session.execute(delete(KnowledgeBaseDocument).where(KnowledgeBaseDocument.doc_id == int(doc_id)))
+            return bool(res.rowcount)
+
+    def get_assignment(self, *, doc_id: int) -> dict[str, Any] | None:
+        with get_session() as session:
+            row = session.execute(
+                select(
+                    KnowledgeBaseDocument.doc_id,
+                    KnowledgeBaseDocument.knowledge_base_id,
+                    KnowledgeBase.name,
+                )
+                .join(KnowledgeBase, KnowledgeBase.knowledge_base_id == KnowledgeBaseDocument.knowledge_base_id)
+                .where(KnowledgeBaseDocument.doc_id == int(doc_id))
+            ).one_or_none()
+            if row is None:
+                return None
+            return {
+                "doc_id": int(row.doc_id),
+                "knowledge_base_id": str(row.knowledge_base_id),
+                "knowledge_base_name": str(row.name),
+            }
+
+
 class MySQLDocStore:
     """MySQL 文档存储实现 (Parent Retrieval)"""
     
@@ -358,11 +521,22 @@ class MySQLDocStore:
             return None
         with get_session() as session:
             row = session.execute(
-                select(Document).where(
+                select(
+                    Document.doc_id,
+                    Document.user_id,
+                    Document.source_path,
+                    Document.checksum,
+                    Document.created_at,
+                    KnowledgeBase.knowledge_base_id,
+                    KnowledgeBase.name.label("knowledge_base_name"),
+                )
+                .outerjoin(KnowledgeBaseDocument, KnowledgeBaseDocument.doc_id == Document.doc_id)
+                .outerjoin(KnowledgeBase, KnowledgeBase.knowledge_base_id == KnowledgeBaseDocument.knowledge_base_id)
+                .where(
                     Document.user_id == uid,
                     Document.checksum == digest,
                 )
-            ).scalar_one_or_none()
+            ).one_or_none()
             if row is None:
                 return None
             return {
@@ -371,6 +545,8 @@ class MySQLDocStore:
                 "source_path": row.source_path,
                 "checksum": row.checksum,
                 "created_at": int(row.created_at),
+                "knowledge_base_id": str(row.knowledge_base_id) if row.knowledge_base_id is not None else None,
+                "knowledge_base_name": str(row.knowledge_base_name) if row.knowledge_base_name is not None else None,
             }
 
     def insert_parent_chunks(self, doc_id: int, chunks: list[dict[str, Any]]) -> list[int]:
@@ -402,8 +578,20 @@ class MySQLDocStore:
             return []
         with get_session() as session:
             rows = session.execute(
-                select(DocContent).where(DocContent.parent_chunk_id.in_([int(x) for x in parent_chunk_ids]))
-            ).scalars().all()
+                select(
+                    DocContent.parent_chunk_id,
+                    DocContent.doc_id,
+                    DocContent.content,
+                    DocContent.page_num,
+                    Document.source_path,
+                    KnowledgeBase.knowledge_base_id,
+                    KnowledgeBase.name.label("knowledge_base_name"),
+                )
+                .outerjoin(Document, Document.doc_id == DocContent.doc_id)
+                .outerjoin(KnowledgeBaseDocument, KnowledgeBaseDocument.doc_id == DocContent.doc_id)
+                .outerjoin(KnowledgeBase, KnowledgeBase.knowledge_base_id == KnowledgeBaseDocument.knowledge_base_id)
+                .where(DocContent.parent_chunk_id.in_([int(x) for x in parent_chunk_ids]))
+            ).all()
             row_by_id = {int(r.parent_chunk_id): r for r in rows}
             out: list[dict[str, Any]] = []
             for i in parent_chunk_ids:
@@ -416,6 +604,13 @@ class MySQLDocStore:
                         "doc_id": int(r.doc_id),
                         "content": r.content,
                         "page_num": r.page_num,
+                        "source_path": r.source_path,
+                        "knowledge_base_id": (
+                            str(r.knowledge_base_id) if r.knowledge_base_id is not None else None
+                        ),
+                        "knowledge_base_name": (
+                            str(r.knowledge_base_name) if r.knowledge_base_name is not None else None
+                        ),
                     }
                 )
             return out
@@ -433,15 +628,22 @@ class MySQLDocStore:
                 .where(DocEmbedding.doc_id == Document.doc_id)
                 .scalar_subquery()
             )
-            stmt = select(
-                Document.doc_id,
-                Document.user_id,
-                Document.source_path,
-                Document.checksum,
-                Document.created_at,
-                parent_count_sq.label("parent_chunk_count"),
-                embedding_count_sq.label("embedding_count"),
-            ).order_by(Document.created_at.desc(), Document.doc_id.desc())
+            stmt = (
+                select(
+                    Document.doc_id,
+                    Document.user_id,
+                    Document.source_path,
+                    Document.checksum,
+                    Document.created_at,
+                    parent_count_sq.label("parent_chunk_count"),
+                    embedding_count_sq.label("embedding_count"),
+                    KnowledgeBase.knowledge_base_id,
+                    KnowledgeBase.name.label("knowledge_base_name"),
+                )
+                .outerjoin(KnowledgeBaseDocument, KnowledgeBaseDocument.doc_id == Document.doc_id)
+                .outerjoin(KnowledgeBase, KnowledgeBase.knowledge_base_id == KnowledgeBaseDocument.knowledge_base_id)
+                .order_by(Document.created_at.desc(), Document.doc_id.desc())
+            )
             if not include_all_users:
                 stmt = stmt.where(Document.user_id == user_id)
 
@@ -455,6 +657,8 @@ class MySQLDocStore:
                     "created_at": int(r.created_at),
                     "parent_chunk_count": int(r.parent_chunk_count or 0),
                     "embedding_count": int(r.embedding_count or 0),
+                    "knowledge_base_id": str(r.knowledge_base_id) if r.knowledge_base_id is not None else None,
+                    "knowledge_base_name": str(r.knowledge_base_name) if r.knowledge_base_name is not None else None,
                 }
                 for r in rows
             ]
@@ -498,7 +702,12 @@ class MySQLDocStore:
                     Document.created_at,
                     parent_count_sq.label("parent_chunk_count"),
                     embedding_count_sq.label("embedding_count"),
-                ).where(Document.doc_id == int(doc_id))
+                    KnowledgeBase.knowledge_base_id,
+                    KnowledgeBase.name.label("knowledge_base_name"),
+                )
+                .outerjoin(KnowledgeBaseDocument, KnowledgeBaseDocument.doc_id == Document.doc_id)
+                .outerjoin(KnowledgeBase, KnowledgeBase.knowledge_base_id == KnowledgeBaseDocument.knowledge_base_id)
+                .where(Document.doc_id == int(doc_id))
             ).one_or_none()
             if row is None:
                 return None
@@ -510,6 +719,8 @@ class MySQLDocStore:
                 "created_at": int(row.created_at),
                 "parent_chunk_count": int(row.parent_chunk_count or 0),
                 "embedding_count": int(row.embedding_count or 0),
+                "knowledge_base_id": str(row.knowledge_base_id) if row.knowledge_base_id is not None else None,
+                "knowledge_base_name": str(row.knowledge_base_name) if row.knowledge_base_name is not None else None,
             }
 
     def get_document_preview(self, doc_id: int, *, limit: int = 5) -> list[dict[str, Any]]:
@@ -576,11 +787,18 @@ class PgDocEmbeddingStore:
         stmt = select(DocEmbedding).order_by(distance).limit(int(k))
 
         if filter:
-            allowed_keys = {"user_id", "doc_id", "source", "type"}
+            allowed_keys = {"user_id", "doc_id", "source", "type", "knowledge_base_id"}
             for key, value in filter.items():
                 if key not in allowed_keys:
                     continue
-                stmt = stmt.where(func.json_extract(DocEmbedding.metadata_json, f"$.{key}") == value)
+                field = func.json_extract(DocEmbedding.metadata_json, f"$.{key}")
+                if isinstance(value, (list, tuple, set)):
+                    values = [item for item in value if item is not None]
+                    if not values:
+                        continue
+                    stmt = stmt.where(field.in_(values))
+                else:
+                    stmt = stmt.where(field == value)
 
         with get_session() as session:
             return list(session.execute(stmt).scalars().all())
@@ -601,11 +819,18 @@ class PgDocEmbeddingStore:
         )
         
         if filter:
-            allowed_keys = {"user_id", "doc_id", "source", "type"}
+            allowed_keys = {"user_id", "doc_id", "source", "type", "knowledge_base_id"}
             for key, value in filter.items():
                 if key not in allowed_keys:
                     continue
-                stmt = stmt.where(func.json_extract(DocEmbedding.metadata_json, f"$.{key}") == value)
+                field = func.json_extract(DocEmbedding.metadata_json, f"$.{key}")
+                if isinstance(value, (list, tuple, set)):
+                    values = [item for item in value if item is not None]
+                    if not values:
+                        continue
+                    stmt = stmt.where(field.in_(values))
+                else:
+                    stmt = stmt.where(field == value)
 
         with get_session() as session:
             return list(session.execute(stmt).scalars().all())

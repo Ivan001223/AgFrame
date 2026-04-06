@@ -223,7 +223,12 @@ class HybridRetrieverService:
                 # Simple exact match for now.
                 match = True
                 for k, v in filter.items():
-                    if meta.get(k) != v:
+                    value = meta.get(k)
+                    if isinstance(v, (list, tuple, set)):
+                        if value not in v:
+                            match = False
+                            break
+                    elif value != v:
                         match = False
                         break
                 if match:

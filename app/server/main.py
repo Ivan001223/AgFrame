@@ -24,6 +24,7 @@ from app.server.api import (
     health,
     history,
     interrupt,
+    knowledge_bases,
     memory,
     profile,
     tasks,
@@ -153,6 +154,7 @@ app.include_router(api_settings.router)  # 内部已处理 Admin 限制
 app.include_router(history.router, dependencies=[Depends(get_current_active_user)])
 app.include_router(memory.router, dependencies=[Depends(get_current_active_user)])
 app.include_router(profile.router, dependencies=[Depends(get_current_active_user)])
+app.include_router(knowledge_bases.router, dependencies=[Depends(get_current_active_user)])
 app.include_router(documents.router, dependencies=[Depends(get_current_active_user)])
 app.include_router(file_access.router, dependencies=[Depends(get_current_active_user)])
 app.include_router(vectorstore.router, dependencies=[Depends(get_current_admin_user)])

@@ -27,7 +27,7 @@ from app.infrastructure.database.models import (
 )
 from app.infrastructure.database.orm import get_session
 from app.infrastructure.database.schema import ensure_schema_if_possible
-from app.infrastructure.database.stores import MySQLDocStore, PgDocEmbeddingStore
+from app.infrastructure.database.stores import KnowledgeBaseDocumentStore, MySQLDocStore, PgDocEmbeddingStore
 from app.infrastructure.utils.files import sha256_file
 from app.infrastructure.utils.logging import get_logger
 from app.infrastructure.utils.text_split import split_text_by_chars
@@ -272,7 +272,12 @@ class RAGEngine:
         """
         return load_documents_from_path(file_path)
 
-    def add_knowledge_base(self, file_path: str, user_id: str | None = None) -> dict[str, Any]:
+    def add_knowledge_base(
+        self,
+        file_path: str,
+        user_id: str | None = None,
+        knowledge_base_id: str | None = None,
+    ) -> dict[str, Any]:
         """
         将文件摄取到知识库中。
 
@@ -317,6 +322,11 @@ class RAGEngine:
             doc_id = doc_store.upsert_document(
                 source_path=file_path, checksum=checksum, user_id=user_id
             )
+            if knowledge_base_id:
+                KnowledgeBaseDocumentStore().assign_document(
+                    doc_id=int(doc_id),
+                    knowledge_base_id=str(knowledge_base_id),
+                )
 
             parent_chunks: list[dict[str, Any]] = []
             for d in docs:
@@ -345,6 +355,7 @@ class RAGEngine:
                                 "child_index": idx,
                                 "source": file_path,
                                 "user_id": user_id or "",  # 写入 vector metadata
+                                "knowledge_base_id": str(knowledge_base_id or ""),
                             },
                         )
                     )
@@ -405,12 +416,23 @@ class RAGEngine:
             return self._failure("ingest_failed", str(e), stage="ingest")
 
     def retrieve_candidates(
-        self, query: str, *, fetch_k: int = 20, user_id: str = None
+        self,
+        query: str,
+        *,
+        fetch_k: int = 20,
+        user_id: str = None,
+        knowledge_base_ids: list[str] | None = None,
     ) -> list[Document]:
         if self._vectorstore is None:
             return []
         cfg = self._get_hybrid_config()
-        filter_dict = {"user_id": user_id} if user_id else None
+        filter_dict: dict[str, Any] | None = None
+        if user_id:
+            filter_dict = {"user_id": user_id}
+        normalized_knowledge_base_ids = [str(item).strip() for item in (knowledge_base_ids or []) if str(item).strip()]
+        if normalized_knowledge_base_ids:
+            filter_dict = dict(filter_dict or {})
+            filter_dict["knowledge_base_id"] = normalized_knowledge_base_ids
 
         if self._hybrid_retriever is None:
             self._hybrid_retriever = HybridRetrieverService(
@@ -429,7 +451,12 @@ class RAGEngine:
         )
 
     def retrieve_context(
-        self, query: str, k: int = 3, fetch_k: int = 20, user_id: str = None
+        self,
+        query: str,
+        k: int = 3,
+        fetch_k: int = 20,
+        user_id: str = None,
+        knowledge_base_ids: list[str] | None = None,
     ) -> list[Document]:
         """
         检索查询的前 k 个相关文档。
@@ -440,7 +467,10 @@ class RAGEngine:
         """
         try:
             candidates = self.retrieve_candidates(
-                query, fetch_k=fetch_k, user_id=user_id
+                query,
+                fetch_k=fetch_k,
+                user_id=user_id,
+                knowledge_base_ids=knowledge_base_ids,
             )
             if not candidates:
                 return []
@@ -500,6 +530,9 @@ class RAGEngine:
                                 "doc_id": int(p["doc_id"]),
                                 "parent_chunk_id": parent_id,
                                 "page_num": p.get("page_num"),
+                                "source": p.get("source_path"),
+                                "knowledge_base_id": p.get("knowledge_base_id"),
+                                "knowledge_base_name": p.get("knowledge_base_name"),
                                 "retrieval_rrf_score": parent_scores.get(parent_id),
                             },
                         )

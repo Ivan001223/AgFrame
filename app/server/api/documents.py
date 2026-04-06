@@ -5,10 +5,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from app.infrastructure.database.models import User
 from app.infrastructure.database.schema import ensure_schema_if_possible
-from app.infrastructure.database.stores import MySQLDocStore
+from app.infrastructure.database.stores import KnowledgeBaseDocumentStore, KnowledgeBaseStore, MySQLDocStore
 from app.infrastructure.queue.client import enqueue_ingest_pdf
 from app.infrastructure.queue.redis_client import (
     claim_task_operation,
@@ -33,7 +34,13 @@ def _serialize_document(row: dict) -> dict:
         "created_at": row.get("created_at"),
         "parent_chunk_count": row.get("parent_chunk_count", 0),
         "embedding_count": row.get("embedding_count", 0),
+        "knowledge_base_id": row.get("knowledge_base_id"),
+        "knowledge_base_name": row.get("knowledge_base_name"),
     }
+
+
+class DocumentKnowledgeBaseAssignmentPayload(BaseModel):
+    knowledge_base_id: str | None = None
 
 
 @router.get("")
@@ -130,6 +137,39 @@ async def delete_document(
     }
 
 
+@router.put("/{doc_id}/knowledge-base")
+async def assign_document_knowledge_base(
+    doc_id: int,
+    payload: DocumentKnowledgeBaseAssignmentPayload,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+):
+    if not ensure_schema_if_possible():
+        raise HTTPException(status_code=400, detail="Database is not available")
+
+    doc_store = MySQLDocStore()
+    document = doc_store.get_document(doc_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if current_user.role != "admin" and document.get("user_id") != current_user.username:
+        raise HTTPException(status_code=403, detail="Not authorized to edit this document")
+
+    knowledge_base_id = str(payload.knowledge_base_id or "").strip() or None
+    if knowledge_base_id:
+        knowledge_base = KnowledgeBaseStore().get_knowledge_base(knowledge_base_id)
+        if knowledge_base is None:
+            raise HTTPException(status_code=404, detail="Knowledge base not found")
+        if current_user.role != "admin" and str(knowledge_base.get("user_id") or "") != current_user.username:
+            raise HTTPException(status_code=403, detail="Not authorized to use this knowledge base")
+        KnowledgeBaseDocumentStore().assign_document(doc_id=doc_id, knowledge_base_id=knowledge_base_id)
+    else:
+        KnowledgeBaseDocumentStore().clear_document(doc_id=doc_id)
+
+    refreshed = doc_store.get_document(doc_id)
+    if refreshed is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return _serialize_document(refreshed)
+
+
 @router.post("/{doc_id}/reindex")
 async def reindex_document(
     doc_id: int,
@@ -182,6 +222,7 @@ async def reindex_document(
             "user_id": doc.get("user_id") or current_user.username,
             "task_type": "reindex_document",
             "doc_id": doc_id,
+            "knowledge_base_id": doc.get("knowledge_base_id"),
             "retry_count": 0,
             "retryable": "false",
             "operation_key": operation_key,
@@ -191,6 +232,7 @@ async def reindex_document(
         task_id,
         source_path,
         user_id=doc.get("user_id") or current_user.username,
+        knowledge_base_id=doc.get("knowledge_base_id"),
     )
     return {
         "message": "Reindex queued",

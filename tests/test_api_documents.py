@@ -11,7 +11,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.infrastructure.database.models import Base, DocContent, DocEmbedding, Document
+from app.infrastructure.database.models import (
+    Base,
+    DocContent,
+    DocEmbedding,
+    Document,
+    KnowledgeBase,
+    KnowledgeBaseDocument,
+)
 from app.server.api import documents as documents_api
 
 
@@ -29,7 +36,16 @@ def _build_client(tmp_path: Any, monkeypatch: Any, user: _U) -> TestClient:
         poolclass=StaticPool,
         future=True,
     )
-    Base.metadata.create_all(bind=engine, tables=[Document.__table__, DocContent.__table__, DocEmbedding.__table__])
+    Base.metadata.create_all(
+        bind=engine,
+        tables=[
+            Document.__table__,
+            KnowledgeBase.__table__,
+            KnowledgeBaseDocument.__table__,
+            DocContent.__table__,
+            DocEmbedding.__table__,
+        ],
+    )
     SessionLocal = sessionmaker(
         bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, future=True
     )
@@ -54,10 +70,60 @@ def _build_client(tmp_path: Any, monkeypatch: Any, user: _U) -> TestClient:
 
         doc1 = Document(doc_id=1, user_id="u1", source_path=str(own_file), checksum="c1", created_at=100)
         doc2 = Document(doc_id=2, user_id="u2", source_path=str(other_file), checksum="c2", created_at=200)
-        session.add_all([doc1, doc2])
+        kb1 = KnowledgeBase(
+            knowledge_base_id="kb-u1",
+            user_id="u1",
+            name="Ops KB",
+            description="ops documents",
+            created_at=90,
+            updated_at=91,
+        )
+        kb2 = KnowledgeBase(
+            knowledge_base_id="kb-u1-archive",
+            user_id="u1",
+            name="Archive KB",
+            description="archived documents",
+            created_at=92,
+            updated_at=93,
+        )
+        kb3 = KnowledgeBase(
+            knowledge_base_id="kb-u2",
+            user_id="u2",
+            name="Finance KB",
+            description="finance documents",
+            created_at=94,
+            updated_at=95,
+        )
+        session.add_all([doc1, doc2, kb1, kb2, kb3])
         session.flush()
         session.add(DocContent(parent_chunk_id=1, doc_id=doc1.doc_id, content="p1", page_num=1, created_at=101))
-        session.add(DocEmbedding(id=1, doc_id=doc1.doc_id, parent_chunk_id=None, child_index=0, source_path=str(own_file), content="c", embedding=[0.1] * 1024, metadata_json={"user_id": "u1"}, created_at=102))
+        session.add(
+            DocEmbedding(
+                id=1,
+                doc_id=doc1.doc_id,
+                parent_chunk_id=None,
+                child_index=0,
+                source_path=str(own_file),
+                content="c",
+                embedding=[0.1] * 1024,
+                metadata_json={"user_id": "u1"},
+                created_at=102,
+            )
+        )
+        session.add(
+            KnowledgeBaseDocument(
+                doc_id=doc1.doc_id,
+                knowledge_base_id=kb1.knowledge_base_id,
+                created_at=103,
+            )
+        )
+        session.add(
+            KnowledgeBaseDocument(
+                doc_id=doc2.doc_id,
+                knowledge_base_id=kb3.knowledge_base_id,
+                created_at=104,
+            )
+        )
 
     app = FastAPI()
     app.include_router(documents_api.router)
@@ -75,6 +141,8 @@ def test_list_documents_is_user_scoped(tmp_path: Any, monkeypatch: Any):
     assert docs[0]["filename"] == "u1-a.pdf"
     assert docs[0]["parent_chunk_count"] == 1
     assert docs[0]["embedding_count"] == 1
+    assert docs[0]["knowledge_base_id"] == "kb-u1"
+    assert docs[0]["knowledge_base_name"] == "Ops KB"
 
 
 def test_list_documents_supports_filename_search(tmp_path: Any, monkeypatch: Any):
@@ -135,6 +203,31 @@ def test_delete_document_removes_row_and_file(tmp_path: Any, monkeypatch: Any):
     assert missing.status_code == 404
 
 
+def test_assign_document_knowledge_base_updates_document_metadata(tmp_path: Any, monkeypatch: Any):
+    client = _build_client(tmp_path, monkeypatch, _U(username="u1"))
+
+    assigned = client.put("/documents/1/knowledge-base", json={"knowledge_base_id": "kb-u1-archive"})
+    assert assigned.status_code == 200
+    assert assigned.json()["knowledge_base_id"] == "kb-u1-archive"
+    assert assigned.json()["knowledge_base_name"] == "Archive KB"
+
+    detail = client.get("/documents/1")
+    assert detail.status_code == 200
+    assert detail.json()["knowledge_base_id"] == "kb-u1-archive"
+
+    cleared = client.put("/documents/1/knowledge-base", json={"knowledge_base_id": None})
+    assert cleared.status_code == 200
+    assert cleared.json()["knowledge_base_id"] is None
+    assert cleared.json()["knowledge_base_name"] is None
+
+
+def test_assign_document_knowledge_base_enforces_library_ownership(tmp_path: Any, monkeypatch: Any):
+    client = _build_client(tmp_path, monkeypatch, _U(username="u1"))
+
+    response = client.put("/documents/1/knowledge-base", json={"knowledge_base_id": "kb-u2"})
+    assert response.status_code == 403
+
+
 def test_reindex_document_checks_ownership(tmp_path: Any, monkeypatch: Any):
     client = _build_client(tmp_path, monkeypatch, _U(username="u1"))
     other = client.post("/documents/2/reindex")
@@ -154,11 +247,17 @@ def test_reindex_document_calls_rag_engine(tmp_path: Any, monkeypatch: Any):
         called["task_id"] = task_id
         called["payload"] = payload
 
-    async def _enqueue(task_id: str, file_path: str, user_id: str | None = None):
+    async def _enqueue(
+        task_id: str,
+        file_path: str,
+        user_id: str | None = None,
+        knowledge_base_id: str | None = None,
+    ):
         called["enqueued"] = {
             "task_id": task_id,
             "file_path": file_path,
             "user_id": user_id,
+            "knowledge_base_id": knowledge_base_id,
         }
 
     monkeypatch.setattr(documents_api, "claim_task_operation", _claim_task_operation)
@@ -171,7 +270,9 @@ def test_reindex_document_calls_rag_engine(tmp_path: Any, monkeypatch: Any):
     assert r.json()["message"] == "Reindex queued"
     assert r.json()["doc_id"] == 1
     assert called["payload"]["task_type"] == "reindex_document"
+    assert called["payload"]["knowledge_base_id"] == "kb-u1"
     assert called["enqueued"]["user_id"] == "u1"
+    assert called["enqueued"]["knowledge_base_id"] == "kb-u1"
     assert called["enqueued"]["file_path"].endswith("u1-a.pdf")
 
 

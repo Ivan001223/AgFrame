@@ -68,6 +68,33 @@ export type HarnessRuntimeStateDTO = {
   research?: HarnessRuntimeResearchDTO | null;
 };
 
+export type HarnessWorkflowStepDTO = {
+  step_id: string;
+  step_index: number;
+  loop_number: number;
+  label: string;
+  execution_id?: string | null;
+  node_id?: string | null;
+  status?: 'pending' | 'in_progress' | 'completed' | 'blocked';
+  kind?: 'agent' | 'cluster_member' | 'cluster_summary';
+};
+
+export type HarnessWorkflowProgressDTO = {
+  enabled?: boolean;
+  status?: 'idle' | 'pending' | 'running' | 'blocked' | 'completed' | 'failed';
+  total_steps?: number;
+  completed_steps?: number;
+  blocked_steps?: number;
+  review_enabled?: boolean;
+  current_step_index?: number | null;
+  current_step_label?: string | null;
+  blocking_step_index?: number | null;
+  blocking_step_label?: string | null;
+  blocking_stage?: string | null;
+  blocking_reason?: string | null;
+  steps?: HarnessWorkflowStepDTO[];
+};
+
 export type HarnessEventDTO = {
   event_id?: string;
   event_type?: string;
@@ -78,6 +105,14 @@ export type HarnessEventDTO = {
   actor?: string | null;
   details_json?: Record<string, unknown> | null;
   created_at?: number;
+};
+
+export type HarnessRunChecklistSnapshotDTO = {
+  enabled?: boolean;
+  total_items?: number;
+  open_items?: number;
+  completed_items?: number;
+  items?: HarnessExecutionChecklistItemDTO[];
 };
 
 export type HarnessRunSummaryDTO = {
@@ -106,6 +141,8 @@ export type HarnessRunSummaryDTO = {
   latest_approval?: HarnessApprovalDTO | null;
   latest_verification?: HarnessVerificationDTO | null;
   runtime_state?: HarnessRuntimeStateDTO | null;
+  workflow_progress?: HarnessWorkflowProgressDTO | null;
+  checklist_snapshot?: HarnessRunChecklistSnapshotDTO | null;
 };
 
 export type HarnessRunDetailDTO = HarnessRunSummaryDTO & {
@@ -160,6 +197,14 @@ export type HarnessCanvasAgentDTO = {
   position?: HarnessCanvasPositionDTO;
   skill_ids?: string[];
   skill_intents?: string[];
+  required_skill_ids?: string[];
+  required_tool_ids?: string[];
+  allowed_tool_ids?: string[];
+  denied_tool_ids?: string[];
+  requires_tool_calling?: boolean;
+  required_mcp_server_ids?: string[];
+  allowed_mcp_server_ids?: string[];
+  denied_mcp_server_ids?: string[];
   cluster_members?: HarnessClusterMemberDTO[];
   brainstorm_rounds?: number;
   cluster_auto_research?: boolean;
@@ -180,6 +225,9 @@ export type HarnessSkillCatalogItemDTO = {
   description?: string | null;
   source: string;
   status?: string;
+  prompt_hint?: string | null;
+  suggested_tool_ids?: string[];
+  suggested_mcp_server_ids?: string[];
 };
 
 export type HarnessSkillPoolItemDTO = {
@@ -203,9 +251,236 @@ export type HarnessSkillRequestDTO = {
   resolved_at?: number | null;
 };
 
+export type HarnessToolCatalogItemDTO = {
+  tool_id: string;
+  title: string;
+  description?: string | null;
+  status?: 'enabled' | 'disabled';
+  requires_flag?: string | null;
+};
+
+export type HarnessMcpServerCatalogItemDTO = {
+  server_id: string;
+  title: string;
+  description?: string | null;
+  status?: 'enabled' | 'disabled';
+  command_preview?: string | null;
+};
+
+export type HarnessDelegationTargetFitDTO = {
+  agent_id: string;
+  agent_name: string;
+  score?: number;
+  fit?: 'strong' | 'good' | 'weak';
+  rationale?: string | null;
+  new_skill_ids?: string[];
+  overlap_lane_ids?: string[];
+  complementary_lane_ids?: string[];
+  new_tool_ids?: string[];
+  new_mcp_server_ids?: string[];
+  gap_cover_mcp_server_ids?: string[];
+  source_profile_id?: 'coordinator' | 'research' | 'implementation' | 'verification' | 'generalist' | null;
+  target_profile_id?: 'coordinator' | 'research' | 'implementation' | 'verification' | 'generalist' | null;
+  same_role_profile?: boolean;
+  same_role_profile_overlap_risk?: boolean;
+  edge_present?: boolean;
+  interaction?: string | null;
+};
+
+export type HarnessDelegationOpportunityDTO = {
+  source_agent_id: string;
+  source_agent_name: string;
+  source_lane_ids?: string[];
+  delegation_focus?: string | null;
+  target: HarnessDelegationTargetFitDTO;
+  suggested_replacements?: HarnessDelegationTargetFitDTO[];
+};
+
+export type HarnessStudioGraphDiagnosticsDTO = {
+  weak_downstream_edges?: HarnessDelegationOpportunityDTO[];
+  best_next_handoffs?: HarnessDelegationOpportunityDTO[];
+  weak_edge_count?: number;
+  best_next_count?: number;
+};
+
+export type HarnessCoordinationAgentPreviewDTO = {
+  agent_id: string;
+  agent_name: string;
+};
+
+export type HarnessCapabilityOwnerEntryDTO = {
+  capability_id: string;
+  owner_agents?: HarnessCoordinationAgentPreviewDTO[];
+};
+
+export type HarnessOrchestrationBriefCapabilityRiskDTO = {
+  kind?: 'skill' | 'tool' | 'mcp';
+  capability_id: string;
+  owner_agents?: HarnessCoordinationAgentPreviewDTO[];
+};
+
+export type HarnessOrchestrationPhaseSummaryDTO = {
+  phase_id?: 'research' | 'synthesis' | 'implementation' | 'verification';
+  agent_count?: number;
+  agents?: HarnessCoordinationAgentPreviewDTO[];
+};
+
+export type HarnessOrchestrationRepairPriorityDTO = {
+  priority_id?:
+    | 'availability'
+    | 'capability_gaps'
+    | 'policy_repair'
+    | 'role_profile_alignment'
+    | 'weak_handoffs'
+    | 'best_next_handoffs'
+    | 'connectivity'
+    | 'single_owner_capabilities'
+    | 'review_path';
+  severity?: 'high' | 'medium' | 'low';
+  count?: number;
+};
+
+export type HarnessOrchestrationAgentRoutingSummaryDTO = {
+  coordinator_anchors?: HarnessCoordinationAgentPreviewDTO[];
+  research_anchors?: HarnessCoordinationAgentPreviewDTO[];
+  implementation_anchors?: HarnessCoordinationAgentPreviewDTO[];
+  verification_anchors?: HarnessCoordinationAgentPreviewDTO[];
+  skill_capable_anchors?: HarnessCoordinationAgentPreviewDTO[];
+  tool_capable_anchors?: HarnessCoordinationAgentPreviewDTO[];
+  mcp_capable_anchors?: HarnessCoordinationAgentPreviewDTO[];
+};
+
+export type HarnessOrchestrationSummaryDTO = {
+  total_agent_count?: number;
+  execution_step_count?: number;
+  review_enabled?: boolean;
+  readiness?: 'blocked' | 'repair' | 'watch' | 'ready';
+  start_agents?: HarnessCoordinationAgentPreviewDTO[];
+  terminal_agents?: HarnessCoordinationAgentPreviewDTO[];
+  shared_lane_count?: number;
+  single_owner_capability_count?: number;
+  single_owner_capability_risks?: HarnessOrchestrationBriefCapabilityRiskDTO[];
+  unavailable_count?: number;
+  limited_availability_count?: number;
+  policy_repair_agent_count?: number;
+  role_profile_drift_agent_count?: number;
+  role_profile_overlap_risk_count?: number;
+  weak_edge_count?: number;
+  best_next_count?: number;
+  capability_gap_count?: number;
+  isolated_agent_count?: number;
+  underconnected_agent_count?: number;
+  phases?: HarnessOrchestrationPhaseSummaryDTO[];
+  repair_priorities?: HarnessOrchestrationRepairPriorityDTO[];
+  agent_routing?: HarnessOrchestrationAgentRoutingSummaryDTO;
+};
+
+export type HarnessAgentExecutionContractDTO = {
+  skill_execution_mode?: 'guidance_only';
+  approved_skill_ids?: string[];
+  suggested_skill_ids?: string[];
+  tool_access_mode?: 'direct_execution' | 'planning_only' | 'mixed' | 'none';
+  executable_tool_ids?: string[];
+  planning_only_tool_ids?: string[];
+  disabled_tool_ids?: string[];
+  mcp_access_mode?: 'planning_only' | 'none';
+  planning_only_mcp_server_ids?: string[];
+  missing_mcp_server_ids?: string[];
+};
+
+export type HarnessAgentDelegationContractDTO = {
+  primary_role_mode?: 'coordinator' | 'research' | 'implementation' | 'verification' | 'generalist';
+  supporting_role_modes?: Array<
+    'coordinator' | 'research' | 'implementation' | 'verification' | 'generalist'
+  >;
+  work_strategy?:
+    | 'synthesize_and_route'
+    | 'gather_then_handoff'
+    | 'implement_then_handoff'
+    | 'verify_and_close'
+    | 'self_contained_delivery'
+    | 'flexible';
+  should_coordinate_parallel_work?: boolean;
+  should_produce_final_output?: boolean;
+  primary_focus?: string | null;
+  upstream_agents?: HarnessCoordinationAgentPreviewDTO[];
+  downstream_agents?: HarnessCoordinationAgentPreviewDTO[];
+  preferred_collaborators?: HarnessCoordinationAgentPreviewDTO[];
+  weak_handoff_targets?: HarnessCoordinationAgentPreviewDTO[];
+  watchouts?: string[];
+};
+
+export type HarnessAgentRoleProfileSuggestionDTO = {
+  profile_id?: 'coordinator' | 'research' | 'implementation' | 'verification' | 'generalist';
+  suggested_skill_ids?: string[];
+  available_skill_ids?: string[];
+  missing_skill_ids?: string[];
+  suggested_tool_ids?: string[];
+  suggested_mcp_server_ids?: string[];
+  restrictive_tool_ids?: string[];
+  restrictive_mcp_server_ids?: string[];
+};
+
+export type HarnessAgentCapabilitySummaryDTO = {
+  agent_id: string;
+  loaded_skill_ids?: string[];
+  missing_skill_ids?: string[];
+  missing_skill_details?: HarnessSkillCatalogItemDTO[];
+  suggested_skill_ids?: string[];
+  loaded_skill_hints?: string[];
+  required_skill_ids?: string[];
+  missing_required_skill_ids?: string[];
+  required_tool_ids?: string[];
+  missing_required_tool_ids?: string[];
+  configured_allowed_tool_ids?: string[];
+  configured_denied_tool_ids?: string[];
+  enabled_tool_ids?: string[];
+  disabled_tool_ids?: string[];
+  policy_added_tool_ids?: string[];
+  policy_blocked_tool_ids?: string[];
+  unknown_allowed_tool_ids?: string[];
+  requires_tool_calling?: boolean;
+  provider_limited_tool_ids?: string[];
+  tool_execution_support?: 'supported' | 'unsupported' | 'unknown';
+  tool_execution_support_reason?: string | null;
+  required_mcp_server_ids?: string[];
+  missing_required_mcp_server_ids?: string[];
+  configured_allowed_mcp_server_ids?: string[];
+  configured_denied_mcp_server_ids?: string[];
+  mcp_server_ids?: string[];
+  missing_mcp_server_ids?: string[];
+  missing_mcp_server_details?: HarnessMcpServerCatalogItemDTO[];
+  policy_added_mcp_server_ids?: string[];
+  policy_blocked_mcp_server_ids?: string[];
+  unknown_allowed_mcp_server_ids?: string[];
+  delegation_lane_ids?: string[];
+  recommended_collaborators?: HarnessDelegationTargetFitDTO[];
+  downstream_handoff_scores?: HarnessDelegationTargetFitDTO[];
+  delegation_focus?: string | null;
+  availability_status?: 'available' | 'limited' | 'unavailable';
+  availability_blockers?: string[];
+  availability_warnings?: string[];
+  readiness_status?: 'ready' | 'limited' | 'blocked';
+  readiness_blockers?: string[];
+  readiness_warnings?: string[];
+  provider_route?: string | null;
+  review_mode?: string | null;
+  capability_brief?: string | null;
+  execution_contract?: HarnessAgentExecutionContractDTO | null;
+  delegation_contract?: HarnessAgentDelegationContractDTO | null;
+  role_profile_suggestion?: HarnessAgentRoleProfileSuggestionDTO | null;
+};
+
 export type HarnessStudioProviderConfigDTO = {
   preferred_provider_id?: string | null;
   fallback_provider_id?: string | null;
+};
+
+export type HarnessExecutionChecklistItemDTO = {
+  item_id: string;
+  content: string;
+  status?: 'pending' | 'in_progress' | 'completed';
+  active_form?: string | null;
 };
 
 export type HarnessModelProviderDTO = {
@@ -224,9 +499,16 @@ export type HarnessStudioGraphDTO = {
   version?: number;
   agents?: HarnessCanvasAgentDTO[];
   edges?: HarnessCanvasEdgeDTO[];
+  graph_diagnostics?: HarnessStudioGraphDiagnosticsDTO;
+  orchestration_summary?: HarnessOrchestrationSummaryDTO;
+  knowledge_base_ids?: string[];
+  execution_checklist?: HarnessExecutionChecklistItemDTO[];
   skill_pool?: HarnessSkillPoolItemDTO[];
   pending_skill_requests?: HarnessSkillRequestDTO[];
   skill_catalog?: HarnessSkillCatalogItemDTO[];
+  tool_catalog?: HarnessToolCatalogItemDTO[];
+  mcp_server_catalog?: HarnessMcpServerCatalogItemDTO[];
+  agent_capability_summaries?: HarnessAgentCapabilitySummaryDTO[];
   review_agent?: HarnessReviewAgentDTO;
   canvas?: {
     x?: number;
@@ -245,6 +527,8 @@ export type HarnessProjectSummaryDTO = {
   updated_at?: number;
   agent_count?: number;
   edge_count?: number;
+  checklist_count?: number;
+  open_checklist_count?: number;
   loaded_skill_count?: number;
   pending_skill_request_count?: number;
   graph_json?: HarnessStudioGraphDTO;

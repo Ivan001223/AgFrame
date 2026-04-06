@@ -128,7 +128,6 @@
     "enable_docs_rag": true,
     "enable_chat_memory": true,
     "enable_self_correction": true,
-    "enable_human_approval": false,
     "allow_dangerous_deserialization": false,
     "enable_tools_write_file": false,
     "enable_tools_python_repl": false,
@@ -150,6 +149,22 @@
     "port": 8000,
     "cors_origins": [],
     "cors_allow_credentials": false
+  },
+  "mcp": {
+    "servers": [
+      {
+        "server_id": "filesystem",
+        "title": "Filesystem",
+        "description": "Example metadata-only MCP inventory entry for Harness capability planning.",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "/absolute/path/to/workspace"
+        ],
+        "enabled": false
+      }
+    ]
   },
   "storage_local": {
     "documents_dir": "data/documents",

@@ -87,7 +87,7 @@ docker compose ps
 
 - `.env.example` 现在默认写入 `LLM_MODEL=dev-stub` 与 `MODEL_PATH_EMBEDDING=dev-stub`，因此本地启动默认不依赖云端 Key
 - 如果需要真实云端生成，再把 `.env` 改成云模型并补齐 `LLM_API_KEY`
-- `ENABLE_HUMAN_APPROVAL` 在 Docker Compose 中默认开启
+- chat 与 harness 的审批现在按运行时实际暂停来显式展示，不再提供全局 Docker 审批开关
 
 如需额外观测组件：
 

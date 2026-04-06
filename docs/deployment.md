@@ -93,7 +93,7 @@ Environment behavior to know:
 
 - `.env.example` now defaults to `LLM_MODEL=dev-stub` and `MODEL_PATH_EMBEDDING=dev-stub`, so local startup works without a cloud key
 - switch `.env` to a cloud model and set `LLM_API_KEY` when you want real remote generation
-- `ENABLE_HUMAN_APPROVAL` defaults to `true` in Docker Compose
+- chat and harness approvals are now surfaced per run when execution actually pauses; there is no global Docker approval toggle
 
 Optional observability profile:
 

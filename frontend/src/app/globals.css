@@ -1,10 +1,20 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-  --font-geist-sans: "Avenir Next", "Segoe UI", sans-serif;
+  --background: #f4f7fb;
+  --foreground: #111827;
+  --surface: #ffffff;
+  --surface-muted: #f8fafc;
+  --line: #e2e8f0;
+  --brand: #2563eb;
+  --brand-soft: #eff6ff;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --font-geist-sans: "Avenir Next", "PingFang SC", "Segoe UI", sans-serif;
   --font-geist-mono: "SFMono-Regular", "SF Mono", "Cascadia Code", monospace;
+  color-scheme: light;
 }
 
 @theme inline {
@@ -14,15 +24,29 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html.dark {
+  --background: #0f172a;
+  --foreground: #e5eefc;
+  --surface: #111827;
+  --surface-muted: #0f172a;
+  --line: #1f2937;
+  --brand: #60a5fa;
+  --brand-soft: rgba(37, 99, 235, 0.18);
+  color-scheme: dark;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans);
+  background-image:
+    radial-gradient(circle at top left, rgba(37, 99, 235, 0.08), transparent 22%),
+    radial-gradient(circle at bottom right, rgba(14, 165, 233, 0.06), transparent 20%),
+    linear-gradient(180deg, #f8fbff 0%, #f4f7fb 100%);
+}
+
+html.dark body {
+  background-image:
+    radial-gradient(circle at top left, rgba(96, 165, 250, 0.12), transparent 18%),
+    linear-gradient(180deg, #0f172a 0%, #111827 100%);
 }

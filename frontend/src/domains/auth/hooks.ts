@@ -11,6 +11,11 @@ export type LoginRequest = {
   password?: string;
 };
 
+export type RegisterRequest = {
+  username: string;
+  password: string;
+};
+
 export type TokenResponse = {
   access_token: string;
   token_type: string;
@@ -58,6 +63,17 @@ export function useLoginMutation() {
     onSuccess: (data: TokenResponse, variables: LoginRequest) => {
       setStoredSession(data.access_token, variables.username);
       queryClient.invalidateQueries({ queryKey: AUTH_KEYS.currentUser });
+    },
+  });
+}
+
+export function useRegisterMutation() {
+  return useMutation({
+    mutationFn: async (data: RegisterRequest) => {
+      return apiClient<CurrentUser>('/auth/register', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
     },
   });
 }

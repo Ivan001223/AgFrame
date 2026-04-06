@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/http/client';
+import { ApiError } from '@/lib/http/errors';
 import { extractContextPruning } from '@/domains/chat/pruning';
 
 export type ChatMessage = {
@@ -151,10 +152,19 @@ export function useChatInvokeMutation() {
 export function useInterruptStatusQuery(sessionId: string) {
   return useQuery({
     queryKey: ['interrupt', sessionId],
-    queryFn: async () => apiClient<InterruptStatusDTO>(`/interrupt/${sessionId}`),
+    queryFn: async () => {
+      try {
+        return await apiClient<InterruptStatusDTO>(`/interrupt/${sessionId}`);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          return null;
+        }
+        throw error;
+      }
+    },
     enabled: !!sessionId,
     retry: false,
-    refetchInterval: 5000,
+    refetchInterval: (query) => (query.state.data?.interrupted ? 5000 : false),
   });
 }
 
@@ -163,13 +173,15 @@ export function useApproveInterruptMutation() {
     mutationFn: async ({
       sessionId,
       approved,
+      comment,
     }: {
       sessionId: string;
       approved: boolean;
+      comment?: string;
     }) =>
       apiClient(`/interrupt/${sessionId}/approve`, {
         method: 'POST',
-        body: JSON.stringify({ approved }),
+        body: JSON.stringify({ approved, comment: comment?.trim() || undefined }),
       }),
   });
 }

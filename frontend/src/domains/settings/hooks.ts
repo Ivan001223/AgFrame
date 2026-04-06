@@ -3,6 +3,28 @@ import { apiClient } from '@/lib/http/client';
 
 export type UserSettingsDTO = Record<string, unknown>;
 export type AdminSettingsDTO = Record<string, unknown>;
+export type UserStartPage = '/chat' | '/harness' | '/knowledge';
+export type UserPreferencesConfig = {
+  language: 'en' | 'zh-CN';
+  theme: 'system' | 'light' | 'dark';
+  response_language: 'auto' | 'en' | 'zh-CN';
+  start_page: UserStartPage;
+  compact_mode: boolean;
+};
+
+export type AdminBasicsConfig = {
+  app_name: string;
+  llm_model: string;
+  embedding_model: string;
+  reranker_model: string;
+  search_provider: string;
+  access_token_expire_minutes: number;
+  documents_dir: string;
+  uploads_dir: string;
+  enable_docs_rag: boolean;
+  enable_chat_memory: boolean;
+};
+
 type RuntimeRerankerStatusDTO = {
   configured?: boolean;
   model_name?: string | null;
@@ -99,6 +121,20 @@ function asBoolean(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
 }
 
+function asPath(
+  value: unknown,
+  fallback: UserStartPage
+): UserStartPage {
+  if (
+    value === '/chat' ||
+    value === '/harness' ||
+    value === '/knowledge'
+  ) {
+    return value;
+  }
+  return fallback;
+}
+
 function normalizeContextPruningConfig(value: unknown): Partial<ContextPruningAdminConfig> {
   const pruning = asRecord(value);
   if (!pruning) {
@@ -153,6 +189,52 @@ export function getContextPruningConfig(
     reranker_window_radius: pruning.reranker_window_radius ?? 1,
     max_lines_per_item: pruning.max_lines_per_item ?? 24,
     score_threshold: pruning.score_threshold ?? 0.18,
+  };
+}
+
+export function getUserPreferenceSettings(
+  settings: UserSettingsDTO | undefined
+): UserPreferencesConfig {
+  const root = asRecord(settings);
+  const language = root?.language;
+  const theme = root?.theme;
+  const responseLanguage = root?.response_language;
+
+  return {
+    language: language === 'zh-CN' ? 'zh-CN' : 'en',
+    theme: theme === 'light' || theme === 'dark' ? theme : 'system',
+    response_language:
+      responseLanguage === 'en' || responseLanguage === 'zh-CN'
+        ? responseLanguage
+        : 'auto',
+    start_page: asPath(root?.start_page, '/chat'),
+    compact_mode: asBoolean(root?.compact_mode) ?? false,
+  };
+}
+
+export function getAdminBasicsConfig(
+  settings: AdminSettingsDTO | undefined
+): AdminBasicsConfig {
+  const root = asRecord(settings);
+  const general = asRecord(root?.general);
+  const llm = asRecord(root?.llm);
+  const localModels = asRecord(root?.local_models);
+  const search = asRecord(root?.search);
+  const auth = asRecord(root?.auth);
+  const storageLocal = asRecord(root?.storage_local);
+  const featureFlags = asRecord(root?.feature_flags);
+
+  return {
+    app_name: asString(general?.app_name) ?? 'AgFrame',
+    llm_model: asString(llm?.model) ?? 'gpt-5.2',
+    embedding_model: asString(localModels?.embedding_model) ?? '',
+    reranker_model: asString(localModels?.rerank_model) ?? '',
+    search_provider: asString(search?.provider) ?? 'duckduckgo',
+    access_token_expire_minutes: asNumber(auth?.access_token_expire_minutes) ?? 30,
+    documents_dir: asString(storageLocal?.documents_dir) ?? 'data/documents',
+    uploads_dir: asString(storageLocal?.uploads_dir) ?? 'data/uploads',
+    enable_docs_rag: asBoolean(featureFlags?.enable_docs_rag) ?? true,
+    enable_chat_memory: asBoolean(featureFlags?.enable_chat_memory) ?? true,
   };
 }
 

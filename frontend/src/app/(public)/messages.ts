@@ -1,0 +1,28 @@
+import type { LocalizedTextMap } from '@/lib/i18n';
+
+export const PUBLIC_MESSAGES = {
+  loginFailed: { en: 'Login failed', zh: '登录失败' },
+  signInTitle: { en: 'Sign in to AgFrame', zh: '登录 AgFrame' },
+  signInSubtitle: { en: 'Welcome to the AI orchestration workspace', zh: '欢迎来到 AI 编排工作区' },
+  restoringSession: { en: 'Restoring your session...', zh: '正在恢复你的会话...' },
+  usernameExample: { en: 'Username (e.g. admin)', zh: '用户名（如 admin）' },
+  usernameRequired: { en: 'Username is required', zh: '请输入用户名' },
+  password: { en: 'Password', zh: '密码' },
+  passwordRequired: { en: 'Password is required', zh: '请输入密码' },
+  signingIn: { en: 'Signing in...', zh: '正在登录...' },
+  signIn: { en: 'Sign in', zh: '登录' },
+  noAccount: { en: "Don't have an account yet?", zh: '还没有账号？' },
+  createOne: { en: 'Create one', zh: '立即注册' },
+  registrationFailed: { en: 'Registration failed', zh: '注册失败' },
+  createAccountTitle: { en: 'Create your AgFrame account', zh: '创建 AgFrame 账号' },
+  firstUserAdmin: { en: 'The first registered user becomes admin automatically.', zh: '第一个注册的用户会自动成为管理员。' },
+  username: { en: 'Username', zh: '用户名' },
+  passwordMin: { en: 'Password (at least 6 characters)', zh: '密码（至少 6 位）' },
+  passwordMinError: { en: 'Password must be at least 6 characters', zh: '密码至少需要 6 位' },
+  confirmPassword: { en: 'Confirm password', zh: '确认密码' },
+  passwordsMismatch: { en: 'Passwords do not match', zh: '两次输入的密码不一致' },
+  creatingAccount: { en: 'Creating account...', zh: '正在创建账号...' },
+  createAccount: { en: 'Create account', zh: '创建账号' },
+  haveAccount: { en: 'Already have an account?', zh: '已经有账号了？' },
+  signInLink: { en: 'Sign in', zh: '返回登录' },
+} satisfies LocalizedTextMap<string>;

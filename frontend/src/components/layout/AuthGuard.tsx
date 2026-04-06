@@ -4,12 +4,15 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { getStoredToken } from '@/lib/auth/session';
 import { useCurrentUserQuery, useLogout } from '@/domains/auth/hooks';
+import { useMessages } from '@/lib/i18n';
+import { APP_SHELL_MESSAGES } from './messages';
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const logout = useLogout();
   const token = getStoredToken();
   const currentUserQuery = useCurrentUserQuery();
+  const text = useMessages(APP_SHELL_MESSAGES);
 
   useEffect(() => {
     if (!token) {
@@ -39,7 +42,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 px-6 dark:bg-gray-950">
         <div className="rounded-xl border border-gray-200 bg-white px-6 py-5 text-sm text-gray-600 shadow-sm dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
-          Verifying your session...
+          {text.verifyingSession}
         </div>
       </div>
     );

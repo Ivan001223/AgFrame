@@ -1,7 +1,7 @@
 import os
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, cast
 
 import uvicorn
 from fastapi import Depends, FastAPI
@@ -35,6 +35,7 @@ from app.server.api import (
     settings as api_settings,
 )
 from app.server.api.auth import (
+    AUTH_COOKIE_NAME,
     decode_access_token,
     get_current_active_user,
     get_current_admin_user,
@@ -76,8 +77,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
         request_id = request.headers.get("X-Request-ID")
         request.state.request_id = request_id if request_id else str(uuid.uuid4())
         auth_header = request.headers.get("Authorization")
+        token = None
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header.split(" ")[1]
+        else:
+            cookie_token = request.cookies.get(AUTH_COOKIE_NAME)
+            if cookie_token:
+                token = cookie_token
+        if token:
             try:
                 payload = decode_access_token(token)
                 if payload:
@@ -109,7 +116,7 @@ cors_options = build_cors_options(
 )
 app.add_middleware(
     CORSMiddleware,
-    **cors_options,
+    **cast(dict[str, Any], cors_options),
 )
 app.add_middleware(AuthMiddleware)
 

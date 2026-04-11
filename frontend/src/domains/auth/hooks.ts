@@ -4,7 +4,6 @@ import { ApiError } from '@/lib/http/errors';
 import {
   clearStoredSession,
   getSessionCacheScope,
-  getStoredToken,
   setStoredSession,
 } from '@/lib/auth/session';
 
@@ -35,13 +34,15 @@ export const AUTH_KEYS = {
 };
 
 export function useCurrentUserQuery() {
-  const token = getStoredToken();
   const scope = getSessionCacheScope();
 
   return useQuery({
     queryKey: [...AUTH_KEYS.currentUser, scope],
-    queryFn: async () => apiClient<CurrentUser>('/auth/users/me'),
-    enabled: !!token,
+    queryFn: async () => {
+      const user = await apiClient<CurrentUser>('/auth/users/me');
+      setStoredSession(user.username);
+      return user;
+    },
     retry: (failureCount, error) => {
       if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
         return false;
@@ -70,7 +71,7 @@ export function useLoginMutation() {
       });
     },
     onSuccess: (data: TokenResponse, variables: LoginRequest) => {
-      setStoredSession(data.access_token, variables.username);
+      setStoredSession(variables.username);
       queryClient.invalidateQueries({ queryKey: AUTH_KEYS.currentUser });
     },
   });
@@ -96,6 +97,9 @@ export function useLogout() {
   const queryClient = useQueryClient();
 
   return () => {
+    void apiClient('/auth/logout', {
+      method: 'POST',
+    }).catch(() => undefined);
     clearStoredSession();
     queryClient.clear();
   };

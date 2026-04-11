@@ -14,32 +14,28 @@ def get_auth_config() -> AuthConfig:
     return settings.auth
 
 
-def _check_default_secret(secret_key: str):
-    """检查是否使用了默认密钥，如果是则发出警告"""
+def _check_default_secret(secret_key: str) -> None:
+    """Warn once when the default JWT secret is still in use."""
     global _default_secret_warning_shown
     if not _default_secret_warning_shown and secret_key == _DEFAULT_AUTH_SECRET:
         warnings.warn(
-            "WARNING: 使用默认的 JWT secret_key。"
-            "这在生产环境中非常不安全。请在环境变量或配置文件中设置 AUTH_SECRET_KEY。",
+            "WARNING: The application is still using the default JWT secret key. "
+            "Set AUTH_SECRET_KEY in your environment or config before production use.",
             UserWarning,
-            stacklevel=3
+            stacklevel=3,
         )
         _default_secret_warning_shown = True
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    if isinstance(plain_password, str):
-        plain_password = plain_password.encode("utf-8")
-    if isinstance(hashed_password, str):
-        hashed_password = hashed_password.encode("utf-8")
-    return bcrypt.checkpw(plain_password, hashed_password)
+    plain_password_bytes = plain_password.encode("utf-8")
+    hashed_password_bytes = hashed_password.encode("utf-8")
+    return bcrypt.checkpw(plain_password_bytes, hashed_password_bytes)
 
 
 def get_password_hash(password: str) -> str:
-    if isinstance(password, str):
-        password = password.encode("utf-8")
-    # gensalt() generates a salt and returns bytes. hashpw returns bytes.
-    return bcrypt.hashpw(password, bcrypt.gensalt()).decode("utf-8")
+    password_bytes = password.encode("utf-8")
+    return bcrypt.hashpw(password_bytes, bcrypt.gensalt()).decode("utf-8")
 
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:

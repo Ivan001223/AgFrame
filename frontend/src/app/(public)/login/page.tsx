@@ -7,7 +7,6 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getStoredToken, getStoredUsername } from '@/lib/auth/session';
 import { useCurrentUserQuery, useLoginMutation } from '@/domains/auth/hooks';
 import { getErrorMessage } from '@/lib/http/errors';
 import { useMessages } from '@/lib/i18n';
@@ -24,7 +23,6 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 export default function LoginPage() {
   const router = useRouter();
   const loginMutation = useLoginMutation();
-  const token = getStoredToken();
   const currentUserQuery = useCurrentUserQuery();
   const [loginError, setLoginError] = useState<string | null>(null);
   const text = useMessages(PUBLIC_MESSAGES);
@@ -38,10 +36,10 @@ export default function LoginPage() {
   });
 
   useEffect(() => {
-    if (token && currentUserQuery.data) {
-      router.replace(getPreferredStartPage(getStoredUsername()));
+    if (currentUserQuery.data) {
+      router.replace(getPreferredStartPage(currentUserQuery.data.username));
     }
-  }, [currentUserQuery.data, router, token]);
+  }, [currentUserQuery.data, router]);
 
   const onSubmit = (data: LoginFormValues) => {
     setLoginError(null);
@@ -66,7 +64,7 @@ export default function LoginPage() {
             {text.signInSubtitle}
           </p>
         </div>
-        {token && currentUserQuery.isLoading && (
+        {currentUserQuery.isLoading && (
           <div className="rounded-md border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-700 dark:border-indigo-900/40 dark:bg-indigo-950/40 dark:text-indigo-200">
             {text.restoringSession}
           </div>

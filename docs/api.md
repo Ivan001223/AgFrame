@@ -7,21 +7,28 @@
 ## Scope
 
 - **Base URL**: `http://127.0.0.1:8000`
-- **Auth model**: JWT Bearer token in `Authorization: Bearer <token>`
+- **Auth model**: `POST /auth/token` returns a JWT and also sets an HttpOnly auth cookie; protected routes accept the cookie and still accept `Authorization: Bearer <token>`
 - **Backend version**: `0.3.1`
 - **Primary runtime entry**: `POST /chat/workbench-invoke`
 
 ## Access Model
 
 - **Public**: `/health/*`, `/auth/*`
-- **Authenticated user**: `/chat/*`, `/interrupt/*`, `/history/*`, `/documents/*`, `/upload/*`, `/tasks/*`, `/memory/*`, `/profile/*`, `/harness/*`
+- **Authenticated user**: `/chat/*`, `/interrupt/*`, `/history/*`, `/documents/*`, `/upload/*`, `/tasks/*`, `/memory/*`, `/profile/*`, `/knowledge-bases/*`, `/files/*`, `/uploads/*`, `/harness/*`, `GET|POST /settings/user`
 - **Admin only**: `GET|POST /settings`, `POST /vectorstore/docs/clear`
 
 ## Authentication
 
-- `POST /auth/token` — exchange username/password for an access token
+- `POST /auth/token` — exchange username/password for an access token and set the auth cookie
+- `POST /auth/logout` — clear the auth cookie
 - `POST /auth/register` — create a new user account
 - `GET /auth/users/me` — retrieve the current authenticated user
+
+Browser clients:
+
+- the frontend primarily authenticates with the HttpOnly cookie rather than storing the JWT in `localStorage`
+- if frontend and backend run on different origins or ports, the backend must allow that origin in `CORS_ORIGINS`
+- browser-based cookie auth also requires `CORS_ALLOW_CREDENTIALS=true`
 
 ## Chat
 
@@ -94,13 +101,27 @@ Session-level human approval and resume flow for interrupted chat execution:
 
 - `GET /documents` — list uploaded documents
 - `GET /documents/{doc_id}` — read document detail and preview fragments
+- `GET /documents/{doc_id}/download` — download the original stored file for a document
 - `DELETE /documents/{doc_id}` — remove the document record and stored file
+- `PUT /documents/{doc_id}/knowledge-base` — assign or clear the knowledge base binding for a document
 - `POST /documents/{doc_id}/reindex` — enqueue reindexing for a document
+
+### Knowledge bases
+
+- `GET /knowledge-bases` — list visible knowledge bases with document counts
+- `POST /knowledge-bases` — create a knowledge base owned by the current user
+- `PUT /knowledge-bases/{knowledge_base_id}` — update name or description
+- `DELETE /knowledge-bases/{knowledge_base_id}` — delete an owned knowledge base
 
 ### Uploads
 
 - `POST /upload` — upload document files and enqueue ingestion
 - `POST /upload/image` — upload an image and return a file URL
+
+### File access
+
+- `GET /uploads/{owner}/{relative_path}` — read an uploaded asset with owner or admin authorization
+- `GET /files/{owner}/{relative_path}` — read a stored document asset with owner or admin authorization
 
 ## Tasks
 

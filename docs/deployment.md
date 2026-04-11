@@ -8,12 +8,12 @@
 
 - **Backend version**: `0.3.1`
 - **Frontend version**: `0.3.1`
-- **Python constraint**: `>=3.11,<3.12`
-- **Primary local stack**: Postgres + Redis + FastAPI + ARQ Worker + Next.js
+- **Python constraint**: `>=3.12,<3.13`
+- **Primary local stack**: Postgres + Redis + FastAPI + 3 ARQ workers + Next.js
 
 ## Requirements
 
-- Python 3.11
+- Python 3.12
 - `uv`
 - Node.js 22 LTS recommended for frontend validation
 - Docker and Docker Compose
@@ -60,6 +60,7 @@ Security-sensitive behavior:
 - startup validation rejects insecure `auth.secret_key`
 - startup validation rejects insecure `database.password`
 - `server.cors_allow_credentials=true` cannot be paired with `server.cors_origins=["*"]`
+- when the frontend talks to the backend from `http://127.0.0.1:3000`, keep `CORS_ALLOW_CREDENTIALS=true` so the browser can send the auth cookie
 
 Recommended compatibility settings for the lightweight retrieval path:
 
@@ -81,6 +82,8 @@ Default services:
 - `redis`
 - `backend`
 - `worker`
+- `worker-ingest`
+- `worker-resume`
 - `frontend`
 
 Default local addresses:
@@ -120,6 +123,8 @@ If you copied `.env.example`, override the Docker-only hostnames before starting
 export AUTH_SECRET_KEY='replace-with-at-least-32-random-chars'
 export DATABASE_URL='postgresql+psycopg://agframe:agframe_secret@127.0.0.1:5432/agframe'
 export REDIS_URL='redis://:redissecret@127.0.0.1:6379/0'
+export CORS_ORIGINS='["http://127.0.0.1:3000","http://localhost:3000"]'
+export CORS_ALLOW_CREDENTIALS='true'
 ```
 
 For a local smoke path without cloud credentials, also override:
@@ -135,11 +140,17 @@ Backend:
 ./scripts/start-backend.sh
 ```
 
-Worker:
+Workers:
 
 ```bash
 ./scripts/start-worker.sh
 ```
+
+The worker startup script launches:
+
+- `IngestWorkerSettings` for document ingestion jobs
+- `RuntimeWorkerSettings` for harness run execution
+- `ResumeWorkerSettings` for interrupt and harness resume jobs
 
 Frontend:
 
@@ -149,7 +160,13 @@ export NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
 npm run dev
 ```
 
-Manual startup requires both backend and worker to be healthy for harness runs, document ingestion, and resume flows.
+Manual startup requires backend plus all three worker classes to be healthy for harness runs, document ingestion, and resume flows.
+
+Authentication note:
+
+- the frontend now relies on an HttpOnly auth cookie issued by `POST /auth/token`
+- `GET /auth/users/me` is used to bootstrap the current user after page load
+- cross-origin frontend calls must keep `CORS_ALLOW_CREDENTIALS=true`; otherwise browser requests from `:3000` to `:8000` will be rejected before auth can succeed
 
 ## Shutdown
 

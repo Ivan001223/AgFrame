@@ -1,23 +1,34 @@
 # AgFrame API 文档
 
+<div align="center">
+  <a href="api.md">English</a>
+</div>
+
 ## 范围
 
 - **Base URL**：`http://127.0.0.1:8000`
-- **认证方式**：JWT Bearer Token，请通过 `Authorization: Bearer <token>` 传递
+- **认证方式**：`POST /auth/token` 会返回 JWT，同时写入 HttpOnly 认证 Cookie；受保护接口优先支持 Cookie，也继续兼容 `Authorization: Bearer <token>`
 - **后端版本**：`0.3.1`
 - **主运行时入口**：`POST /chat/workbench-invoke`
 
 ## 访问模型
 
 - **开放接口**：`/health/*`、`/auth/*`
-- **登录后可用**：`/chat/*`、`/interrupt/*`、`/history/*`、`/documents/*`、`/upload/*`、`/tasks/*`、`/memory/*`、`/profile/*`、`/harness/*`
+- **登录后可用**：`/chat/*`、`/interrupt/*`、`/history/*`、`/documents/*`、`/upload/*`、`/tasks/*`、`/memory/*`、`/profile/*`、`/knowledge-bases/*`、`/files/*`、`/uploads/*`、`/harness/*`、`GET|POST /settings/user`
 - **仅管理员**：`GET|POST /settings`、`POST /vectorstore/docs/clear`
 
 ## 认证鉴权
 
-- `POST /auth/token` — 使用用户名和密码换取访问令牌
+- `POST /auth/token` — 使用用户名和密码换取访问令牌，并设置认证 Cookie
+- `POST /auth/logout` — 清除认证 Cookie
 - `POST /auth/register` — 注册新用户
 - `GET /auth/users/me` — 获取当前登录用户信息
+
+浏览器客户端说明：
+
+- 当前前端默认使用后端下发的 HttpOnly Cookie 鉴权，而不是把 JWT 保存在 `localStorage`
+- 如果前端和后端不在同一个 origin 或端口，请先把对应来源加入 `CORS_ORIGINS`
+- 浏览器使用 Cookie 鉴权时还需要 `CORS_ALLOW_CREDENTIALS=true`
 
 ## 聊天接口
 
@@ -90,13 +101,27 @@
 
 - `GET /documents` — 列出已上传文档
 - `GET /documents/{doc_id}` — 读取文档详情与预览片段
+- `GET /documents/{doc_id}/download` — 下载文档原始文件
 - `DELETE /documents/{doc_id}` — 删除文档记录与源文件
+- `PUT /documents/{doc_id}/knowledge-base` — 绑定或清空文档所属知识库
 - `POST /documents/{doc_id}/reindex` — 重新入队文档索引任务
+
+### Knowledge Bases
+
+- `GET /knowledge-bases` — 列出当前可见知识库及文档数量
+- `POST /knowledge-bases` — 创建当前用户拥有的知识库
+- `PUT /knowledge-bases/{knowledge_base_id}` — 更新知识库名称或描述
+- `DELETE /knowledge-bases/{knowledge_base_id}` — 删除当前用户拥有的知识库
 
 ### Upload
 
 - `POST /upload` — 上传文档文件并触发入库
 - `POST /upload/image` — 上传图片并返回文件访问地址
+
+### File Access
+
+- `GET /uploads/{owner}/{relative_path}` — 按 owner 或 admin 权限读取上传资产
+- `GET /files/{owner}/{relative_path}` — 按 owner 或 admin 权限读取文档资产
 
 ## 后台任务
 

@@ -2,7 +2,7 @@ import time
 from datetime import timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -20,7 +20,8 @@ from app.infrastructure.utils.security import (
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
+AUTH_COOKIE_NAME = "agframe_access_token"
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token", auto_error=False)
 
 
 class Token(BaseModel):
@@ -55,20 +56,57 @@ def get_db():
         session.close()
 
 
+def _request_is_secure(request: Request) -> bool:
+    forwarded_proto = str(request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    if forwarded_proto:
+        return forwarded_proto == "https"
+    return request.url.scheme == "https"
+
+
+def _set_auth_cookie(response: Response, *, request: Request, access_token: str) -> None:
+    max_age_seconds = int(settings.auth.access_token_expire_minutes) * 60
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=access_token,
+        max_age=max_age_seconds,
+        expires=max_age_seconds,
+        httponly=True,
+        secure=_request_is_secure(request),
+        samesite="lax",
+        path="/",
+    )
+
+
+def _clear_auth_cookie(response: Response, *, request: Request) -> None:
+    response.delete_cookie(
+        key=AUTH_COOKIE_NAME,
+        httponly=True,
+        secure=_request_is_secure(request),
+        samesite="lax",
+        path="/",
+    )
+
+
 async def get_current_user(
-    token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)
+    token: Annotated[str | None, Depends(oauth2_scheme)],
+    db: Session = Depends(get_db),
+    cookie_token: Annotated[str | None, Cookie(alias=AUTH_COOKIE_NAME)] = None,
 ):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    payload = decode_access_token(token)
+    resolved_token = str(token or cookie_token or "").strip()
+    if not resolved_token:
+        raise credentials_exception
+    payload = decode_access_token(resolved_token)
     if payload is None:
         raise credentials_exception
-    username: str = payload.get("sub")
-    if username is None:
+    subject = payload.get("sub")
+    if not isinstance(subject, str) or not subject:
         raise credentials_exception
+    username = subject
 
     stmt = select(User).where(User.username == username)
     user = db.execute(stmt).scalar_one_or_none()
@@ -115,6 +153,8 @@ def _require_bootstrap_token(first_user_missing: bool, provided_bootstrap_token:
 
 @router.post("/token", response_model=Token)
 async def login_for_access_token(
+    response: Response,
+    request: Request,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     db: Session = Depends(get_db),
 ):
@@ -132,7 +172,14 @@ async def login_for_access_token(
         data={"sub": user.username, "role": user.role},
         expires_delta=timedelta(minutes=settings.auth.access_token_expire_minutes),
     )
+    _set_auth_cookie(response, request=request, access_token=access_token)
     return {"access_token": access_token, "token_type": "bearer"}  # nosec B105
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(response: Response, request: Request):
+    _clear_auth_cookie(response, request=request)
+    response.status_code = status.HTTP_204_NO_CONTENT
 
 
 @router.post("/register", response_model=UserResponse)

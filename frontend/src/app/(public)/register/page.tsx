@@ -7,7 +7,6 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getStoredToken, getStoredUsername } from '@/lib/auth/session';
 import { useCurrentUserQuery, useLoginMutation, useRegisterMutation } from '@/domains/auth/hooks';
 import { getErrorMessage } from '@/lib/http/errors';
 import { useMessages } from '@/lib/i18n';
@@ -34,7 +33,6 @@ export default function RegisterPage() {
   const router = useRouter();
   const text = useMessages(PUBLIC_MESSAGES);
   const registerSchema = useMemo(() => buildRegisterSchema(text.passwordsMismatch), [text.passwordsMismatch]);
-  const token = getStoredToken();
   const currentUserQuery = useCurrentUserQuery();
   const registerMutation = useRegisterMutation();
   const loginMutation = useLoginMutation();
@@ -49,10 +47,10 @@ export default function RegisterPage() {
   });
 
   useEffect(() => {
-    if (token && currentUserQuery.data) {
-      router.replace(getPreferredStartPage(getStoredUsername()));
+    if (currentUserQuery.data) {
+      router.replace(getPreferredStartPage(currentUserQuery.data.username));
     }
-  }, [currentUserQuery.data, router, token]);
+  }, [currentUserQuery.data, router]);
 
   const onSubmit = async (data: RegisterFormValues) => {
     setRegisterError(null);

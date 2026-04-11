@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -79,6 +79,11 @@ def test_register_and_login_flow(test_app: tuple[FastAPI, sessionmaker]):
     assert tok.status_code == 200
     access_token = tok.json()["access_token"]
     assert access_token
+    assert tok.cookies.get(auth_api.AUTH_COOKIE_NAME) == access_token
+    set_cookie = tok.headers.get("set-cookie", "")
+    assert f"{auth_api.AUTH_COOKIE_NAME}=" in set_cookie
+    assert "HttpOnly" in set_cookie
+    assert "SameSite=lax" in set_cookie
 
     bad = client.post("/auth/token", data={"username": "u2", "password": "wrong"})
     assert bad.status_code == 401
@@ -86,6 +91,14 @@ def test_register_and_login_flow(test_app: tuple[FastAPI, sessionmaker]):
     me = client.get("/auth/users/me", headers={"Authorization": f"Bearer {access_token}"})
     assert me.status_code == 200
     assert me.json()["username"] == "u2"
+
+    me_via_cookie = client.get("/auth/users/me")
+    assert me_via_cookie.status_code == 200
+    assert me_via_cookie.json()["username"] == "u2"
+
+    logout = client.post("/auth/logout")
+    assert logout.status_code == 204
+    assert client.get("/auth/users/me").status_code == 401
 
 
 def test_users_me_rejects_invalid_token(test_app: tuple[FastAPI, sessionmaker]):
@@ -149,13 +162,13 @@ async def test_active_and_admin_guards():
             self.hashed_password = "x"
             self.created_at = int(time.time())
 
-    with pytest.raises(Exception):
+    with pytest.raises(HTTPException):
         await auth_api.get_current_active_user(current_user=_U(role="user", is_active=False))
 
     u = await auth_api.get_current_active_user(current_user=_U(role="user", is_active=True))
     assert u.is_active is True
 
-    with pytest.raises(Exception):
+    with pytest.raises(HTTPException):
         await auth_api.get_current_admin_user(current_user=u)
 
     admin = await auth_api.get_current_admin_user(current_user=_U(role="admin", is_active=True))

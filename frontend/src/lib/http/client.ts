@@ -1,5 +1,5 @@
 import { ApiError, ApiErrorResponse } from './errors';
-import { clearStoredSession, getStoredToken } from '@/lib/auth/session';
+import { clearStoredSession } from '@/lib/auth/session';
 
 // Read backend URL from env and otherwise use same-origin relative paths.
 export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || '').trim();
@@ -35,10 +35,6 @@ export async function apiClient<T>(
     }
   }
 
-  // Handle Token
-  // In a real app, you might want to read a cookie or localStorage here
-  const token = getStoredToken();
-
   const isFormDataBody = typeof FormData !== 'undefined' && customConfig.body instanceof FormData;
   const headers = new Headers(customConfig.headers);
 
@@ -46,12 +42,10 @@ export async function apiClient<T>(
   if (!isFormDataBody && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
-  if (token && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
 
   const config: RequestInit = {
     ...customConfig,
+    credentials: customConfig.credentials ?? 'include',
     headers,
   };
 

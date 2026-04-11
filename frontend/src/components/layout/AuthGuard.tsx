@@ -2,7 +2,6 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { getStoredToken } from '@/lib/auth/session';
 import { useCurrentUserQuery, useLogout } from '@/domains/auth/hooks';
 import { getErrorMessage, isAuthApiError } from '@/lib/http/errors';
 import { useMessages } from '@/lib/i18n';
@@ -11,16 +10,10 @@ import { APP_SHELL_MESSAGES } from './messages';
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const logout = useLogout();
-  const token = getStoredToken();
   const currentUserQuery = useCurrentUserQuery();
   const text = useMessages(APP_SHELL_MESSAGES);
 
   useEffect(() => {
-    if (!token) {
-      router.replace('/login');
-      return;
-    }
-
     const handleExpired = () => {
       logout();
       router.replace('/login');
@@ -30,16 +23,16 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     return () => {
       window.removeEventListener('agframe:auth-expired', handleExpired);
     };
-  }, [logout, router, token]);
+  }, [logout, router]);
 
   useEffect(() => {
-    if (token && isAuthApiError(currentUserQuery.error)) {
+    if (isAuthApiError(currentUserQuery.error)) {
       logout();
       router.replace('/login');
     }
-  }, [currentUserQuery.error, logout, router, token]);
+  }, [currentUserQuery.error, logout, router]);
 
-  if (!token || currentUserQuery.isLoading) {
+  if (currentUserQuery.isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 px-6 dark:bg-gray-950">
         <div className="rounded-xl border border-gray-200 bg-white px-6 py-5 text-sm text-gray-600 shadow-sm dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
@@ -50,6 +43,9 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   }
 
   if (!currentUserQuery.data) {
+    if (isAuthApiError(currentUserQuery.error)) {
+      return null;
+    }
     if (currentUserQuery.isError) {
       return (
         <div className="flex min-h-screen items-center justify-center bg-gray-50 px-6 dark:bg-gray-950">

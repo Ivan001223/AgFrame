@@ -3,7 +3,7 @@
 </div>
 
 <div align="center">
-  <img src="https://img.shields.io/badge/Python-3.11-blue?style=flat-square&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/Python-3.12-blue?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/FastAPI-0.115+-cyan?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI">
   <img src="https://img.shields.io/badge/LangGraph-0.3+-FF6B6B?style=flat-square&logoColor=white" alt="LangGraph">
   <img src="https://img.shields.io/badge/Version-0.3.1-blue?style=flat-square" alt="Version">
@@ -18,7 +18,7 @@
   <b>Backend-owned chat runtime, harness control plane, and Agent Studio workbench</b>
 </div>
 
----
+***
 
 ![AgFrame Banner](data/assets/banner.png)
 
@@ -42,7 +42,7 @@ flowchart TD
     GRAPH[LangGraph Runtime]
     INTERRUPT["Interrupt Flow<br/>Approval / Resume"]
     HARNESS["Harness Control Plane<br/>Runs / Verification / Policies / Studio"]
-    QUEUE[Redis + ARQ Worker]
+    QUEUE[Redis + 3 ARQ Workers]
     REDIS[Redis Checkpoints]
     PG[Postgres Persistence]
 
@@ -63,7 +63,7 @@ flowchart TD
 - **Backend API**: `app/server/main.py` mounts FastAPI routers, LangServe `/chat` routes, static file serving, auth, and rate limiting.
 - **Chat flow**: `POST /chat/workbench-invoke` is the main workbench entry. The backend applies runtime config, invokes the graph, reads the latest state, and persists messages.
 - **Harness flow**: `app/server/api/harness.py` exposes runs, studio projects, skill requests, approvals, verification, runtime-state history, and model providers.
-- **Queue execution**: ARQ workers execute document ingestion, harness runs, and harness resume jobs.
+- **Queue execution**: dedicated ARQ workers execute document ingestion, harness runs, and harness resume jobs.
 - **Frontend**: `frontend/` uses Next.js App Router, React Query, shared HTTP utilities, and domain-specific hooks.
 
 ### Retrieval defaults
@@ -144,6 +144,8 @@ Default services:
 - `redis`
 - `backend`
 - `worker`
+- `worker-ingest`
+- `worker-resume`
 - `frontend`
 
 Default local addresses:
@@ -166,6 +168,8 @@ If you copied `.env.example`, replace the Docker-only service hosts before start
 export AUTH_SECRET_KEY='replace-with-at-least-32-random-chars'
 export DATABASE_URL='postgresql+psycopg://agframe:agframe_secret@127.0.0.1:5432/agframe'
 export REDIS_URL='redis://:redissecret@127.0.0.1:6379/0'
+export CORS_ORIGINS='["http://127.0.0.1:3000","http://localhost:3000"]'
+export CORS_ALLOW_CREDENTIALS='true'
 ```
 
 If you want a local no-cloud smoke path, also override:
@@ -181,11 +185,17 @@ Backend:
 ./scripts/start-backend.sh
 ```
 
-Worker:
+Workers:
 
 ```bash
 ./scripts/start-worker.sh
 ```
+
+The worker startup script launches three ARQ processes in parallel:
+
+- `IngestWorkerSettings` for document ingestion
+- `RuntimeWorkerSettings` for harness run execution
+- `ResumeWorkerSettings` for interrupt and harness resume jobs
 
 Frontend:
 
@@ -194,6 +204,8 @@ cd frontend
 export NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
 npm run dev
 ```
+
+The frontend now restores auth from the backend-issued HttpOnly cookie, so browser calls from `:3000` to `:8000` require the CORS credential settings above.
 
 ## Main Capabilities
 
@@ -226,7 +238,8 @@ The ready check reports retrieval and runtime component readiness, including the
 
 ## Version Scope
 
-- Backend version: `0.3.1`
-- Frontend version: `0.3.1`
-- Python constraint: `>=3.11,<3.12`
-- This README is aligned with the current repository state on 2026-03-30
+- Backend version: `0.3.2`
+- Frontend version: `0.3.2`
+- Python constraint: `>=3.12,<3.13`
+- This README is aligned with the current repository state on 2026-04-08
+

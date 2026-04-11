@@ -8,7 +8,7 @@ This Next.js application is the authenticated workbench for the AgFrame backend.
 
 ## Stack
 
-- Next.js `16.1.6`
+- Next.js `16.2.3`
 - React `19.2.3`
 - TanStack React Query
 - React Hook Form + Zod
@@ -16,10 +16,12 @@ This Next.js application is the authenticated workbench for the AgFrame backend.
 
 ## Routes
 
+- `/register` — first-user bootstrap and optional open-registration page
 - `/login` — login page
 - `/chat` — chat workbench
 - `/harness` — Harness Agent Studio and control-plane surface
 - `/knowledge` — knowledge base management
+- `/knowledge/[docId]` — document detail, preview, download, reindex, and knowledge-base assignment
 - `/conversations` — conversation list
 - `/conversations/[conversationId]` — conversation detail
 - `/memory` — memory console
@@ -36,12 +38,19 @@ npm run dev
 
 Open `http://127.0.0.1:3000` after startup.
 
+When the backend runs on a different origin or port, ensure it is configured with:
+
+- `CORS_ORIGINS=["http://127.0.0.1:3000","http://localhost:3000"]`
+- `CORS_ALLOW_CREDENTIALS=true`
+
 ## Auth Model
 
 - login uses `POST /auth/token`
+- logout uses `POST /auth/logout`
 - current-user bootstrap uses `GET /auth/users/me`
-- authenticated workspace routes require a stored token
-- expired or invalid auth redirects back to `/login`
+- browser auth is driven by the HttpOnly cookie issued by the backend
+- the frontend only keeps the username locally for cache scoping and preferences
+- expired or invalid auth clears local session hints and redirects back to `/login`
 - admin-only UI depends on `role === "admin"`
 
 ## API Integration Notes
@@ -85,11 +94,14 @@ Primary harness endpoints consumed by the frontend include:
 - personal settings map to `GET|POST /settings/user`
 - admin settings map to `GET|POST /settings`
 - document uploads use `POST /upload` with multipart field `files`
+- knowledge base management uses `GET|POST|PUT|DELETE /knowledge-bases`
+- document operations also call `GET /documents/{doc_id}/download` and `PUT /documents/{doc_id}/knowledge-base`
 
 ## Verification
 
 ```bash
 npm run lint -- --max-warnings=0
+npm run typecheck
 npm run build
 ```
 

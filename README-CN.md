@@ -3,7 +3,7 @@
 </div>
 
 <div align="center">
-  <img src="https://img.shields.io/badge/Python-3.11-blue?style=flat-square&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/Python-3.12-blue?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/FastAPI-0.115+-cyan?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI">
   <img src="https://img.shields.io/badge/LangGraph-0.3+-FF6B6B?style=flat-square&logoColor=white" alt="LangGraph">
   <img src="https://img.shields.io/badge/Version-0.3.1-blue?style=flat-square" alt="Version">
@@ -14,7 +14,7 @@
   <b>后端自管聊天运行时、Harness 控制平面与 Agent Studio 工作台</b>
 </div>
 
----
+***
 
 ![AgFrame Banner](data/assets/banner.png)
 
@@ -38,7 +38,7 @@ flowchart TD
     GRAPH[LangGraph 运行时]
     INTERRUPT["中断链路<br/>审批 / 恢复"]
     HARNESS["Harness 控制平面<br/>Runs / Verification / Policies / Studio"]
-    QUEUE[Redis + ARQ Worker]
+    QUEUE[Redis + 3 类 ARQ Worker]
     REDIS[Redis Checkpoint]
     PG[Postgres 持久化]
 
@@ -59,7 +59,7 @@ flowchart TD
 - **后端 API**：`app/server/main.py` 负责挂载 FastAPI 路由、LangServe `/chat`、静态文件、认证和限流。
 - **聊天链路**：`POST /chat/workbench-invoke` 是工作台主入口，由后端统一注入运行时配置、调用图执行并持久化消息。
 - **Harness 链路**：`app/server/api/harness.py` 覆盖 runs、studio projects、skill requests、approvals、verification、runtime-state history 和 model providers。
-- **异步执行**：ARQ Worker 负责文档入库、harness run 执行和 harness resume。
+- **异步执行**：三类 ARQ Worker 分别负责文档入库、harness run 执行和 harness resume。
 - **前端结构**：`frontend/` 使用 Next.js App Router、React Query、共享 HTTP Client 和领域化 hooks。
 
 ### 默认检索链路
@@ -124,8 +124,8 @@ cp configs/config.example.json configs/config.json
 
 说明：
 
-- `docker-compose.yml` 只有在 `.env` 未覆盖时才会回退到 `LLM_MODEL=dev-stub`
-- `.env.example` 当前默认写的是 `LLM_MODEL=gpt-4o-mini`，如果要在无云端 Key 的情况下跑本地 live smoke，需要自行调整 `.env`
+- `.env.example` 当前默认写入 `LLM_MODEL=dev-stub` 与 `MODEL_PATH_EMBEDDING=dev-stub`，因此本地启动默认不依赖云端 Key
+- 如果要切换回云模型，需要同时更新 `.env` 并提供有效的 `LLM_API_KEY`
 
 ### 3. 使用 Docker Compose 启动整套服务
 
@@ -140,6 +140,8 @@ docker compose ps
 - `redis`
 - `backend`
 - `worker`
+- `worker-ingest`
+- `worker-resume`
 - `frontend`
 
 默认访问地址：
@@ -156,17 +158,40 @@ docker compose --profile observability up --build -d
 
 ### 4. 手动启动服务
 
+如果你是从 `.env.example` 复制得到 `.env`，在宿主机直接启动 backend 或 worker 之前，请先覆盖其中仅适用于 Docker 网络的主机名：
+
+```bash
+export AUTH_SECRET_KEY='replace-with-at-least-32-random-chars'
+export DATABASE_URL='postgresql+psycopg://agframe:agframe_secret@127.0.0.1:5432/agframe'
+export REDIS_URL='redis://:redissecret@127.0.0.1:6379/0'
+export CORS_ORIGINS='["http://127.0.0.1:3000","http://localhost:3000"]'
+export CORS_ALLOW_CREDENTIALS='true'
+```
+
+如果希望在本地走无云端依赖的 smoke 路径，还需要额外覆盖：
+
+```bash
+export LLM_MODEL='dev-stub'
+export MODEL_PATH_EMBEDDING='dev-stub'
+```
+
 Backend：
 
 ```bash
 ./.venv/bin/python -m app.server.main
 ```
 
-Worker：
+Workers：
 
 ```bash
-./.venv/bin/arq app.infrastructure.queue.worker_settings.WorkerSettings
+./scripts/start-worker.sh
 ```
+
+`./scripts/start-worker.sh` 会并行拉起三类 ARQ Worker：
+
+- `IngestWorkerSettings`：负责文档入库
+- `RuntimeWorkerSettings`：负责 harness run 执行
+- `ResumeWorkerSettings`：负责 interrupt 与 harness resume 任务
 
 Frontend：
 
@@ -175,6 +200,8 @@ cd frontend
 export NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
 npm run dev
 ```
+
+前端现在通过后端写入的 HttpOnly Cookie 恢复登录状态，所以浏览器从 `:3000` 访问 `:8000` 时需要上面的 CORS credential 配置。
 
 ## 主要能力
 
@@ -207,7 +234,8 @@ npm run dev
 
 ## 版本范围
 
-- 后端版本：`0.3.1`
-- 前端版本：`0.3.1`
-- Python 约束：`>=3.11,<3.12`
-- 本 README 已按 2026-03-30 的仓库状态校准
+- 后端版本：`0.3.2`
+- 前端版本：`0.3.2`
+- Python 约束：`>=3.12,<3.13`
+- 本 README 已按 2026-04-08 的仓库状态校准
+

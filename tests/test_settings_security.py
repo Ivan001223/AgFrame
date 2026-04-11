@@ -9,7 +9,7 @@ from app.infrastructure.config.settings import AuthConfig, DatabaseConfig, LLMCo
 
 def test_validate_security_raises_on_insecure_defaults():
     s = Settings()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="auth.secret_key uses an insecure default"):
         s.validate_security()
 
 
@@ -43,7 +43,7 @@ def test_validate_security_rejects_insecure_database_url_password():
         ),
         llm=LLMConfig(LLM_API_KEY="k" * 40),
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="database.password uses an insecure default"):
         s.validate_security()
 
 
@@ -65,5 +65,5 @@ def test_validate_security_warns_for_cloud_model_without_api_key():
         database=DatabaseConfig(DB_PASSWORD="StrongPassw0rd!"),
         llm=LLMConfig(LLM_MODEL="gpt-4o-mini", LLM_API_KEY=""),
     )
-    with pytest.warns(UserWarning, match="llm.api_key 未配置"):
+    with pytest.warns(UserWarning, match="llm.api_key is not configured"):
         s.validate_security()

@@ -13,11 +13,11 @@ from urllib.parse import unquote, urlsplit
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.infrastructure.config.env import init_env
+
 logger = logging.getLogger(__name__)
 
 # 初始化环境变量
-from app.infrastructure.config.env import init_env
-
 init_env()
 
 
@@ -353,7 +353,7 @@ class Settings(BaseSettings):
                     if hasattr(self.storage_s3, key):
                         # 检查是否有对应的环境变量设置
                         env_key = self._get_env_alias(self.storage_s3, key)
-                        if not os.getenv(env_key):
+                        if not env_key or not os.getenv(env_key):
                             setattr(self.storage_s3, key, value)
             else:
                 # 本地存储配置
@@ -385,7 +385,7 @@ class Settings(BaseSettings):
                 else:
                     # 检查是否有对应的环境变量设置
                     env_key = self._get_env_alias(config_obj, sub_key)
-                    if not os.getenv(env_key):
+                    if not env_key or not os.getenv(env_key):
                         setattr(config_obj, sub_key, sub_value)
 
     def _get_env_alias(self, config_obj: BaseSettings, field_name: str) -> str | None:
@@ -444,7 +444,8 @@ class Settings(BaseSettings):
         if self._llm_requires_api_key() and (api_key in insecure_keys or api_key == ""):
             warnings.warn(
                 "警告: llm.api_key 未配置，将无法使用 OpenAI 等云端 LLM。"
-                "请在 configs/config.json 中设置 API Key，或通过环境变量 LLM_API_KEY 设置。"
+                "请在 configs/config.json 中设置 API Key，或通过环境变量 LLM_API_KEY 设置。",
+                stacklevel=2,
             )
 
         if self.server.cors_allow_credentials and "*" in self.server.cors_origins:
@@ -455,4 +456,58 @@ class Settings(BaseSettings):
 
 
 # 创建全局 Settings 单例
+def _validate_security_impl(self: Settings) -> None:
+    """Validate security-sensitive configuration."""
+    import warnings
+
+    insecure_keys = [
+        "set-auth-secret-key-before-production",
+        "secret",
+        "changeme",
+        "password",
+        "123456",
+        "admin",
+    ]
+    if self.auth.secret_key in insecure_keys or len(self.auth.secret_key) < 32:
+        raise ValueError(
+            "Security configuration error: auth.secret_key uses an insecure default "
+            f"value '{self.auth.secret_key}'. Set a random value with at least 32 characters "
+            "in configs/config.json or via the AUTH_SECRET_KEY environment variable."
+        )
+
+    db_password = self.database.password
+    db_url = str(self.database.url or "").strip()
+    if db_url:
+        try:
+            parsed = urlsplit(db_url)
+        except ValueError:
+            parsed = None
+        if parsed and parsed.password:
+            db_password = unquote(parsed.password)
+    if db_password in insecure_keys or (db_password and len(db_password) < 8):
+        raise ValueError(
+            "Security configuration error: database.password uses an insecure default value. "
+            "Set a stronger database password in configs/config.json or via the "
+            "DB_PASSWORD environment variable."
+        )
+
+    api_key = self.llm.api_key
+    if self._llm_requires_api_key() and (api_key in insecure_keys or api_key == ""):
+        warnings.warn(
+            "Warning: llm.api_key is not configured, so hosted LLM providers such as OpenAI "
+            "will be unavailable. Set it in configs/config.json or via LLM_API_KEY.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    if self.server.cors_allow_credentials and "*" in self.server.cors_origins:
+        raise ValueError(
+            "Security configuration error: server.cors_origins cannot include '*' when "
+            "server.cors_allow_credentials=true."
+        )
+
+
+Settings.validate_security = _validate_security_impl  # type: ignore[method-assign]
+
+
 settings = Settings()

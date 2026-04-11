@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { API_BASE_URL, apiClient } from '@/lib/http/client';
-import { getSessionCacheScope, getStoredToken } from '@/lib/auth/session';
+import { getSessionCacheScope } from '@/lib/auth/session';
 
 export type DocumentDTO = {
   doc_id: number;
@@ -114,7 +114,6 @@ export function useUploadDocumentMutation() {
 
   return useMutation({
     mutationFn: async ({ file, knowledgeBaseId, onProgress }: UploadDocumentRequest) => {
-      const token = getStoredToken();
       const formData = new FormData();
       formData.append('files', file);
       if (knowledgeBaseId) {
@@ -132,10 +131,7 @@ export function useUploadDocumentMutation() {
       }>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open('POST', `${API_BASE_URL}/upload`);
-
-        if (token) {
-          xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-        }
+        xhr.withCredentials = true;
 
         xhr.upload.onprogress = (event) => {
           if (!event.lengthComputable || !onProgress) {
@@ -174,12 +170,9 @@ export async function downloadDocumentFile(doc: Pick<DocumentDTO, 'filename' | '
     throw new Error('Download URL is unavailable');
   }
 
-  const token = getStoredToken();
   const response = await fetch(`${API_BASE_URL}${doc.download_url}`, {
     method: 'GET',
-    headers: {
-      ...(token && { Authorization: `Bearer ${token}` }),
-    },
+    credentials: 'include',
   });
 
   if (!response.ok) {

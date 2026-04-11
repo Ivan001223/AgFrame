@@ -1,15 +1,19 @@
 # 部署指南
 
+<div align="center">
+  <a href="deployment.md">English</a>
+</div>
+
 ## 范围
 
 - **后端版本**：`0.3.1`
 - **前端版本**：`0.3.1`
-- **Python 约束**：`>=3.11,<3.12`
-- **本地默认栈**：Postgres + Redis + FastAPI + ARQ Worker + Next.js
+- **Python 约束**：`>=3.12,<3.13`
+- **本地默认栈**：Postgres + Redis + FastAPI + 3 类 ARQ Worker + Next.js
 
 ## 环境要求
 
-- Python 3.11
+- Python 3.12
 - `uv`
 - 前端验证建议使用 Node.js 22 LTS
 - Docker 和 Docker Compose
@@ -56,6 +60,7 @@ cp configs/config.example.json configs/config.json
 - 启动校验会拒绝不安全的 `auth.secret_key`
 - 启动校验会拒绝不安全的 `database.password`
 - `server.cors_allow_credentials=true` 不能与 `server.cors_origins=["*"]` 同时出现
+- 当前端从 `http://127.0.0.1:3000` 访问后端时，请保持 `CORS_ALLOW_CREDENTIALS=true`，否则浏览器不会携带认证 Cookie
 
 轻量检索链路推荐保持以下兼容配置为空：
 
@@ -75,6 +80,8 @@ docker compose ps
 - `redis`
 - `backend`
 - `worker`
+- `worker-ingest`
+- `worker-resume`
 - `frontend`
 
 默认访问地址：
@@ -114,6 +121,8 @@ Langfuse 默认暴露在 `http://127.0.0.1:3001`。
 export AUTH_SECRET_KEY='replace-with-at-least-32-random-chars'
 export DATABASE_URL='postgresql+psycopg://agframe:agframe_secret@127.0.0.1:5432/agframe'
 export REDIS_URL='redis://:redissecret@127.0.0.1:6379/0'
+export CORS_ORIGINS='["http://127.0.0.1:3000","http://localhost:3000"]'
+export CORS_ALLOW_CREDENTIALS='true'
 ```
 
 如果希望在本地走无云端依赖的 smoke 路径，还需要额外覆盖：
@@ -129,11 +138,17 @@ Backend：
 ./scripts/start-backend.sh
 ```
 
-Worker：
+Workers：
 
 ```bash
 ./scripts/start-worker.sh
 ```
+
+该脚本会并行拉起：
+
+- `IngestWorkerSettings`，负责文档入库任务
+- `RuntimeWorkerSettings`，负责 harness run 执行
+- `ResumeWorkerSettings`，负责 interrupt 与 harness resume 任务
 
 Frontend：
 
@@ -143,7 +158,13 @@ export NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
 npm run dev
 ```
 
-手动启动时，backend 与 worker 必须同时健康运行，否则 harness run、文档入库和 resume 链路都无法完整工作。
+手动启动时，backend 与三类 worker 都必须健康运行，否则 harness run、文档入库和 resume 链路都无法完整工作。
+
+认证说明：
+
+- 前端现在依赖 `POST /auth/token` 下发的 HttpOnly Cookie，而不是把 JWT 持久化到 `localStorage`
+- 页面加载后的当前用户恢复依赖 `GET /auth/users/me`
+- 当前端和后端分端口或分源运行时，必须打开 `CORS_ALLOW_CREDENTIALS=true`，否则浏览器会在鉴权前直接拦截请求
 
 ## 停止服务
 

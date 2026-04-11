@@ -1,5 +1,9 @@
 # AgFrame 前端架构
 
+<div align="center">
+  <a href="frontend-architecture.md">English</a>
+</div>
+
 ## 范围
 
 - **框架**：Next.js `16.1.6`

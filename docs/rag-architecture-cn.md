@@ -1,5 +1,9 @@
 # RAG 架构设计
 
+<div align="center">
+  <a href="rag-architecture.md">English</a>
+</div>
+
 ## 架构概览
 
 AgFrame 默认的 RAG（检索增强生成）链路仍然坚持轻量和透明。在当前系统中，这条检索路径服务于后端自管的聊天运行时和相关文档工作流，而不是前端自管的 Demo 式链路。
@@ -69,7 +73,7 @@ Dense Search (密集检索) + BM25 (稀疏检索)
 
 `settings.prompt.context_pruning` 中的当前默认值：
 
-- `method="auto"`
+- `method="heuristic"`
 - `auto_reranker_min_lines=40`
 - `auto_reranker_min_chars=2500`
 - `neighbor_window=1`

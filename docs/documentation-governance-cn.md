@@ -1,5 +1,9 @@
 # 文档治理规范
 
+<div align="center">
+  <a href="documentation-governance.md">English</a>
+</div>
+
 ## 目标
 
 让仓库文档在中英文两条主线上都持续与当前代码、运行时行为和运维流程保持一致。
@@ -32,6 +36,7 @@
 - `security*.md` 负责安全基线与发布前检查
 - `frontend-architecture*.md` 负责前端结构与数据流
 - `rag-architecture*.md` 负责检索设计与迁移上下文
+- `documentation-package-index.md`、`documentation-change-record.md`、`documentation-quality-report.md` 负责文档审计清单、变更追踪与质量签核产物
 
 ### 子系统入口文档
 
@@ -64,6 +69,7 @@
 - 中英文对应文档必须在同一批变更中更新
 - 除非确有必要，两种语言的章节结构应保持对称
 - 端点列表、命令、版本号和文件路径必须等价
+- 内部审计产物在仅作为发布复核交付物、且当前没有维护中的英文对照文件时，可以按中文单语维护
 
 ## 版本控制与可追溯性
 

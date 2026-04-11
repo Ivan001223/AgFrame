@@ -73,7 +73,7 @@ Current default values in `settings.rag.retrieval`:
 
 Current default values in `settings.prompt.context_pruning`:
 
-- `method="auto"`
+- `method="heuristic"`
 - `auto_reranker_min_lines=40`
 - `auto_reranker_min_chars=2500`
 - `neighbor_window=1`

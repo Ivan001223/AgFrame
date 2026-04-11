@@ -1,5 +1,9 @@
 # 安全说明
 
+<div align="center">
+  <a href="security.md">English</a>
+</div>
+
 ## 配置基线
 
 - `auth.secret_key` 必须是长度不少于 32 的随机值

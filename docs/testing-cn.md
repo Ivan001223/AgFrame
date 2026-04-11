@@ -1,5 +1,9 @@
 # 测试指南
 
+<div align="center">
+  <a href="testing.md">English</a>
+</div>
+
 ## 范围
 
 - Python 测试优先使用 `./.venv/bin/python`
@@ -101,6 +105,7 @@ export LIVE_SMOKE_BASE_URL='http://127.0.0.1:8000'
 cd frontend
 export NEXT_PUBLIC_API_URL='http://127.0.0.1:8000'
 npm run lint -- --max-warnings=0
+npm run typecheck
 npm run build
 ```
 

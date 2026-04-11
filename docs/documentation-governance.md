@@ -1,5 +1,9 @@
 # Documentation Governance
 
+<div align="center">
+  <a href="documentation-governance-cn.md">中文文档</a>
+</div>
+
 ## Goal
 
 Keep repository documentation aligned with the current codebase, runtime behavior, and operational workflows in both English and Chinese.
@@ -32,6 +36,7 @@ Do not own:
 - `security*.md` own security baseline and release checks
 - `frontend-architecture*.md` own frontend structure and data flow
 - `rag-architecture*.md` own retrieval design and migration context
+- `documentation-package-index.md`, `documentation-change-record.md`, and `documentation-quality-report.md` own documentation-audit inventory, change traceability, and quality sign-off artifacts
 
 ### Subsystem entry docs
 
@@ -64,6 +69,7 @@ Update documentation whenever any of the following changes:
 - English and Chinese counterparts must be updated in the same change set
 - section structure should remain symmetrical unless a language-specific note is necessary
 - endpoint lists, commands, version numbers, and file paths must remain equivalent
+- internal audit artifacts may remain Chinese-only when they are used as release-review deliverables and no maintained English counterpart exists
 
 ## Versioning and Traceability
 

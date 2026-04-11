@@ -77,7 +77,7 @@ class MemoryUpdateService:
             profile = profile_engine.get_profile(user_id)
             # 提取自上次画像更新以来的新对话
             chat_log = "\n".join([f"{m.get('role')}: {m.get('content')}" for m in messages[last_profiled:]])
-            
+
             if profile and any(profile.values()):
                 # 增量更新
                 new_profile = incremental_update_profile(profile, chat_log=chat_log)

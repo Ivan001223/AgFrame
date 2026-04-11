@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any, cast
 
 from typing_extensions import TypedDict
 
-from app.runtime.contracts.pruning import ChatContextPruningPayload, build_chat_context_pruning_payload
+from app.runtime.contracts.pruning import (
+    ChatContextPruningPayload,
+    build_chat_context_pruning_payload,
+)
 
 
 class WebSearchPayload(TypedDict):
@@ -50,9 +54,12 @@ def build_workflow_context_payload(
     interrupt_description: str | None = None,
     interrupt_payload: dict[str, Any] | None = None,
 ) -> WorkflowContextPayload:
-    payload: WorkflowContextPayload = build_chat_context_pruning_payload(
-        current=current,
-        session_id=session_id,
+    payload = cast(
+        WorkflowContextPayload,
+        build_chat_context_pruning_payload(
+            current=current,
+            session_id=session_id,
+        ),
     )
 
     existing_user_id = payload.get("user_id")

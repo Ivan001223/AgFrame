@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any, cast
 
 from typing_extensions import TypedDict
 
@@ -22,7 +23,7 @@ def build_agent_trace_payload(
     candidate_pruning: CandidatePruningTrace | None = None,
     prompt_pruning: PromptPruningTrace | None = None,
 ) -> AgentTracePayload:
-    payload: AgentTracePayload = dict(current or {})
+    payload: AgentTracePayload = cast(AgentTracePayload, dict(current or {}))
 
     existing_trace_id = payload.get("trace_id")
     if isinstance(existing_trace_id, str) and existing_trace_id:

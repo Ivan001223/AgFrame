@@ -53,6 +53,8 @@ def run_json_router(
         response = chain.invoke({"messages": sanitized_messages})
         # 解析 LLM 返回的 JSON 字符串
         data = parse_json_from_llm(str(getattr(response, "content", response)))
+        if not isinstance(data, dict):
+            raise ValueError("JSON router expected an object response.")
         return schema(**data)
     except Exception as e:
         # 异常处理：使用回退数据

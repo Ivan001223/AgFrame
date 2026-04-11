@@ -1,13 +1,12 @@
 """
 健康检查端点
 """
+from fastapi import APIRouter, status
 from sqlalchemy import text
 
-from fastapi import APIRouter, status
-
+from app.infrastructure.config.settings import settings
 from app.infrastructure.database.orm import get_engine
 from app.infrastructure.database.schema import is_database_ready
-from app.infrastructure.config.settings import settings
 from app.infrastructure.queue.redis_client import get_redis
 from app.runtime.llm.llm_factory import get_llm
 

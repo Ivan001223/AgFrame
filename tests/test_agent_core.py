@@ -2,9 +2,8 @@
 Agent Core 测试 - 测试 Agent 核心数据结构
 """
 
-import pytest
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

@@ -376,7 +376,7 @@ class HarnessEventStore:
             if run_id is not None:
                 stmt = stmt.where(HarnessEvent.run_id == run_id)
             stmt = stmt.order_by(HarnessEvent.created_at.desc()).limit(int(limit))
-            rows = session.execute(stmt).scalars().all()
+            rows = list(session.execute(stmt).scalars().all())
             rows.reverse()
             return [self._to_dict(row) for row in rows]
 
@@ -587,7 +587,7 @@ class HarnessModelProviderStore:
             result = session.execute(
                 delete(HarnessModelProvider).where(HarnessModelProvider.provider_id == provider_id)
             )
-            return result.rowcount > 0
+            return bool(getattr(result, "rowcount", 0) > 0)
 
     @staticmethod
     def _to_dict(row: HarnessModelProvider) -> dict[str, object]:

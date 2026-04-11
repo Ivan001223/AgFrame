@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from langgraph.graph import END, StateGraph
 
@@ -24,8 +24,9 @@ def _route_key(state: AgentState) -> Literal["none", "docs", "history", "both"]:
     enable_chat_memory = flags.enable_chat_memory
     context = state.get("context") or {}
     route = state.get("route") or context.get("route") or {}
-    needs_docs = bool(route.get("needs_docs")) and enable_docs_rag
-    needs_history = bool(route.get("needs_history")) and enable_chat_memory
+    route_payload = route if isinstance(route, dict) else {}
+    needs_docs = bool(route_payload.get("needs_docs")) and enable_docs_rag
+    needs_history = bool(route_payload.get("needs_history")) and enable_chat_memory
     if needs_docs and needs_history:
         return "both"
     if needs_docs:
@@ -39,7 +40,8 @@ def _after_docs_key(state: AgentState) -> Literal["profile", "memories"]:
     enable_chat_memory = settings.feature_flags.enable_chat_memory
     context = state.get("context") or {}
     route = state.get("route") or context.get("route") or {}
-    if bool(route.get("needs_history")) and enable_chat_memory:
+    route_payload = route if isinstance(route, dict) else {}
+    if bool(route_payload.get("needs_history")) and enable_chat_memory:
         return "memories"
     return "profile"
 
@@ -53,7 +55,8 @@ def _grader_key(state: AgentState) -> Literal["accept", "rewrite", "search"]:
     attempts = int(trace.get("self_correction_attempts") or 0)
     if attempts >= _get_max_self_correction_attempts():
         return "accept"
-    grade = (state.get("context") or {}).get("grade") or {}
+    grade_value = (state.get("context") or {}).get("grade")
+    grade: dict[str, Any] = cast(dict[str, Any], grade_value) if isinstance(grade_value, dict) else {}
     verdict = str(grade.get("verdict") or "accept").strip().lower()
     if verdict == "search":
         return "search"
@@ -79,7 +82,8 @@ def _check_approval(state: AgentState) -> Literal["approved", "pending"]:
     if state.get("interrupted") is False and str(state.get("next_step") or "") != "wait_approval":
         return "approved"
     action_required = state.get("action_required")
-    if action_required and action_required.get("approved"):
+    action_required_payload = action_required if isinstance(action_required, dict) else {}
+    if action_required_payload and action_required_payload.get("approved"):
         return "approved"
     return "pending"
 
@@ -95,41 +99,41 @@ def run_app(checkpointer: Any | None = None):
     flags = settings.feature_flags
     enable_self_correction = flags.enable_self_correction
 
-    workflow.add_node("bootstrap_request", bootstrap_request_node)
-    workflow.add_node("router", router_node)
-    workflow.add_node("retrieve_docs", retrieve_docs_node)
-    workflow.add_node("retrieve_memories", retrieve_memories_node)
-    workflow.add_node("retrieve_profile", retrieve_profile_node)
-    workflow.add_node("assemble", assemble_prompt_node)
-    workflow.add_node("generate", generate_node)
-    workflow.add_node("human_interrupt", human_interrupt_node)
-    workflow.add_node("check_approval", check_approval_node)
+    workflow.add_node("bootstrap_request", cast(Any, bootstrap_request_node))
+    workflow.add_node("router", cast(Any, router_node))
+    workflow.add_node("retrieve_docs", cast(Any, retrieve_docs_node))
+    workflow.add_node("retrieve_memories", cast(Any, retrieve_memories_node))
+    workflow.add_node("retrieve_profile", cast(Any, retrieve_profile_node))
+    workflow.add_node("assemble", cast(Any, assemble_prompt_node))
+    workflow.add_node("generate", cast(Any, generate_node))
+    workflow.add_node("human_interrupt", cast(Any, human_interrupt_node))
+    workflow.add_node("check_approval", cast(Any, check_approval_node))
     if enable_self_correction:
-        workflow.add_node("grader", grader_node)
-        workflow.add_node("web_search", web_search_node)
+        workflow.add_node("grader", cast(Any, grader_node))
+        workflow.add_node("web_search", cast(Any, web_search_node))
 
     workflow.set_entry_point("bootstrap_request")
     workflow.add_edge("bootstrap_request", "router")
     workflow.add_conditional_edges(
         "router",
         _route_key,
-        {
+        cast(dict[Any, str], {
             "both": "retrieve_docs",
             "docs": "retrieve_docs",
             "history": "retrieve_memories",
             "none": "retrieve_profile",
-        },
+        }),
     )
     workflow.add_conditional_edges(
         "retrieve_docs",
         _after_docs_key,
-        {"memories": "retrieve_memories", "profile": "retrieve_profile"},
+        cast(dict[Any, str], {"memories": "retrieve_memories", "profile": "retrieve_profile"}),
     )
     workflow.add_edge("retrieve_memories", "retrieve_profile")
     workflow.add_edge("retrieve_profile", "assemble")
     workflow.add_edge("assemble", "generate")
 
-    generate_routes: dict[str, str] = {
+    generate_routes: dict[Any, str] = {
         "interrupt": "human_interrupt",
         "end": END,
     }
@@ -144,14 +148,14 @@ def run_app(checkpointer: Any | None = None):
     workflow.add_conditional_edges(
         "check_approval",
         _check_approval,
-        {"approved": "generate", "pending": END},
+        cast(dict[Any, str], {"approved": "generate", "pending": END}),
     )
 
     if enable_self_correction:
         workflow.add_conditional_edges(
             "grader",
             _grader_key,
-            {"accept": END, "rewrite": "retrieve_profile", "search": "web_search"},
+            cast(dict[Any, str], {"accept": END, "rewrite": "retrieve_profile", "search": "web_search"}),
         )
         workflow.add_edge("web_search", "retrieve_profile")
 

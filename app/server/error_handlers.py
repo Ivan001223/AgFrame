@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, cast
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -14,12 +14,12 @@ logger = get_logger("exception_handler")
 
 def get_request_id(request: Request) -> str:
     request_id = getattr(request.state, "request_id", None)
-    if request_id:
+    if isinstance(request_id, str) and request_id:
         return request_id
     header_value = request.headers.get("X-Request-ID")
     request_id = header_value if header_value else str(uuid.uuid4())
     request.state.request_id = request_id
-    return request_id
+    return str(request_id)
 
 
 def build_error_content(
@@ -85,6 +85,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 
 def register_exception_handlers(app: FastAPI) -> None:
-    app.add_exception_handler(Exception, global_exception_handler)
-    app.add_exception_handler(HTTPException, http_exception_handler)
-    app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(Exception, cast(Any, global_exception_handler))
+    app.add_exception_handler(HTTPException, cast(Any, http_exception_handler))
+    app.add_exception_handler(RequestValidationError, cast(Any, validation_exception_handler))

@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import time
 import uuid
-from typing import Any
+from typing import Any, cast
 
 import anyio
 
@@ -12,6 +12,7 @@ from app.harness.persistence.stores import HarnessModelProviderStore
 from app.harness.runtime.checkpoint_adapter import CheckpointAdapter
 from app.harness.runtime.run_service import build_run_service
 from app.harness.runtime.verification_service import VerificationService
+from app.infrastructure.database.schema import ensure_schema_if_possible
 from app.infrastructure.queue.redis_client import (
     append_task_incident,
     claim_task_operation,
@@ -20,26 +21,24 @@ from app.infrastructure.queue.redis_client import (
     update_task,
 )
 from app.infrastructure.storage.object_store import get_object_store
-from app.infrastructure.database.schema import ensure_schema_if_possible
 from app.infrastructure.utils.logging import bind_logger, get_logger
 from app.memory.long_term.user_memory_engine import UserMemoryEngine
 from app.runtime.graph.orchestration_graph import (
+    OrchestrationState,
     OutputGuardrailTrip,
     build_orchestration_execution_plan,
-    compile_orchestration_graph,
     invoke_orchestration_step,
     review_orchestration_output,
 )
 from app.runtime.graph.resume_service import GraphResumeService
 from app.runtime.llm.provider_registry import ModelProviderRegistry
-from app.server.session_history import persist_session_messages
+from app.skills.rag.rag_engine import get_rag_engine
 from app.skills.registry import build_fallback_skill_descriptor, get_skill_descriptor
 from app.skills.research.enhanced_search import (
     enhanced_search_response,
     enhanced_web_search,
     fetch_browser_previews,
 )
-from app.skills.rag.rag_engine import get_rag_engine
 
 _log = get_logger("task_queue.arq_jobs")
 
@@ -49,6 +48,15 @@ def _maybe_call(service: Any, method_name: str, *args: Any, **kwargs: Any) -> An
     if callable(method):
         return method(*args, **kwargs)
     return None
+
+
+def _persist_session_messages(*args: Any, **kwargs: Any) -> Any:
+    from app.server.session_history import persist_session_messages
+
+    return persist_session_messages(*args, **kwargs)
+
+
+persist_session_messages = _persist_session_messages
 
 
 def _normalize_ingest_result(result: Any) -> dict[str, Any]:
@@ -507,7 +515,7 @@ def _snapshot_research_payload_for_approval(research_payload: dict[str, Any]) ->
 
     memory_payload = research_payload.get("memory")
     if isinstance(memory_payload, dict):
-        memory_snapshot = {
+        memory_snapshot: dict[str, Any] = {
             "stored": bool(memory_payload.get("stored")),
         }
         reason = _trim_prompt_context(str(memory_payload.get("reason") or "").strip(), max_chars=200)
@@ -1862,7 +1870,7 @@ async def ingest_pdf(
     ctx: dict[str, Any],
     task_id: str,
     storage_uri: str,
-    user_id: str = None,
+    user_id: str | None = None,
     knowledge_base_id: str | None = None,
 ) -> bool:
     logger = bind_logger(_log, session_id=task_id, node="ingest_pdf")
@@ -2022,7 +2030,7 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
     try:
         if task_type == HarnessTaskType.DOCUMENT_INGEST.value:
             _maybe_call(service, "set_current_step", run_id, "ingest_document")
-            input_json = run.get("input_json") or {}
+            input_json = cast(dict[str, Any], run.get("input_json") or {})
             storage_uri = str(input_json.get("storage_uri") or input_json.get("file_path") or "")
             user_id = str(run.get("user_id") or "") or None
             knowledge_base_id = str(input_json.get("knowledge_base_id") or "").strip() or None
@@ -2048,17 +2056,19 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
             return bool(result.get("ok"))
 
         if task_type == HarnessTaskType.AGENT_ORCHESTRATION.value:
-            input_json = run.get("input_json") or {}
-            metadata_json = run.get("metadata_json") if isinstance(run, dict) else {}
-            metadata_json = metadata_json if isinstance(metadata_json, dict) else {}
+            input_json = cast(dict[str, Any], run.get("input_json") or {})
+            metadata_json = cast(dict[str, Any], run.get("metadata_json") or {})
             graph = input_json.get("graph") if isinstance(input_json, dict) else {}
             graph = graph if isinstance(graph, dict) else {}
-            agents = graph.get("agents") if isinstance(graph.get("agents"), list) else []
+            agents = cast(list[dict[str, Any]], graph.get("agents") if isinstance(graph.get("agents"), list) else [])
             selected_agent_ids = input_json.get("selected_agent_ids") if isinstance(input_json, dict) else []
             selected_agent_ids = selected_agent_ids if isinstance(selected_agent_ids, list) else []
             user_id = str(run.get("user_id") or "") or None
             loop_count = int(input_json.get("loop_count") or 1) if isinstance(input_json, dict) else 1
-            review_agent = graph.get("review_agent") if isinstance(graph.get("review_agent"), dict) else {}
+            review_agent = cast(
+                dict[str, Any],
+                graph.get("review_agent") if isinstance(graph.get("review_agent"), dict) else {},
+            )
             review_agent_enabled = bool(review_agent.get("enabled", True))
             skill_catalog_lookup = _build_skill_catalog_lookup(graph)
             loaded_skill_ids = {
@@ -2329,7 +2339,7 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                         "resumed_at": int(time.time() * 1000),
                     },
                 )
-            execution_steps = [
+            execution_steps: list[dict[str, Any]] = [
                 {"loop_number": loop_number, "agent_config": agent_conf}
                 for loop_number in range(1, max(loop_count, 1) + 1)
                 for agent_conf in ordered_agents
@@ -2339,7 +2349,7 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
             final_state = initial_state
             for step_index in range(next_step_index, len(execution_steps)):
                 step = execution_steps[step_index]
-                agent_conf = step["agent_config"]
+                agent_conf = cast(dict[str, Any], step["agent_config"])
                 final_state["loop_index"] = int(step["loop_number"]) - 1
                 previous_state = _snapshot_orchestration_state(final_state, fallback_task=task_str)
                 previous_state["messages"] = []
@@ -2400,7 +2410,7 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                             provider_config=provider_config,
                             default_timeout=default_timeout,
                             provider_registry=provider_registry,
-                            state=final_state,
+                            state=cast(OrchestrationState, final_state),
                             on_stream_chunk=_review_stream_chunk,
                         )
                     )
@@ -2783,9 +2793,10 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                                 "segment_count": int(segmented_review.get("segment_count") or 0),
                                 "segments_reviewed": int(segmented_review.get("segments_reviewed") or 0),
                                 "blocked_segment_index": (
-                                    int((segmented_review.get("blocked_segment") or {}).get("segment_index"))
+                                    _coerce_non_negative_int(
+                                        cast(dict[str, Any], segmented_review.get("blocked_segment")).get("segment_index")
+                                    )
                                     if isinstance(segmented_review.get("blocked_segment"), dict)
-                                    and segmented_review.get("blocked_segment") is not None
                                     else None
                                 ),
                             },
@@ -2965,7 +2976,7 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
             agent_outputs = final_state.get("agent_outputs", {})
             output_artifacts = final_state.get("output_artifacts", {})
             errors = final_state.get("errors", [])
-            
+
             _maybe_call(
                 service,
                 "record_event",
@@ -3052,10 +3063,11 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                     session_id=session_id,
                     messages=normalized_messages,
                 )
+            interrupted_value = resume_result.get("interrupted") if isinstance(resume_result, dict) else None
             verification = verification_service.build_session_resume_result(
                 ok=ok,
                 session_id=session_id,
-                interrupted=resume_result.get("interrupted") if "interrupted" in resume_result else None,
+                interrupted=interrupted_value if isinstance(interrupted_value, bool) else None,
                 error_code=str(resume_result.get("error_code") or "") or None,
                 error_message=str(resume_result.get("error_message") or "") or None,
             )
@@ -3080,12 +3092,15 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                 error_message=str(exc),
             )
         elif task_type == HarnessTaskType.AGENT_ORCHESTRATION.value:
-            input_json = run.get("input_json") or {}
+            input_json = cast(dict[str, Any], run.get("input_json") or {})
             selected_agent_ids = input_json.get("selected_agent_ids") if isinstance(input_json, dict) else []
             selected_agent_ids = selected_agent_ids if isinstance(selected_agent_ids, list) else []
             graph = input_json.get("graph") if isinstance(input_json, dict) else {}
             graph = graph if isinstance(graph, dict) else {}
-            review_agent = graph.get("review_agent") if isinstance(graph.get("review_agent"), dict) else {}
+            review_agent = cast(
+                dict[str, Any],
+                graph.get("review_agent") if isinstance(graph.get("review_agent"), dict) else {},
+            )
             verification = verification_service.build_agent_orchestration_result(
                 ok=False,
                 active_agent_ids=[str(agent_id) for agent_id in selected_agent_ids],

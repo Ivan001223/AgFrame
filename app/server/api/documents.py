@@ -9,7 +9,11 @@ from pydantic import BaseModel
 
 from app.infrastructure.database.models import User
 from app.infrastructure.database.schema import ensure_schema_if_possible
-from app.infrastructure.database.stores import KnowledgeBaseDocumentStore, KnowledgeBaseStore, MySQLDocStore
+from app.infrastructure.database.stores import (
+    KnowledgeBaseDocumentStore,
+    KnowledgeBaseStore,
+    MySQLDocStore,
+)
 from app.infrastructure.queue.client import enqueue_ingest_pdf
 from app.infrastructure.queue.redis_client import (
     claim_task_operation,

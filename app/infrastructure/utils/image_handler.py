@@ -3,7 +3,7 @@ import logging
 import mimetypes
 from typing import Any
 
-import requests
+import requests  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +12,7 @@ def is_local_url(url: str) -> bool:
     """检查 URL 是否指向本地服务器。"""
     return url.startswith('http://localhost') or url.startswith('http://127.0.0.1')
 
-def convert_url_to_base64(url: str) -> str:
+def convert_url_to_base64(url: str) -> str | None:
     """
     从 URL 拉取图片并转换为 base64 data URI。
     适用于将本地图片传给云端 LLM。

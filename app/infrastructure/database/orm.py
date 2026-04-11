@@ -56,10 +56,10 @@ def get_sessionmaker() -> sessionmaker:
     global _SessionLocal
     if _SessionLocal is None:
         _SessionLocal = sessionmaker(
-            bind=get_engine(), 
-            autoflush=False, 
-            autocommit=False, 
-            expire_on_commit=False, 
+            bind=get_engine(),
+            autoflush=False,
+            autocommit=False,
+            expire_on_commit=False,
             future=True
         )
     return _SessionLocal

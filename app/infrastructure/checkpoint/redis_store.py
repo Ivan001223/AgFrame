@@ -1,9 +1,11 @@
+from collections.abc import AsyncIterator
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from importlib import import_module
-from typing import Any
+from typing import Any, cast
 
-from langgraph.checkpoint.base import BaseCheckpointSaver, empty_checkpoint
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointTuple, empty_checkpoint
 
 from app.infrastructure.config.settings import settings
 
@@ -33,7 +35,7 @@ def _load_async_redis_saver() -> type[Any]:
             "缺少运行时依赖 'langgraph-checkpoint-redis'。"
             "请重新同步项目依赖后再启动后端或 worker。"
         ) from exc
-    return module.AsyncRedisSaver
+    return cast(type[Any], module.AsyncRedisSaver)
 
 
 
@@ -142,9 +144,20 @@ class AsyncRedisSaverWrapper(BaseCheckpointSaver):
         saver = await self.get_saver()
         return await saver.adelete_thread(thread_id)
 
-    async def alist(self, config, limit, before, filter=None):
-        saver = await self.get_saver()
-        return await saver.alist(config, limit, before, filter)
+    def alist(
+        self,
+        config: RunnableConfig | None,
+        *,
+        filter: dict[str, Any] | None = None,
+        before: RunnableConfig | None = None,
+        limit: int | None = None,
+    ) -> AsyncIterator[CheckpointTuple]:
+        async def _iterate() -> AsyncIterator[CheckpointTuple]:
+            saver = await self.get_saver()
+            async for item in saver.alist(config, filter=filter, before=before, limit=limit):
+                yield item
+
+        return _iterate()
 
     async def load(self, session_id: str) -> dict[str, Any] | None:
         saver = await self.get_saver()
@@ -165,7 +178,7 @@ class AsyncRedisSaverWrapper(BaseCheckpointSaver):
 
         updated_at = checkpoint_tuple.metadata.get("saved_at") or checkpoint.get("ts")
         if not updated_at:
-            updated_at = datetime.now(timezone.utc).isoformat()
+            updated_at = datetime.now(UTC).isoformat()
 
         return {
             "checkpoint": checkpoint,
@@ -224,7 +237,7 @@ class AsyncRedisSaverWrapper(BaseCheckpointSaver):
         updated_channels: list[str] = []
 
         if existing_tuple is None and input_is_checkpoint:
-            for key, value in channel_values.items():
+            for key, _value in channel_values.items():
                 if key not in channel_versions:
                     channel_versions[key] = version_getter(None, None)
                 new_versions[key] = channel_versions[key]
@@ -276,7 +289,7 @@ class AsyncRedisSaverWrapper(BaseCheckpointSaver):
             checkpoint_ns=checkpoint_ns,
             checkpoint_id=parent_checkpoint_id,
         )
-        saved_at = datetime.now(timezone.utc).isoformat()
+        saved_at = datetime.now(UTC).isoformat()
         metadata = deepcopy(existing_tuple.metadata) if existing_tuple else {}
         metadata["source"] = "update"
         if "step" not in metadata:

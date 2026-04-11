@@ -55,10 +55,14 @@ class ApprovalService:
                 await self.checkpoint_adapter.save(str(session_id), checkpoint_data)
 
         if action_type == "orchestration_review":
-            input_json = dict(run.get("input_json") or {}) if isinstance(run, dict) else {}
-            metadata_json = dict(run.get("metadata_json") or {}) if isinstance(run, dict) else {}
-            resume_state = dict(input_json.get("orchestration_resume") or {})
-            payload_json = dict(approval.get("payload_json") or {})
+            input_value = run.get("input_json") if isinstance(run, dict) else None
+            metadata_value = run.get("metadata_json") if isinstance(run, dict) else None
+            input_json = dict(input_value) if isinstance(input_value, dict) else {}
+            metadata_json = dict(metadata_value) if isinstance(metadata_value, dict) else {}
+            resume_state_value = input_json.get("orchestration_resume")
+            payload_value = approval.get("payload_json")
+            resume_state = dict(resume_state_value) if isinstance(resume_state_value, dict) else {}
+            payload_json = dict(payload_value) if isinstance(payload_value, dict) else {}
             review_stage = str(payload_json.get("review_stage") or "").strip()
             if approved:
                 if review_stage == "cluster_research":

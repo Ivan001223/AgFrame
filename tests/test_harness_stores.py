@@ -1,4 +1,9 @@
-from app.harness.persistence.stores import HarnessAgentProjectStore, HarnessApprovalStore, HarnessRunStore, HarnessVerificationStore
+from app.harness.persistence.stores import (
+    HarnessAgentProjectStore,
+    HarnessApprovalStore,
+    HarnessRunStore,
+    HarnessVerificationStore,
+)
 
 
 def test_run_store_builds_run_record(monkeypatch):

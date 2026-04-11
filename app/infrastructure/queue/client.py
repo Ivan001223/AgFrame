@@ -30,7 +30,7 @@ async def get_arq_pool() -> ArqRedis:
 async def enqueue_ingest_pdf(
     task_id: str,
     storage_uri: str,
-    user_id: str = None,
+    user_id: str | None = None,
     knowledge_base_id: str | None = None,
 ) -> str:
     pool = await get_arq_pool()

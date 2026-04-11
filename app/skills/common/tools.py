@@ -18,7 +18,7 @@ def web_search(query: str) -> str:
     """
     try:
         search = DuckDuckGoSearchRun()
-        return search.invoke(query)
+        return str(search.invoke(query))
     except Exception as e:
         return f"Search failed: {e}"
 
@@ -50,7 +50,7 @@ def knowledge_retriever(query: str) -> str:
         docs = get_rag_engine().retrieve_context(query)
         if not docs:
             return "No relevant information found in knowledge base."
-        
+
         context_str = "\n\n".join([f"[Source: {doc.metadata.get('source', 'Unknown')}]\n{doc.page_content}" for doc in docs])
         return context_str
     except Exception as e:
@@ -63,7 +63,7 @@ def read_document(file_path: str) -> str:
     读取文件并提取文本。
     优先复用统一文档解析链路，支持 PDF、图片、TXT、MD、DOCX、XLSX。
     用于分析文件内容或从图片中提取文字。
-    
+
     参数:
         file_path: 文件的绝对路径。
     """
@@ -133,7 +133,7 @@ def python_executor(code: str) -> str:
         result = asyncio.run(execute_code(code))
 
         if result.get("success"):
-            return result.get("output", "Code executed successfully (no output)")
+            return str(result.get("output", "Code executed successfully (no output)"))
         else:
             error = result.get("error") or result.get("output", "Unknown error")
             return f"Execution failed: {error}"

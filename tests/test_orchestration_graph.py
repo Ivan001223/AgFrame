@@ -2,30 +2,31 @@ import time
 
 import anyio
 import pytest
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
 from app.runtime.graph.orchestration_graph import (
     FIRST_PRINCIPLES_DIRECTIVE,
     GAME_THEORY_DIRECTIVE,
     _build_agent_collaboration_contract,
     _build_agent_output_artifact,
-    _build_cluster_output_artifact,
-    _build_brainstorm_summary_prompt,
     _build_brainstorm_round_context,
+    _build_brainstorm_summary_prompt,
+    _build_cluster_output_artifact,
+    _build_prior_research_context,
     _build_team_capability_roster,
     _build_upstream_handoff_context,
-    _invoke_llm_with_tool_loop,
-    _invoke_llm_with_streaming_fallback,
-    _build_prior_research_context,
-    _format_capability_snapshot,
     _extract_brainstorm_votes,
+    _format_capability_snapshot,
+    _invoke_llm_with_streaming_fallback,
+    _invoke_llm_with_tool_loop,
+    _topological_sort,
     _winning_brainstorm_vote,
     build_orchestration_execution_plan,
     compile_orchestration_graph,
-    _topological_sort,
     review_orchestration_output,
 )
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from app.runtime.llm.provider_registry import ModelProviderRegistry, RegisteredProvider
+
 
 def test_topological_sort_linear():
     agents = [{"agent_id": "A"}, {"agent_id": "B"}, {"agent_id": "C"}]

@@ -4,7 +4,9 @@ import json
 import logging
 import time
 import uuid
-from typing import Any
+from collections.abc import Awaitable
+from inspect import isawaitable
+from typing import Any, cast
 
 from redis.asyncio import Redis
 
@@ -42,21 +44,27 @@ def task_incidents_key() -> str:
     return "taskincidents"
 
 
+async def _await_maybe[T](value: T | Awaitable[T]) -> T:
+    if isawaitable(value):
+        return await value
+    return value
+
+
 async def init_task(task_id: str, fields: dict[str, Any]) -> None:
     r = get_redis()
-    await r.hset(task_key(task_id), mapping={k: str(v) for k, v in (fields or {}).items()})
+    await _await_maybe(r.hset(task_key(task_id), mapping={k: str(v) for k, v in (fields or {}).items()}))
 
 
 async def update_task(task_id: str, fields: dict[str, Any]) -> None:
     if not fields:
         return
     r = get_redis()
-    await r.hset(task_key(task_id), mapping={k: str(v) for k, v in fields.items()})
+    await _await_maybe(r.hset(task_key(task_id), mapping={k: str(v) for k, v in fields.items()}))
 
 
 async def get_task(task_id: str) -> dict[str, str]:
     r = get_redis()
-    out = await r.hgetall(task_key(task_id))
+    out = await _await_maybe(r.hgetall(task_key(task_id)))
     return dict(out or {})
 
 
@@ -68,10 +76,10 @@ async def claim_task_operation(
 ) -> str:
     r = get_redis()
     key = task_operation_key(operation_key)
-    claimed = await r.set(key, task_id, ex=ttl_seconds, nx=True)
+    claimed = await _await_maybe(r.set(key, task_id, ex=ttl_seconds, nx=True))
     if claimed:
         return task_id
-    existing = await r.get(key)
+    existing = await _await_maybe(r.get(key))
     return str(existing or task_id)
 
 
@@ -81,11 +89,11 @@ async def release_task_operation(operation_key: str, *, expected_task_id: str | 
     r = get_redis()
     key = task_operation_key(operation_key)
     if expected_task_id is None:
-        await r.delete(key)
+        await _await_maybe(r.delete(key))
         return
-    existing = await r.get(key)
+    existing = await _await_maybe(r.get(key))
     if existing == expected_task_id:
-        await r.delete(key)
+        await _await_maybe(r.delete(key))
 
 
 async def append_task_incident(
@@ -104,17 +112,17 @@ async def append_task_incident(
     normalized.setdefault("updated_at", now)
     payload = json.dumps(normalized, ensure_ascii=True)
     key = task_incidents_key()
-    await r.lpush(key, payload)
-    await r.ltrim(key, 0, max_items - 1)
+    await _await_maybe(r.lpush(key, payload))
+    await _await_maybe(r.ltrim(key, 0, max_items - 1))
     return normalized
 
 
 async def list_task_incidents(*, limit: int = 20) -> list[dict[str, Any]]:
     r = get_redis()
-    raw_items = await r.lrange(task_incidents_key(), 0, max(0, limit - 1))
+    raw_items = await _await_maybe(r.lrange(task_incidents_key(), 0, max(0, limit - 1)))
     out: list[dict[str, Any]] = []
     for item in raw_items:
-        parsed = _parse_incident_payload(item)
+        parsed = _parse_incident_payload(cast(str, item))
         if isinstance(parsed, dict):
             out.append(parsed)
     return out
@@ -128,10 +136,10 @@ async def update_task_incident(
         return None
     r = get_redis()
     key = task_incidents_key()
-    raw_items = await r.lrange(key, 0, -1)
+    raw_items = await _await_maybe(r.lrange(key, 0, -1))
     now = int(time.time())
     for index, item in enumerate(raw_items):
-        parsed = _parse_incident_payload(item)
+        parsed = _parse_incident_payload(cast(str, item))
         if not isinstance(parsed, dict):
             continue
         if str(parsed.get("incident_id") or "") != incident_id:
@@ -140,7 +148,7 @@ async def update_task_incident(
         updated.update(updates or {})
         updated["updated_at"] = now
         payload = json.dumps(updated, ensure_ascii=True)
-        await r.lset(key, index, payload)
+        await _await_maybe(r.lset(key, index, payload))
         return updated
     return None
 

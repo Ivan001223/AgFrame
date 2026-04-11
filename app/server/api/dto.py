@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from typing import Any
 
 from typing_extensions import TypedDict
@@ -20,7 +21,7 @@ class SettingsPayload(TypedDict, total=False):
     runtime_status: RuntimeStatus
 
 
-def build_runtime_status(config: dict[str, Any]) -> RuntimeStatus:
+def build_runtime_status(config: Mapping[str, Any]) -> RuntimeStatus:
     reranker_cfg = config.get("reranker") or {}
     local_models = config.get("local_models") or {}
     env_var = str(reranker_cfg.get("env_var") or "MODEL_PATH_RERANKER").strip()

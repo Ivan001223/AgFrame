@@ -1,3 +1,6 @@
+from typing import Any, cast
+
+from langchain_core.tools import BaseTool
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
 
@@ -12,11 +15,11 @@ def run_app():
     researcher_node = get_researcher_node()
     writer_node = get_writer_node()
 
-    tools = [get_search_tool(return_results_obj=False)]
+    tools = [cast(BaseTool | Any, get_search_tool(return_results_obj=False))]
     tool_node = ToolNode(tools)
 
     def orchestrator_node(state: AgentState):
-        decision = route_request(state)
+        decision = route_request(dict(state))
         print(f"编排器决策：{decision.destination}（{decision.reasoning}）")
         return {"next_step": decision.destination, "reasoning": decision.reasoning}
 

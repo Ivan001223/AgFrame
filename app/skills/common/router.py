@@ -8,10 +8,10 @@ import anyio
 
 from app.infrastructure.utils.logging import bind_logger, get_logger
 from app.runtime.contracts.retrieval_state import clear_retrieval_artifacts_inplace
+from app.runtime.contracts.trace import build_agent_trace_payload
 from app.runtime.graph.memory_router import route_memory
 from app.runtime.graph.registry import register_node
 from app.runtime.graph.state import AgentState
-from app.runtime.contracts.trace import build_agent_trace_payload
 
 _log = get_logger("workflow.router")
 
@@ -22,7 +22,7 @@ async def router_node(state: AgentState) -> dict[str, Any]:
     ctx = dict(state.get("context") or {})
     clear_retrieval_artifacts_inplace(ctx)
     trace = build_agent_trace_payload(current=state.get("trace"))
-    trace_id = trace.get("trace_id") or ctx.get("trace_id") or str(uuid.uuid4())
+    trace_id = str(trace.get("trace_id") or ctx.get("trace_id") or str(uuid.uuid4()))
     trace = build_agent_trace_payload(current=trace, trace_id=trace_id)
     ctx["trace_id"] = trace_id
 
@@ -38,7 +38,7 @@ async def router_node(state: AgentState) -> dict[str, Any]:
             "reasoning": str(existing_route.get("reasoning") or "Provided by state"),
         }
     else:
-        decision = await anyio.to_thread.run_sync(lambda: route_memory(state))
+        decision = await anyio.to_thread.run_sync(lambda: route_memory(dict(state)))
         route = {
             "needs_docs": bool(decision.needs_docs),
             "needs_history": bool(decision.needs_history),

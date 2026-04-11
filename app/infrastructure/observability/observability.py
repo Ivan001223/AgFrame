@@ -1,12 +1,14 @@
 import logging
 import os
+from typing import Any, cast
 
+_callback_handler_type: Any | None = None
 try:
-    from langfuse import Langfuse
-    from langfuse.callback import CallbackHandler
+    from langfuse.callback import CallbackHandler as _ImportedCallbackHandler  # type: ignore[import-not-found]
 except ImportError:
-    CallbackHandler = None
-    Langfuse = None
+    _callback_handler_type = None
+else:
+    _callback_handler_type = _ImportedCallbackHandler
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +17,7 @@ def get_langfuse_callback() -> object | None:
     Returns a LangfuseCallbackHandler if credentials are set.
     Returns None otherwise to avoid crashing.
     """
-    if not CallbackHandler:
+    if not _callback_handler_type:
         logger.warning("Langfuse not installed.")
         return None
 
@@ -25,10 +27,13 @@ def get_langfuse_callback() -> object | None:
 
     if public_key and secret_key:
         try:
-            return CallbackHandler(
+            return cast(
+                object,
+                _callback_handler_type(
                 public_key=public_key,
                 secret_key=secret_key,
                 host=host
+                ),
             )
         except Exception as e:
             logger.error(f"Failed to initialize Langfuse callback: {e}")

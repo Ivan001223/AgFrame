@@ -207,10 +207,9 @@ class VerificationService:
         active_ids = set(cls._normalize_string_list(active_agent_ids))
         weak_edges: list[dict[str, Any]] = []
         best_next_handoffs: list[dict[str, Any]] = []
+        agent_capabilities = cls._normalize_record_list(capability_snapshot.get("agent_capabilities"))
 
-        for agent_capability in capability_snapshot.get("agent_capabilities") or []:
-            if not isinstance(agent_capability, dict):
-                continue
+        for agent_capability in agent_capabilities:
             source_agent_id = cls._normalize_string(agent_capability.get("agent_id"))
             if not source_agent_id or (active_ids and source_agent_id not in active_ids):
                 continue
@@ -302,10 +301,9 @@ class VerificationService:
         agents: list[dict[str, Any]] = []
         blocked_count = 0
         limited_count = 0
+        agent_capabilities = cls._normalize_record_list(capability_snapshot.get("agent_capabilities"))
 
-        for agent_capability in capability_snapshot.get("agent_capabilities") or []:
-            if not isinstance(agent_capability, dict):
-                continue
+        for agent_capability in agent_capabilities:
             agent_id = cls._normalize_string(agent_capability.get("agent_id"))
             if not agent_id or (active_ids and agent_id not in active_ids):
                 continue
@@ -384,10 +382,9 @@ class VerificationService:
         agents: list[dict[str, Any]] = []
         unavailable_count = 0
         limited_count = 0
+        agent_capabilities = cls._normalize_record_list(capability_snapshot.get("agent_capabilities"))
 
-        for agent_capability in capability_snapshot.get("agent_capabilities") or []:
-            if not isinstance(agent_capability, dict):
-                continue
+        for agent_capability in agent_capabilities:
             agent_id = cls._normalize_string(agent_capability.get("agent_id"))
             if not agent_id or (active_ids and agent_id not in active_ids):
                 continue
@@ -481,10 +478,9 @@ class VerificationService:
         planning_only_tool_agent_count = 0
         planning_only_mcp_agent_count = 0
         direct_execution_agent_count = 0
+        agent_capabilities = cls._normalize_record_list(capability_snapshot.get("agent_capabilities"))
 
-        for agent_capability in capability_snapshot.get("agent_capabilities") or []:
-            if not isinstance(agent_capability, dict):
-                continue
+        for agent_capability in agent_capabilities:
             agent_id = cls._normalize_string(agent_capability.get("agent_id"))
             if not agent_id or (active_ids and agent_id not in active_ids):
                 continue
@@ -620,6 +616,7 @@ class VerificationService:
         coordinator_mcp_context_risks: list[dict[str, Any]] = []
         considered_agent_count = 0
         role_profile_agents: list[dict[str, Any]] = []
+        agent_capabilities = cls._normalize_record_list(capability_snapshot.get("agent_capabilities"))
 
         def append_preview_once(target: list[dict[str, Any]], preview: dict[str, Any]) -> None:
             agent_id = cls._normalize_string(preview.get("agent_id"))
@@ -680,9 +677,7 @@ class VerificationService:
                 )
             return fallback
 
-        for agent_capability in capability_snapshot.get("agent_capabilities") or []:
-            if not isinstance(agent_capability, dict):
-                continue
+        for agent_capability in agent_capabilities:
             agent_id = cls._normalize_string(agent_capability.get("agent_id"))
             if not agent_id or (active_ids and agent_id not in active_ids):
                 continue

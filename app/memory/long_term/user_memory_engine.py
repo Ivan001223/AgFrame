@@ -117,7 +117,7 @@ class UserMemoryEngine:
         embeddings = self.embeddings.embed_documents(texts)
         now = int(time.time())
         rows: list[dict[str, Any]] = []
-        for it, emb in zip(items, embeddings):
+        for it, emb in zip(items, embeddings, strict=False):
             rows.append(
                 {
                     "user_id": uid,
@@ -200,7 +200,7 @@ class UserMemoryEngine:
             for f in facts:
                 if isinstance(f, str):
                     txt = f.strip()
-                    conf = 0.6
+                    conf: object | None = 0.6
                     last = None
                 elif isinstance(f, dict):
                     txt = str(f.get("text") or "").strip()
@@ -217,7 +217,9 @@ class UserMemoryEngine:
                         "subkind": "profile_fact",
                         "text": text,
                         "item_hash": item_hash,
-                        "confidence_score": float(conf) if conf is not None else 0.6,
+                        "confidence_score": (
+                            float(conf) if isinstance(conf, (int, float, str)) else 0.6
+                        ),
                         "last_verified_at": int(last) if last is not None else None,
                         "metadata_json": {"type": "profile_fact"},
                     }

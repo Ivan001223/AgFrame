@@ -3,7 +3,7 @@ import logging
 import os
 import tempfile
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 import docker
 
@@ -22,12 +22,12 @@ class CodeSandbox:
         self.timeout = timeout
         self.memory_limit = memory_limit
         self.cpu_limit = cpu_limit
-        self._client: docker.DockerClient | None = None
+        self._client: Any | None = None
 
     @property
-    def client(self) -> docker.DockerClient:
+    def client(self) -> Any:
         if self._client is None:
-            self._client = docker.from_env()
+            self._client = cast(Any, getattr(docker, "from_env")())
         return self._client
 
     def _create_container(self, code: str) -> str:
@@ -50,7 +50,7 @@ class CodeSandbox:
                 cap_drop=["ALL"],
                 security_opt=["no-new-privileges"],
             )
-            return container.id
+            return str(container.id)
         finally:
             os.unlink(temp_path)
 

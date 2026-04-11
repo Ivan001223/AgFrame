@@ -1,5 +1,5 @@
-from app.infrastructure.config.settings import settings
 from app.harness.runtime.studio_service import HarnessStudioService
+from app.infrastructure.config.settings import settings
 
 
 class _RunService:

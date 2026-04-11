@@ -1,6 +1,6 @@
 import logging
 import time
-from typing import Any
+from typing import Any, cast
 
 import mysql.connector
 
@@ -58,17 +58,17 @@ class DatabaseManager:
             self._init_pool()
             if not self._pool:
                 raise Exception("Database connection pool is not initialized.")
-        
+
         return self._pool.get_connection()
 
     def execute_query(self, query: str, params: tuple | None = None) -> list[dict[str, Any]]:
         """
         执行查询语句 (SELECT) 并返回字典格式的结果列表。
-        
+
         Args:
             query: SQL 查询语句
             params: SQL 参数元组
-            
+
         Returns:
             list[dict]: 查询结果列表
         """
@@ -79,7 +79,7 @@ class DatabaseManager:
             cursor = conn.cursor(dictionary=True)
             cursor.execute(query, params or ())
             result = cursor.fetchall()
-            return result
+            return cast(list[dict[str, Any]], result)
         except mysql.connector.Error as err:
             logger.error(f"Query execution error: {err}")
             raise
@@ -92,11 +92,11 @@ class DatabaseManager:
     def execute_update(self, query: str, params: tuple | None = None) -> int | None:
         """
         执行更新语句 (INSERT/UPDATE/DELETE) 并返回最后插入的行 ID。
-        
+
         Args:
             query: SQL 更新语句
             params: SQL 参数元组
-            
+
         Returns:
             int: lastrowid (对于 INSERT 语句)
         """
@@ -107,7 +107,7 @@ class DatabaseManager:
             cursor = conn.cursor()
             cursor.execute(query, params or ())
             conn.commit()
-            return cursor.lastrowid
+            return cast(int | None, cursor.lastrowid)
         except mysql.connector.Error as err:
             logger.error(f"Update execution error: {err}")
             raise

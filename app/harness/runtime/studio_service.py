@@ -3,19 +3,20 @@ from __future__ import annotations
 import inspect
 import time
 import uuid
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any, Literal, cast
 
-from app.infrastructure.config.settings import settings
 from app.harness.contracts.run import HarnessTaskType
 from app.harness.contracts.studio import (
     HarnessAgentCapabilitySummary,
     HarnessAgentDelegationContract,
     HarnessAgentExecutionContract,
     HarnessAgentRoleProfileSuggestion,
-    HarnessCapabilityOwnerEntry,
     HarnessCanvasAgent,
     HarnessCanvasEdge,
     HarnessCanvasPosition,
+    HarnessCapabilityOwnerEntry,
     HarnessCoordinationAgentPreview,
     HarnessDelegationOpportunity,
     HarnessExecutionChecklistItem,
@@ -36,6 +37,7 @@ from app.harness.contracts.studio import (
 from app.harness.persistence.stores import HarnessAgentProjectStore
 from app.harness.runtime.role_profile_alignment import build_role_profile_alignment_diagnostics
 from app.harness.runtime.run_service import HarnessRunService, build_run_service
+from app.infrastructure.config.settings import settings
 from app.runtime.llm.provider_registry import infer_tool_calling_support
 from app.skills.common.tools import ALL_TOOLS
 from app.skills.registry import build_fallback_skill_descriptor, get_skill_descriptor
@@ -165,7 +167,28 @@ class HarnessStudioService:
         suffix = f" (+{len(trimmed) - limit} more)" if len(trimmed) > limit else ""
         return ", ".join(preview) + suffix
 
-    def _normalize_identifier_list(self, values: list[object] | None) -> list[str]:
+    @staticmethod
+    def _as_object_list(values: object) -> list[object]:
+        return list(values) if isinstance(values, list) else []
+
+    @staticmethod
+    def _as_object_dict(value: object) -> dict[str, object]:
+        return cast(dict[str, object], value) if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _coerce_int(value: object, default: int = 0) -> int:
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            try:
+                return int(value)
+            except ValueError:
+                return default
+        return default
+
+    def _normalize_identifier_list(self, values: Sequence[object] | None) -> list[str]:
         normalized: list[str] = []
         seen: set[str] = set()
         for value in values or []:
@@ -232,7 +255,7 @@ class HarnessStudioService:
         alias_values.extend(
             self._expand_mcp_alias_candidates(str(payload.get("command") or ""))
         )
-        for arg in payload.get("args") or []:
+        for arg in self._as_object_list(payload.get("args")):
             alias_values.extend(self._expand_mcp_alias_candidates(str(arg)))
         return self._dedupe_preserve_order(alias_values)
 
@@ -242,7 +265,7 @@ class HarnessStudioService:
             server_id = self._normalize_skill_key(str(item.get("server_id") or ""))
             if not server_id:
                 continue
-            for alias in item.get("alias_ids") or []:
+            for alias in self._as_object_list(item.get("alias_ids")):
                 normalized_alias = self._normalize_skill_key(str(alias))
                 if not normalized_alias:
                     continue
@@ -372,15 +395,15 @@ class HarnessStudioService:
                     status="enabled" if bool(item.get("enabled", True)) else "disabled",
                     command_preview=self._build_mcp_command_preview(
                         str(item.get("command") or "") or None,
-                        [str(arg) for arg in item.get("args") or [] if str(arg).strip()],
+                        [str(arg) for arg in self._as_object_list(item.get("args")) if str(arg).strip()],
                     ),
                 ).model_dump()
             )
         return catalog
 
     def _sync_skill_pool_with_catalog(self, graph: dict[str, object]) -> dict[str, object]:
-        catalog = graph.get("skill_catalog") or []
-        existing_pool = list(graph.get("skill_pool") or [])
+        catalog = self._as_object_list(graph.get("skill_catalog"))
+        existing_pool = self._as_object_list(graph.get("skill_pool"))
         catalog_by_key: dict[str, dict[str, object]] = {}
         for item in catalog:
             if not isinstance(item, dict):
@@ -412,7 +435,7 @@ class HarnessStudioService:
         return graph
 
     def _build_provider_route(self, agent: dict[str, object], graph: dict[str, object]) -> str:
-        provider_config = graph.get("provider_config") if isinstance(graph.get("provider_config"), dict) else {}
+        provider_config = self._as_object_dict(graph.get("provider_config"))
         preferred = str(agent.get("preferred_provider_id") or provider_config.get("preferred_provider_id") or "").strip()
         fallback = str(agent.get("fallback_provider_id") or provider_config.get("fallback_provider_id") or "").strip()
         if preferred and fallback:
@@ -424,7 +447,7 @@ class HarnessStudioService:
         return "project default"
 
     def _build_review_mode(self, agent: dict[str, object], graph: dict[str, object]) -> str:
-        review_agent = graph.get("review_agent") if isinstance(graph.get("review_agent"), dict) else {}
+        review_agent = self._as_object_dict(graph.get("review_agent"))
         review_agent_enabled = bool(review_agent.get("enabled", True))
         if str(agent.get("node_kind") or "agent") == "cluster":
             if bool(agent.get("cluster_auto_review", True)) and review_agent_enabled:
@@ -439,7 +462,7 @@ class HarnessStudioService:
         return "direct handoff"
 
     def _infer_tool_execution_support(self, agent: dict[str, object], graph: dict[str, object]) -> tuple[str, str]:
-        provider_config = graph.get("provider_config") if isinstance(graph.get("provider_config"), dict) else {}
+        provider_config = self._as_object_dict(graph.get("provider_config"))
         provider_hint = str(
             agent.get("preferred_provider_id")
             or agent.get("fallback_provider_id")
@@ -470,8 +493,8 @@ class HarnessStudioService:
         seen: set[str] = set()
         for skill_id in relevant_skill_ids:
             skill_item = skill_catalog_by_id.get(self._normalize_skill_key(skill_id), {})
-            for tool_id in skill_item.get("suggested_tool_ids") or []:
-                normalized_tool_id = self._normalize_skill_key(str(tool_id))
+            for suggested_tool in self._as_object_list(skill_item.get("suggested_tool_ids")):
+                normalized_tool_id = self._normalize_skill_key(str(suggested_tool))
                 if not normalized_tool_id or normalized_tool_id not in tool_status_by_id or normalized_tool_id in seen:
                     continue
                 seen.add(normalized_tool_id)
@@ -492,8 +515,8 @@ class HarnessStudioService:
             skill_catalog_by_id=skill_catalog_by_id,
             tool_catalog=tool_catalog,
         )
-        allowed_tool_ids = self._normalize_identifier_list(agent.get("allowed_tool_ids"))
-        denied_tool_ids = self._normalize_identifier_list(agent.get("denied_tool_ids"))
+        allowed_tool_ids = self._normalize_identifier_list(self._as_object_list(agent.get("allowed_tool_ids")))
+        denied_tool_ids = self._normalize_identifier_list(self._as_object_list(agent.get("denied_tool_ids")))
         tool_catalog_ids = set(tool_status_by_id)
         configured_allowed_tool_ids = [tool_id for tool_id in allowed_tool_ids if tool_id in tool_catalog_ids]
         configured_denied_tool_ids = [tool_id for tool_id in denied_tool_ids if tool_id in tool_catalog_ids]
@@ -542,7 +565,7 @@ class HarnessStudioService:
         seen: set[str] = set()
         for skill_id in relevant_skill_ids:
             skill_item = skill_catalog_by_id.get(self._normalize_skill_key(skill_id), {})
-            for server_id in skill_item.get("suggested_mcp_server_ids") or []:
+            for server_id in self._as_object_list(skill_item.get("suggested_mcp_server_ids")):
                 normalized_server_id = self._normalize_skill_key(str(server_id))
                 if not normalized_server_id or normalized_server_id in seen:
                     continue
@@ -577,8 +600,8 @@ class HarnessStudioService:
             suggested_server_ids,
             alias_lookup=mcp_alias_to_server_id,
         )
-        raw_allowed_mcp_server_ids = self._normalize_identifier_list(agent.get("allowed_mcp_server_ids"))
-        raw_denied_mcp_server_ids = self._normalize_identifier_list(agent.get("denied_mcp_server_ids"))
+        raw_allowed_mcp_server_ids = self._normalize_identifier_list(self._as_object_list(agent.get("allowed_mcp_server_ids")))
+        raw_denied_mcp_server_ids = self._normalize_identifier_list(self._as_object_list(agent.get("denied_mcp_server_ids")))
         allowed_mcp_server_ids = self._canonicalize_mcp_server_ids(
             raw_allowed_mcp_server_ids,
             alias_lookup=mcp_alias_to_server_id,
@@ -638,7 +661,7 @@ class HarnessStudioService:
         }
 
     def _match_skills_for_intents(self, intents: list[str], graph: dict[str, object]) -> list[str]:
-        catalog = graph.get("skill_catalog") or []
+        catalog = self._as_object_list(graph.get("skill_catalog"))
         matches: list[str] = []
         normalized_intents = [self._normalize_skill_key(intent) for intent in intents if self._normalize_skill_key(intent)]
         for item in catalog:
@@ -679,9 +702,9 @@ class HarnessStudioService:
                 or f"app/skills/{normalized_skill_id}",
                 status=str(catalog_item.get("status") or "available").strip() or "available",
                 prompt_hint=str(catalog_item.get("prompt_hint") or "").strip() or None,
-                suggested_tool_ids=self._normalize_identifier_list(catalog_item.get("suggested_tool_ids")),
+                suggested_tool_ids=self._normalize_identifier_list(self._as_object_list(catalog_item.get("suggested_tool_ids"))),
                 suggested_mcp_server_ids=self._normalize_identifier_list(
-                    catalog_item.get("suggested_mcp_server_ids")
+                    self._as_object_list(catalog_item.get("suggested_mcp_server_ids"))
                 ),
             ).model_dump()
 
@@ -734,13 +757,18 @@ class HarnessStudioService:
             seen.add(normalized_server_id)
             catalog_item = dict(mcp_server_catalog_by_id.get(normalized_server_id) or {})
             if catalog_item:
+                status: Literal["enabled", "disabled"] = (
+                    "enabled"
+                    if str(catalog_item.get("status") or "disabled").strip() == "enabled"
+                    else "disabled"
+                )
                 details.append(
                     HarnessMcpServerCatalogItem(
                         server_id=normalized_server_id,
                         title=str(catalog_item.get("title") or normalized_server_id).strip()
                         or self._humanize_identifier(normalized_server_id),
                         description=str(catalog_item.get("description") or "").strip() or None,
-                        status=str(catalog_item.get("status") or "disabled").strip() or "disabled",
+                        status=status,
                         command_preview=str(catalog_item.get("command_preview") or "").strip() or None,
                     ).model_dump()
                 )
@@ -757,24 +785,24 @@ class HarnessStudioService:
         return details
 
     def _build_agent_readiness(self, summary: dict[str, object]) -> dict[str, object]:
-        loaded_skill_ids = [str(item).strip() for item in summary.get("loaded_skill_ids") or [] if str(item).strip()]
-        missing_skill_ids = [str(item).strip() for item in summary.get("missing_skill_ids") or [] if str(item).strip()]
+        loaded_skill_ids = [str(item).strip() for item in self._as_object_list(summary.get("loaded_skill_ids")) if str(item).strip()]
+        missing_skill_ids = [str(item).strip() for item in self._as_object_list(summary.get("missing_skill_ids")) if str(item).strip()]
         configured_allowed_tool_ids = [
-            str(item).strip() for item in summary.get("configured_allowed_tool_ids") or [] if str(item).strip()
+            str(item).strip() for item in self._as_object_list(summary.get("configured_allowed_tool_ids")) if str(item).strip()
         ]
-        disabled_tool_ids = [str(item).strip() for item in summary.get("disabled_tool_ids") or [] if str(item).strip()]
+        disabled_tool_ids = [str(item).strip() for item in self._as_object_list(summary.get("disabled_tool_ids")) if str(item).strip()]
         provider_limited_tool_ids = [
-            str(item).strip() for item in summary.get("provider_limited_tool_ids") or [] if str(item).strip()
+            str(item).strip() for item in self._as_object_list(summary.get("provider_limited_tool_ids")) if str(item).strip()
         ]
         configured_allowed_mcp_server_ids = [
-            str(item).strip() for item in summary.get("configured_allowed_mcp_server_ids") or [] if str(item).strip()
+            str(item).strip() for item in self._as_object_list(summary.get("configured_allowed_mcp_server_ids")) if str(item).strip()
         ]
-        missing_mcp_server_ids = [str(item).strip() for item in summary.get("missing_mcp_server_ids") or [] if str(item).strip()]
+        missing_mcp_server_ids = [str(item).strip() for item in self._as_object_list(summary.get("missing_mcp_server_ids")) if str(item).strip()]
         unknown_allowed_tool_ids = [
-            str(item).strip() for item in summary.get("unknown_allowed_tool_ids") or [] if str(item).strip()
+            str(item).strip() for item in self._as_object_list(summary.get("unknown_allowed_tool_ids")) if str(item).strip()
         ]
         unknown_allowed_mcp_server_ids = [
-            str(item).strip() for item in summary.get("unknown_allowed_mcp_server_ids") or [] if str(item).strip()
+            str(item).strip() for item in self._as_object_list(summary.get("unknown_allowed_mcp_server_ids")) if str(item).strip()
         ]
         tool_execution_support_reason = str(summary.get("tool_execution_support_reason") or "").strip()
 
@@ -845,33 +873,33 @@ class HarnessStudioService:
         mcp_status_by_id: dict[str, str],
         mcp_alias_to_server_id: dict[str, str],
     ) -> dict[str, object]:
-        required_skill_ids = self._normalize_identifier_list(agent.get("required_skill_ids"))
+        required_skill_ids = self._normalize_identifier_list(self._as_object_list(agent.get("required_skill_ids")))
         missing_required_skill_ids = [
             skill_id for skill_id in required_skill_ids if skill_id not in approved_skill_ids
         ]
-        required_tool_ids = self._normalize_identifier_list(agent.get("required_tool_ids"))
+        required_tool_ids = self._normalize_identifier_list(self._as_object_list(agent.get("required_tool_ids")))
         missing_required_tool_ids: list[str] = []
         required_mcp_server_ids = self._canonicalize_mcp_server_ids(
-            self._normalize_identifier_list(agent.get("required_mcp_server_ids")),
+            self._normalize_identifier_list(self._as_object_list(agent.get("required_mcp_server_ids"))),
             alias_lookup=mcp_alias_to_server_id,
         )
         missing_required_mcp_server_ids = [
             server_id for server_id in required_mcp_server_ids if mcp_status_by_id.get(server_id) != "enabled"
         ]
         enabled_tool_ids = {
-            str(item).strip() for item in summary.get("enabled_tool_ids") or [] if str(item).strip()
+            str(item).strip() for item in self._as_object_list(summary.get("enabled_tool_ids")) if str(item).strip()
         }
         disabled_tool_ids = {
-            str(item).strip() for item in summary.get("disabled_tool_ids") or [] if str(item).strip()
+            str(item).strip() for item in self._as_object_list(summary.get("disabled_tool_ids")) if str(item).strip()
         }
         provider_limited_tool_ids = {
-            str(item).strip() for item in summary.get("provider_limited_tool_ids") or [] if str(item).strip()
+            str(item).strip() for item in self._as_object_list(summary.get("provider_limited_tool_ids")) if str(item).strip()
         }
         configured_allowed_tool_ids = {
-            str(item).strip() for item in summary.get("configured_allowed_tool_ids") or [] if str(item).strip()
+            str(item).strip() for item in self._as_object_list(summary.get("configured_allowed_tool_ids")) if str(item).strip()
         }
         configured_denied_tool_ids = {
-            str(item).strip() for item in summary.get("configured_denied_tool_ids") or [] if str(item).strip()
+            str(item).strip() for item in self._as_object_list(summary.get("configured_denied_tool_ids")) if str(item).strip()
         }
         tool_catalog_ids = set(tool_catalog_by_id)
         tool_execution_support = str(summary.get("tool_execution_support") or "unknown").strip() or "unknown"
@@ -1065,19 +1093,19 @@ class HarnessStudioService:
                 continue
             counts["total_agent_count"] += 1
             execution_contract = (
-                dict(summary.get("execution_contract") or {})
+                self._as_object_dict(summary.get("execution_contract"))
                 if isinstance(summary.get("execution_contract"), dict)
                 else self._build_agent_execution_contract(summary)
             )
             tool_access_mode = str(execution_contract.get("tool_access_mode") or "").strip() or "none"
             planning_only_tool_ids = [
                 str(item)
-                for item in execution_contract.get("planning_only_tool_ids") or []
+                for item in self._as_object_list(execution_contract.get("planning_only_tool_ids"))
                 if str(item).strip()
             ]
             planning_only_mcp_server_ids = [
                 str(item)
-                for item in execution_contract.get("planning_only_mcp_server_ids") or []
+                for item in self._as_object_list(execution_contract.get("planning_only_mcp_server_ids"))
                 if str(item).strip()
             ]
             if tool_access_mode in {"direct_execution", "mixed"}:
@@ -1114,14 +1142,14 @@ class HarnessStudioService:
                 continue
             counts["total_agent_count"] += 1
             delegation_contract = (
-                dict(summary.get("delegation_contract") or {})
+                self._as_object_dict(summary.get("delegation_contract"))
                 if isinstance(summary.get("delegation_contract"), dict)
                 else {}
             )
             primary_role_mode = str(delegation_contract.get("primary_role_mode") or "").strip() or "generalist"
             supporting_role_modes = {
                 str(item).strip()
-                for item in delegation_contract.get("supporting_role_modes") or []
+                for item in self._as_object_list(delegation_contract.get("supporting_role_modes"))
                 if str(item).strip()
             }
             work_strategy = str(delegation_contract.get("work_strategy") or "").strip()
@@ -1174,17 +1202,17 @@ class HarnessStudioService:
             {
                 "agent_id": str(entry.get("agent_id") or "").strip(),
                 "agent_name": str(entry.get("agent_name") or entry.get("agent_id") or "").strip(),
-                "score": int(entry.get("score") or 0),
+                "score": self._coerce_int(entry.get("score")),
             }
             for entry in entries
             if isinstance(entry, dict)
             and str(entry.get("agent_id") or "").strip()
             and str(entry.get("agent_name") or entry.get("agent_id") or "").strip()
-            and int(entry.get("score") or 0) > 0
+            and self._coerce_int(entry.get("score")) > 0
         ]
         ranked.sort(
             key=lambda item: (
-                -int(item["score"]),
+                -self._coerce_int(item["score"]),
                 str(item["agent_name"]),
             )
         )
@@ -1206,8 +1234,8 @@ class HarnessStudioService:
         normalized_blocked_tool_ids = self._normalize_identifier_list(blocked_tool_ids)
         if not normalized_blocked_tool_ids:
             return []
-        allowed_tool_ids = set(self._normalize_identifier_list(agent.get("allowed_tool_ids")))
-        denied_tool_ids = set(self._normalize_identifier_list(agent.get("denied_tool_ids")))
+        allowed_tool_ids = set(self._normalize_identifier_list(self._as_object_list(agent.get("allowed_tool_ids"))))
+        denied_tool_ids = set(self._normalize_identifier_list(self._as_object_list(agent.get("denied_tool_ids"))))
         has_explicit_allowed_tools = bool(allowed_tool_ids)
         return [
             tool_id
@@ -1225,8 +1253,8 @@ class HarnessStudioService:
         normalized_blocked_mcp_server_ids = self._normalize_identifier_list(blocked_mcp_server_ids)
         if not normalized_blocked_mcp_server_ids:
             return []
-        allowed_mcp_server_ids = set(self._normalize_identifier_list(agent.get("allowed_mcp_server_ids")))
-        denied_mcp_server_ids = set(self._normalize_identifier_list(agent.get("denied_mcp_server_ids")))
+        allowed_mcp_server_ids = set(self._normalize_identifier_list(self._as_object_list(agent.get("allowed_mcp_server_ids"))))
+        denied_mcp_server_ids = set(self._normalize_identifier_list(self._as_object_list(agent.get("denied_mcp_server_ids"))))
         has_explicit_allowed_mcp_servers = bool(allowed_mcp_server_ids)
         return [
             server_id
@@ -1243,7 +1271,7 @@ class HarnessStudioService:
         if not isinstance(agent, dict) or not isinstance(summary, dict):
             return []
         delegation_contract = (
-            dict(summary.get("delegation_contract") or {})
+            self._as_object_dict(summary.get("delegation_contract"))
             if isinstance(summary.get("delegation_contract"), dict)
             else self._build_agent_delegation_contract(
                 agent=agent,
@@ -1264,15 +1292,17 @@ class HarnessStudioService:
         ):
             return []
         execution_contract = (
-            dict(summary.get("execution_contract") or {})
+            self._as_object_dict(summary.get("execution_contract"))
             if isinstance(summary.get("execution_contract"), dict)
             else self._build_agent_execution_contract(summary)
         )
         tool_access_mode = str(execution_contract.get("tool_access_mode") or "none").strip() or "none"
-        executable_tool_ids = self._normalize_identifier_list(execution_contract.get("executable_tool_ids"))
+        executable_tool_ids = self._normalize_identifier_list(
+            self._as_object_list(execution_contract.get("executable_tool_ids"))
+        )
         if not executable_tool_ids and tool_access_mode in {"direct_execution", "mixed"}:
-            executable_tool_ids = self._normalize_identifier_list(summary.get("enabled_tool_ids"))
-        denied_tool_ids = set(self._normalize_identifier_list(agent.get("denied_tool_ids")))
+            executable_tool_ids = self._normalize_identifier_list(self._as_object_list(summary.get("enabled_tool_ids")))
+        denied_tool_ids = set(self._normalize_identifier_list(self._as_object_list(agent.get("denied_tool_ids"))))
         return [
             tool_id
             for tool_id in executable_tool_ids
@@ -1287,7 +1317,7 @@ class HarnessStudioService:
         if not isinstance(agent, dict) or not isinstance(summary, dict):
             return []
         delegation_contract = (
-            dict(summary.get("delegation_contract") or {})
+            self._as_object_dict(summary.get("delegation_contract"))
             if isinstance(summary.get("delegation_contract"), dict)
             else self._build_agent_delegation_contract(
                 agent=agent,
@@ -1308,17 +1338,17 @@ class HarnessStudioService:
         ):
             return []
         execution_contract = (
-            dict(summary.get("execution_contract") or {})
+            self._as_object_dict(summary.get("execution_contract"))
             if isinstance(summary.get("execution_contract"), dict)
             else self._build_agent_execution_contract(summary)
         )
         mcp_access_mode = str(execution_contract.get("mcp_access_mode") or "none").strip() or "none"
         planning_only_mcp_server_ids = self._normalize_identifier_list(
-            execution_contract.get("planning_only_mcp_server_ids")
+            self._as_object_list(execution_contract.get("planning_only_mcp_server_ids"))
         )
         if not planning_only_mcp_server_ids and mcp_access_mode == "planning_only":
-            planning_only_mcp_server_ids = self._normalize_identifier_list(summary.get("mcp_server_ids"))
-        denied_mcp_server_ids = set(self._normalize_identifier_list(agent.get("denied_mcp_server_ids")))
+            planning_only_mcp_server_ids = self._normalize_identifier_list(self._as_object_list(summary.get("mcp_server_ids")))
+        denied_mcp_server_ids = set(self._normalize_identifier_list(self._as_object_list(agent.get("denied_mcp_server_ids"))))
         return [
             server_id
             for server_id in planning_only_mcp_server_ids
@@ -1397,7 +1427,7 @@ class HarnessStudioService:
             summary = summary_by_agent_id.get(agent_id, {})
             lane_ids = [
                 str(item).strip()
-                for item in summary.get("delegation_lane_ids") or []
+                for item in self._as_object_list(summary.get("delegation_lane_ids"))
                 if str(item).strip()
             ]
             for lane_id in lane_ids:
@@ -1415,12 +1445,12 @@ class HarnessStudioService:
 
             recommended_collaborators = [
                 dict(item)
-                for item in summary.get("recommended_collaborators") or []
+                for item in self._as_object_list(summary.get("recommended_collaborators"))
                 if isinstance(item, dict)
             ]
             downstream_handoff_scores = [
                 dict(item)
-                for item in summary.get("downstream_handoff_scores") or []
+                for item in self._as_object_list(summary.get("downstream_handoff_scores"))
                 if isinstance(item, dict)
             ]
             has_bridge_opportunity = any(
@@ -1513,7 +1543,7 @@ class HarnessStudioService:
             for agent in filtered_agents
         }
         included_agent_ids = set(agent_name_by_id)
-        capability_owner_map = {
+        capability_owner_map: dict[str, dict[str, list[dict[str, object]]]] = {
             "skills": {},
             "tools": {},
             "mcp": {},
@@ -1532,33 +1562,69 @@ class HarnessStudioService:
                 agent_id=agent_id,
                 agent_name=agent_name_by_id.get(agent_id, agent_id),
             )
-            for skill_id in [str(item).strip() for item in summary.get("loaded_skill_ids") or [] if str(item).strip()]:
+            for skill_id in [
+                str(item).strip()
+                for item in self._as_object_list(summary.get("loaded_skill_ids"))
+                if str(item).strip()
+            ]:
                 self._append_capability_owner(capability_owner_map["skills"], capability_id=skill_id, owner=owner)
-            for tool_id in [str(item).strip() for item in summary.get("enabled_tool_ids") or [] if str(item).strip()]:
+            for tool_id in [
+                str(item).strip()
+                for item in self._as_object_list(summary.get("enabled_tool_ids"))
+                if str(item).strip()
+            ]:
                 self._append_capability_owner(capability_owner_map["tools"], capability_id=tool_id, owner=owner)
-            for server_id in [str(item).strip() for item in summary.get("mcp_server_ids") or [] if str(item).strip()]:
+            for server_id in [
+                str(item).strip()
+                for item in self._as_object_list(summary.get("mcp_server_ids"))
+                if str(item).strip()
+            ]:
                 self._append_capability_owner(capability_owner_map["mcp"], capability_id=server_id, owner=owner)
             for skill_id in [
-                *[str(item).strip() for item in summary.get("missing_skill_ids") or [] if str(item).strip()],
-                *[str(item).strip() for item in summary.get("missing_required_skill_ids") or [] if str(item).strip()],
-            ]:
-                missing_skill_ids.add(skill_id)
-            for tool_id in [
-                *[str(item).strip() for item in summary.get("policy_blocked_tool_ids") or [] if str(item).strip()],
-                *[str(item).strip() for item in summary.get("provider_limited_tool_ids") or [] if str(item).strip()],
-                *[str(item).strip() for item in summary.get("missing_required_tool_ids") or [] if str(item).strip()],
-            ]:
-                blocked_tool_ids.add(tool_id)
-            for server_id in [
-                *[str(item).strip() for item in summary.get("missing_mcp_server_ids") or [] if str(item).strip()],
                 *[
                     str(item).strip()
-                    for item in summary.get("missing_required_mcp_server_ids") or []
+                    for item in self._as_object_list(summary.get("missing_skill_ids"))
                     if str(item).strip()
                 ],
                 *[
                     str(item).strip()
-                    for item in summary.get("policy_blocked_mcp_server_ids") or []
+                    for item in self._as_object_list(summary.get("missing_required_skill_ids"))
+                    if str(item).strip()
+                ],
+            ]:
+                missing_skill_ids.add(skill_id)
+            for tool_id in [
+                *[
+                    str(item).strip()
+                    for item in self._as_object_list(summary.get("policy_blocked_tool_ids"))
+                    if str(item).strip()
+                ],
+                *[
+                    str(item).strip()
+                    for item in self._as_object_list(summary.get("provider_limited_tool_ids"))
+                    if str(item).strip()
+                ],
+                *[
+                    str(item).strip()
+                    for item in self._as_object_list(summary.get("missing_required_tool_ids"))
+                    if str(item).strip()
+                ],
+            ]:
+                blocked_tool_ids.add(tool_id)
+            for server_id in [
+                *[
+                    str(item).strip()
+                    for item in self._as_object_list(summary.get("missing_mcp_server_ids"))
+                    if str(item).strip()
+                ],
+                *[
+                    str(item).strip()
+                    for item in self._as_object_list(summary.get("missing_required_mcp_server_ids"))
+                    if str(item).strip()
+                ],
+                *[
+                    str(item).strip()
+                    for item in self._as_object_list(summary.get("policy_blocked_mcp_server_ids"))
                     if str(item).strip()
                 ],
             ]:
@@ -1574,7 +1640,7 @@ class HarnessStudioService:
                     single_owner_entries.append(
                         HarnessCapabilityOwnerEntry(
                             capability_id=capability_id,
-                            owner_agents=owners,
+                            owner_agents=cast(Any, owners),
                         ).model_dump()
                     )
             shared_ids.sort()
@@ -1608,21 +1674,21 @@ class HarnessStudioService:
     ) -> dict[str, object]:
         agents = [
             dict(agent)
-            for agent in graph.get("agents") or []
+            for agent in self._as_object_list(graph.get("agents"))
             if isinstance(agent, dict)
         ]
         edges = [
             dict(edge)
-            for edge in graph.get("edges") or []
+            for edge in self._as_object_list(graph.get("edges"))
             if isinstance(edge, dict)
         ]
         summaries = [
             dict(summary)
-            for summary in graph.get("agent_capability_summaries") or []
+            for summary in self._as_object_list(graph.get("agent_capability_summaries"))
             if isinstance(summary, dict)
         ]
-        review_enabled = bool((graph.get("review_agent") or {}).get("enabled", True))
-        execution_step_count = len(graph.get("execution_checklist") or [])
+        review_enabled = bool(self._as_object_dict(graph.get("review_agent")).get("enabled", True))
+        execution_step_count = len(self._as_object_list(graph.get("execution_checklist")))
         selected = {
             str(agent_id).strip()
             for agent_id in selected_agent_ids or []
@@ -1691,35 +1757,31 @@ class HarnessStudioService:
         )
 
         selection_scope = sorted(included_agent_ids) if selected else None
-        topology_summary = self._build_orchestration_topology_summary(
+        topology_summary: dict[str, object] = self._build_orchestration_topology_summary(
             agents=agents,
             edges=edges,
             summaries=summaries,
             selected_agent_ids=selection_scope,
         )
-        capability_coverage_summary = self._build_orchestration_capability_coverage_summary(
+        capability_coverage_summary: dict[str, object] = self._build_orchestration_capability_coverage_summary(
             agents=agents,
             summaries=summaries,
             selected_agent_ids=selection_scope,
         )
-        collaboration_diagnostics = (
+        collaboration_diagnostics: dict[str, object] = (
             self._filter_graph_diagnostics_for_agent_scope(
-                graph.get("graph_diagnostics") if isinstance(graph.get("graph_diagnostics"), dict) else {},
+                self._as_object_dict(graph.get("graph_diagnostics")),
                 selected_agent_ids=selection_scope or [],
             )
             if selection_scope
-            else (
-                graph.get("graph_diagnostics")
-                if isinstance(graph.get("graph_diagnostics"), dict)
-                else HarnessStudioGraphDiagnostics().model_dump()
-            )
+            else self._as_object_dict(graph.get("graph_diagnostics")) or HarnessStudioGraphDiagnostics().model_dump()
         )
         availability_counts = self._summarize_agent_availability_counts(
             summaries,
             selected_agent_ids=selection_scope,
         )
-        unavailable_count = int(availability_counts.get("unavailable_agent_count") or 0)
-        limited_availability_count = int(availability_counts.get("limited_agent_count") or 0)
+        unavailable_count = self._coerce_int(availability_counts.get("unavailable_agent_count"))
+        limited_availability_count = self._coerce_int(availability_counts.get("limited_agent_count"))
 
         agent_by_id = {
             str(agent.get("agent_id") or "").strip(): dict(agent)
@@ -1730,13 +1792,17 @@ class HarnessStudioService:
             summary = summary_by_agent_id.get(agent_id, {})
             actionable_tool_ids = self._compute_actionable_tool_policy_suggestion_ids(
                 agent,
-                [str(item).strip() for item in summary.get("policy_blocked_tool_ids") or [] if str(item).strip()],
+                [
+                    str(item).strip()
+                    for item in self._as_object_list(summary.get("policy_blocked_tool_ids"))
+                    if str(item).strip()
+                ],
             )
             actionable_mcp_server_ids = self._compute_actionable_mcp_policy_suggestion_ids(
                 agent,
                 [
                     str(item).strip()
-                    for item in summary.get("policy_blocked_mcp_server_ids") or []
+                    for item in self._as_object_list(summary.get("policy_blocked_mcp_server_ids"))
                     if str(item).strip()
                 ],
             )
@@ -1761,27 +1827,30 @@ class HarnessStudioService:
                 HarnessOrchestrationBriefCapabilityRisk(
                     kind="skill",
                     capability_id=str(entry.get("capability_id") or "").strip(),
-                    owner_agents=list(entry.get("owner_agents") or []),
+                    owner_agents=cast(Any, self._extract_coordination_preview_list(entry.get("owner_agents"))),
                 ).model_dump()
-                for entry in capability_coverage_summary.get("single_owner_skills") or []
+                for entry in self._as_object_list(capability_coverage_summary.get("single_owner_skills"))
+                if isinstance(entry, dict)
                 if str(entry.get("capability_id") or "").strip()
             ]
             + [
                 HarnessOrchestrationBriefCapabilityRisk(
                     kind="tool",
                     capability_id=str(entry.get("capability_id") or "").strip(),
-                    owner_agents=list(entry.get("owner_agents") or []),
+                    owner_agents=cast(Any, self._extract_coordination_preview_list(entry.get("owner_agents"))),
                 ).model_dump()
-                for entry in capability_coverage_summary.get("single_owner_tools") or []
+                for entry in self._as_object_list(capability_coverage_summary.get("single_owner_tools"))
+                if isinstance(entry, dict)
                 if str(entry.get("capability_id") or "").strip()
             ]
             + [
                 HarnessOrchestrationBriefCapabilityRisk(
                     kind="mcp",
                     capability_id=str(entry.get("capability_id") or "").strip(),
-                    owner_agents=list(entry.get("owner_agents") or []),
+                    owner_agents=cast(Any, self._extract_coordination_preview_list(entry.get("owner_agents"))),
                 ).model_dump()
-                for entry in capability_coverage_summary.get("single_owner_mcp_servers") or []
+                for entry in self._as_object_list(capability_coverage_summary.get("single_owner_mcp_servers"))
+                if isinstance(entry, dict)
                 if str(entry.get("capability_id") or "").strip()
             ],
             key=lambda item: (
@@ -1790,9 +1859,9 @@ class HarnessStudioService:
             ),
         )
         capability_gap_count = (
-            len(capability_coverage_summary.get("missing_skill_ids") or [])
-            + len(capability_coverage_summary.get("blocked_tool_ids") or [])
-            + len(capability_coverage_summary.get("missing_mcp_server_ids") or [])
+            len(self._as_object_list(capability_coverage_summary.get("missing_skill_ids")))
+            + len(self._as_object_list(capability_coverage_summary.get("blocked_tool_ids")))
+            + len(self._as_object_list(capability_coverage_summary.get("missing_mcp_server_ids")))
         )
         role_profile_alignment = build_role_profile_alignment_diagnostics(
             [
@@ -1813,8 +1882,8 @@ class HarnessStudioService:
                 for summary in [summary_by_agent_id.get(agent_id, {})]
             ]
         )
-        role_profile_drift_agent_count = int(role_profile_alignment.get("drift_agent_count") or 0)
-        role_profile_overlap_risk_count = int(role_profile_alignment.get("overlap_risk_count") or 0)
+        role_profile_drift_agent_count = self._coerce_int(role_profile_alignment.get("drift_agent_count"))
+        role_profile_overlap_risk_count = self._coerce_int(role_profile_alignment.get("overlap_risk_count"))
 
         phase_entries: dict[str, list[dict[str, object]]] = {
             "research": [],
@@ -1838,30 +1907,46 @@ class HarnessStudioService:
             role_hint = self._normalize_skill_key(str(agent.get("role") or ""))
             inbound_count = inbound_count_by_agent_id.get(agent_id, 0)
             outbound_count = outbound_count_by_agent_id.get(agent_id, 0)
-            lane_ids = [str(item).strip() for item in summary.get("delegation_lane_ids") or [] if str(item).strip()]
+            lane_ids = [
+                str(item).strip()
+                for item in self._as_object_list(summary.get("delegation_lane_ids"))
+                if str(item).strip()
+            ]
             lane_id_set = set(lane_ids)
             lane_count = len(lane_ids)
             loaded_skill_ids = {
                 str(item).strip()
-                for item in summary.get("loaded_skill_ids") or []
+                for item in self._as_object_list(summary.get("loaded_skill_ids"))
                 if str(item).strip()
             }
             strong_collaborator_count = len(
                 [
                     item
-                    for item in summary.get("recommended_collaborators") or []
+                    for item in self._as_object_list(summary.get("recommended_collaborators"))
                     if isinstance(item, dict)
                     and str(item.get("fit") or "").strip() in {"strong", "good"}
                 ]
             )
             enabled_tool_count = len(
-                [str(item).strip() for item in summary.get("enabled_tool_ids") or [] if str(item).strip()]
+                [
+                    str(item).strip()
+                    for item in self._as_object_list(summary.get("enabled_tool_ids"))
+                    if str(item).strip()
+                ]
             )
             mcp_server_count = len(
-                [str(item).strip() for item in summary.get("mcp_server_ids") or [] if str(item).strip()]
+                [
+                    str(item).strip()
+                    for item in self._as_object_list(summary.get("mcp_server_ids"))
+                    if str(item).strip()
+                ]
             )
             loaded_skill_count = len(
-                [str(item).strip() for item in summary.get("loaded_skill_ids") or [] if str(item).strip()]
+                [
+                    str(item).strip()
+                    for item in self._as_object_list(summary.get("loaded_skill_ids"))
+                    if str(item).strip()
+                ]
             )
             signals: list[object] = [
                 agent.get("name"),
@@ -1870,7 +1955,7 @@ class HarnessStudioService:
                 agent.get("system_prompt"),
                 summary.get("delegation_focus"),
                 summary.get("review_mode"),
-                *list(agent.get("skill_intents") or []),
+                *self._as_object_list(agent.get("skill_intents")),
                 *lane_ids,
             ]
 
@@ -1990,7 +2075,7 @@ class HarnessStudioService:
             explicit_entries = sorted(
                 phase_entries.get(phase_id, []),
                 key=lambda item: (
-                    -int(item.get("score") or 0),
+                    -self._coerce_int(item.get("score")),
                     str(item.get("agent_name") or ""),
                 ),
             )
@@ -2007,7 +2092,7 @@ class HarnessStudioService:
             return HarnessOrchestrationPhaseSummary(
                 phase_id=phase_id,  # type: ignore[arg-type]
                 agent_count=len(phase_agents),
-                agents=phase_agents,
+                agents=cast(Any, phase_agents),
             ).model_dump()
 
         implementation_fallback_agents = (
@@ -2040,13 +2125,13 @@ class HarnessStudioService:
             to_phase_summary("verification", terminal_agents),
         ]
         agent_routing = HarnessOrchestrationAgentRoutingSummary(
-            coordinator_anchors=self._pick_top_coordination_anchors(routing_entries["coordinator"]),
-            research_anchors=self._pick_top_coordination_anchors(routing_entries["research"]),
-            implementation_anchors=self._pick_top_coordination_anchors(routing_entries["implementation"]),
-            verification_anchors=self._pick_top_coordination_anchors(routing_entries["verification"]),
-            skill_capable_anchors=self._pick_top_coordination_anchors(routing_entries["skill"]),
-            tool_capable_anchors=self._pick_top_coordination_anchors(routing_entries["tool"]),
-            mcp_capable_anchors=self._pick_top_coordination_anchors(routing_entries["mcp"]),
+            coordinator_anchors=cast(Any, self._pick_top_coordination_anchors(routing_entries["coordinator"])),
+            research_anchors=cast(Any, self._pick_top_coordination_anchors(routing_entries["research"])),
+            implementation_anchors=cast(Any, self._pick_top_coordination_anchors(routing_entries["implementation"])),
+            verification_anchors=cast(Any, self._pick_top_coordination_anchors(routing_entries["verification"])),
+            skill_capable_anchors=cast(Any, self._pick_top_coordination_anchors(routing_entries["skill"])),
+            tool_capable_anchors=cast(Any, self._pick_top_coordination_anchors(routing_entries["tool"])),
+            mcp_capable_anchors=cast(Any, self._pick_top_coordination_anchors(routing_entries["mcp"])),
         ).model_dump()
 
         repair_priorities: list[dict[str, object]] = []
@@ -2090,8 +2175,8 @@ class HarnessStudioService:
                     count=role_profile_drift_agent_count + role_profile_overlap_risk_count,
                 ).model_dump()
             )
-        weak_edge_count = int(collaboration_diagnostics.get("weak_edge_count") or 0)
-        best_next_count = int(collaboration_diagnostics.get("best_next_count") or 0)
+        weak_edge_count = self._coerce_int(collaboration_diagnostics.get("weak_edge_count"))
+        best_next_count = self._coerce_int(collaboration_diagnostics.get("best_next_count"))
         if weak_edge_count > 0:
             repair_priorities.append(
                 HarnessOrchestrationRepairPriority(
@@ -2108,8 +2193,8 @@ class HarnessStudioService:
                     count=best_next_count,
                 ).model_dump()
             )
-        connectivity_count = int(topology_summary.get("isolated_agent_count") or 0) + int(
-            topology_summary.get("underconnected_agent_count") or 0
+        connectivity_count = self._coerce_int(topology_summary.get("isolated_agent_count")) + self._coerce_int(
+            topology_summary.get("underconnected_agent_count")
         )
         if connectivity_count > 0:
             repair_priorities.append(
@@ -2138,7 +2223,7 @@ class HarnessStudioService:
         repair_priorities.sort(
             key=lambda item: (
                 {"high": 0, "medium": 1, "low": 2}.get(str(item.get("severity") or "low"), 9),
-                -int(item.get("count") or 0),
+                -self._coerce_int(item.get("count")),
             )
         )
 
@@ -2154,8 +2239,8 @@ class HarnessStudioService:
         elif (
             role_profile_overlap_risk_count > 0
             or
-            int(topology_summary.get("isolated_agent_count") or 0) > 0
-            or int(topology_summary.get("underconnected_agent_count") or 0) > 0
+            self._coerce_int(topology_summary.get("isolated_agent_count")) > 0
+            or self._coerce_int(topology_summary.get("underconnected_agent_count")) > 0
             or bool(single_owner_capability_risks)
             or not review_enabled
             or not start_agents
@@ -2169,12 +2254,12 @@ class HarnessStudioService:
             total_agent_count=len(filtered_agents),
             execution_step_count=execution_step_count,
             review_enabled=review_enabled,
-            readiness=readiness,
-            start_agents=start_agents,
-            terminal_agents=terminal_agents,
-            shared_lane_count=int(topology_summary.get("shared_lane_count") or 0),
+            readiness=cast(Any, readiness),
+            start_agents=cast(Any, start_agents),
+            terminal_agents=cast(Any, terminal_agents),
+            shared_lane_count=self._coerce_int(topology_summary.get("shared_lane_count")),
             single_owner_capability_count=len(single_owner_capability_risks),
-            single_owner_capability_risks=single_owner_capability_risks,
+            single_owner_capability_risks=cast(Any, single_owner_capability_risks),
             unavailable_count=unavailable_count,
             limited_availability_count=limited_availability_count,
             policy_repair_agent_count=policy_repair_agent_count,
@@ -2183,83 +2268,121 @@ class HarnessStudioService:
             weak_edge_count=weak_edge_count,
             best_next_count=best_next_count,
             capability_gap_count=capability_gap_count,
-            isolated_agent_count=int(topology_summary.get("isolated_agent_count") or 0),
-            underconnected_agent_count=int(topology_summary.get("underconnected_agent_count") or 0),
-            phases=phases,
-            repair_priorities=repair_priorities,
-            agent_routing=agent_routing,
+            isolated_agent_count=self._coerce_int(topology_summary.get("isolated_agent_count")),
+            underconnected_agent_count=self._coerce_int(topology_summary.get("underconnected_agent_count")),
+            phases=cast(Any, phases),
+            repair_priorities=cast(Any, repair_priorities),
+            agent_routing=cast(Any, agent_routing),
         ).model_dump()
 
     def _build_agent_capability_brief(self, summary: dict[str, object]) -> str:
-        loaded_skill_ids = [str(item) for item in summary.get("loaded_skill_ids") or [] if str(item).strip()]
-        missing_skill_ids = [str(item) for item in summary.get("missing_skill_ids") or [] if str(item).strip()]
-        suggested_skill_ids = [str(item) for item in summary.get("suggested_skill_ids") or [] if str(item).strip()]
-        required_skill_ids = [str(item) for item in summary.get("required_skill_ids") or [] if str(item).strip()]
-        missing_required_skill_ids = [
-            str(item) for item in summary.get("missing_required_skill_ids") or [] if str(item).strip()
+        loaded_skill_ids = [
+            str(item) for item in self._as_object_list(summary.get("loaded_skill_ids")) if str(item).strip()
         ]
-        required_tool_ids = [str(item) for item in summary.get("required_tool_ids") or [] if str(item).strip()]
+        missing_skill_ids = [
+            str(item) for item in self._as_object_list(summary.get("missing_skill_ids")) if str(item).strip()
+        ]
+        suggested_skill_ids = [
+            str(item) for item in self._as_object_list(summary.get("suggested_skill_ids")) if str(item).strip()
+        ]
+        required_skill_ids = [
+            str(item) for item in self._as_object_list(summary.get("required_skill_ids")) if str(item).strip()
+        ]
+        missing_required_skill_ids = [
+            str(item) for item in self._as_object_list(summary.get("missing_required_skill_ids")) if str(item).strip()
+        ]
+        required_tool_ids = [
+            str(item) for item in self._as_object_list(summary.get("required_tool_ids")) if str(item).strip()
+        ]
         missing_required_tool_ids = [
-            str(item) for item in summary.get("missing_required_tool_ids") or [] if str(item).strip()
+            str(item) for item in self._as_object_list(summary.get("missing_required_tool_ids")) if str(item).strip()
         ]
         configured_allowed_tool_ids = [
-            str(item) for item in summary.get("configured_allowed_tool_ids") or [] if str(item).strip()
+            str(item) for item in self._as_object_list(summary.get("configured_allowed_tool_ids")) if str(item).strip()
         ]
         configured_denied_tool_ids = [
-            str(item) for item in summary.get("configured_denied_tool_ids") or [] if str(item).strip()
+            str(item) for item in self._as_object_list(summary.get("configured_denied_tool_ids")) if str(item).strip()
         ]
-        enabled_tool_ids = [str(item) for item in summary.get("enabled_tool_ids") or [] if str(item).strip()]
-        disabled_tool_ids = [str(item) for item in summary.get("disabled_tool_ids") or [] if str(item).strip()]
-        policy_added_tool_ids = [str(item) for item in summary.get("policy_added_tool_ids") or [] if str(item).strip()]
+        enabled_tool_ids = [
+            str(item) for item in self._as_object_list(summary.get("enabled_tool_ids")) if str(item).strip()
+        ]
+        disabled_tool_ids = [
+            str(item) for item in self._as_object_list(summary.get("disabled_tool_ids")) if str(item).strip()
+        ]
+        policy_added_tool_ids = [
+            str(item) for item in self._as_object_list(summary.get("policy_added_tool_ids")) if str(item).strip()
+        ]
         policy_blocked_tool_ids = [
-            str(item) for item in summary.get("policy_blocked_tool_ids") or [] if str(item).strip()
+            str(item) for item in self._as_object_list(summary.get("policy_blocked_tool_ids")) if str(item).strip()
         ]
         unknown_allowed_tool_ids = [
-            str(item) for item in summary.get("unknown_allowed_tool_ids") or [] if str(item).strip()
+            str(item) for item in self._as_object_list(summary.get("unknown_allowed_tool_ids")) if str(item).strip()
         ]
         requires_tool_calling = bool(summary.get("requires_tool_calling", False))
         provider_limited_tool_ids = [
-            str(item) for item in summary.get("provider_limited_tool_ids") or [] if str(item).strip()
+            str(item) for item in self._as_object_list(summary.get("provider_limited_tool_ids")) if str(item).strip()
         ]
         tool_execution_support = str(summary.get("tool_execution_support") or "unknown").strip() or "unknown"
         tool_execution_support_reason = str(summary.get("tool_execution_support_reason") or "").strip()
         required_mcp_server_ids = [
-            str(item) for item in summary.get("required_mcp_server_ids") or [] if str(item).strip()
+            str(item) for item in self._as_object_list(summary.get("required_mcp_server_ids")) if str(item).strip()
         ]
         missing_required_mcp_server_ids = [
-            str(item) for item in summary.get("missing_required_mcp_server_ids") or [] if str(item).strip()
+            str(item)
+            for item in self._as_object_list(summary.get("missing_required_mcp_server_ids"))
+            if str(item).strip()
         ]
         configured_allowed_mcp_server_ids = [
-            str(item) for item in summary.get("configured_allowed_mcp_server_ids") or [] if str(item).strip()
+            str(item)
+            for item in self._as_object_list(summary.get("configured_allowed_mcp_server_ids"))
+            if str(item).strip()
         ]
         configured_denied_mcp_server_ids = [
-            str(item) for item in summary.get("configured_denied_mcp_server_ids") or [] if str(item).strip()
+            str(item)
+            for item in self._as_object_list(summary.get("configured_denied_mcp_server_ids"))
+            if str(item).strip()
         ]
-        mcp_server_ids = [str(item) for item in summary.get("mcp_server_ids") or [] if str(item).strip()]
-        missing_mcp_server_ids = [str(item) for item in summary.get("missing_mcp_server_ids") or [] if str(item).strip()]
+        mcp_server_ids = [str(item) for item in self._as_object_list(summary.get("mcp_server_ids")) if str(item).strip()]
+        missing_mcp_server_ids = [
+            str(item) for item in self._as_object_list(summary.get("missing_mcp_server_ids")) if str(item).strip()
+        ]
         policy_added_mcp_server_ids = [
-            str(item) for item in summary.get("policy_added_mcp_server_ids") or [] if str(item).strip()
+            str(item) for item in self._as_object_list(summary.get("policy_added_mcp_server_ids")) if str(item).strip()
         ]
         policy_blocked_mcp_server_ids = [
-            str(item) for item in summary.get("policy_blocked_mcp_server_ids") or [] if str(item).strip()
+            str(item)
+            for item in self._as_object_list(summary.get("policy_blocked_mcp_server_ids"))
+            if str(item).strip()
         ]
         unknown_allowed_mcp_server_ids = [
-            str(item) for item in summary.get("unknown_allowed_mcp_server_ids") or [] if str(item).strip()
+            str(item)
+            for item in self._as_object_list(summary.get("unknown_allowed_mcp_server_ids"))
+            if str(item).strip()
         ]
-        delegation_lane_ids = [str(item) for item in summary.get("delegation_lane_ids") or [] if str(item).strip()]
+        delegation_lane_ids = [
+            str(item) for item in self._as_object_list(summary.get("delegation_lane_ids")) if str(item).strip()
+        ]
         recommended_collaborators = [
-            dict(item) for item in summary.get("recommended_collaborators") or [] if isinstance(item, dict)
+            dict(item) for item in self._as_object_list(summary.get("recommended_collaborators")) if isinstance(item, dict)
         ]
         downstream_handoff_scores = [
-            dict(item) for item in summary.get("downstream_handoff_scores") or [] if isinstance(item, dict)
+            dict(item) for item in self._as_object_list(summary.get("downstream_handoff_scores")) if isinstance(item, dict)
         ]
         delegation_focus = str(summary.get("delegation_focus") or "").strip()
         availability_status = str(summary.get("availability_status") or "available").strip() or "available"
-        availability_blockers = [str(item) for item in summary.get("availability_blockers") or [] if str(item).strip()]
-        availability_warnings = [str(item) for item in summary.get("availability_warnings") or [] if str(item).strip()]
+        availability_blockers = [
+            str(item) for item in self._as_object_list(summary.get("availability_blockers")) if str(item).strip()
+        ]
+        availability_warnings = [
+            str(item) for item in self._as_object_list(summary.get("availability_warnings")) if str(item).strip()
+        ]
         readiness_status = str(summary.get("readiness_status") or "ready").strip() or "ready"
-        readiness_blockers = [str(item) for item in summary.get("readiness_blockers") or [] if str(item).strip()]
-        readiness_warnings = [str(item) for item in summary.get("readiness_warnings") or [] if str(item).strip()]
+        readiness_blockers = [
+            str(item) for item in self._as_object_list(summary.get("readiness_blockers")) if str(item).strip()
+        ]
+        readiness_warnings = [
+            str(item) for item in self._as_object_list(summary.get("readiness_warnings")) if str(item).strip()
+        ]
         provider_route = str(summary.get("provider_route") or "project default").strip() or "project default"
         review_mode = str(summary.get("review_mode") or "direct handoff").strip() or "direct handoff"
 
@@ -2369,16 +2492,29 @@ class HarnessStudioService:
         return ". ".join(parts) + "."
 
     def _build_agent_execution_contract(self, summary: dict[str, object]) -> dict[str, object]:
-        approved_skill_ids = [str(item) for item in summary.get("loaded_skill_ids") or [] if str(item).strip()]
-        suggested_skill_ids = [str(item) for item in summary.get("suggested_skill_ids") or [] if str(item).strip()]
-        executable_tool_ids = [str(item) for item in summary.get("enabled_tool_ids") or [] if str(item).strip()]
-        planning_only_tool_ids = [
-            str(item) for item in summary.get("provider_limited_tool_ids") or [] if str(item).strip()
+        approved_skill_ids = [
+            str(item) for item in self._as_object_list(summary.get("loaded_skill_ids")) if str(item).strip()
         ]
-        disabled_tool_ids = [str(item) for item in summary.get("disabled_tool_ids") or [] if str(item).strip()]
-        planning_only_mcp_server_ids = [str(item) for item in summary.get("mcp_server_ids") or [] if str(item).strip()]
-        missing_mcp_server_ids = [str(item) for item in summary.get("missing_mcp_server_ids") or [] if str(item).strip()]
+        suggested_skill_ids = [
+            str(item) for item in self._as_object_list(summary.get("suggested_skill_ids")) if str(item).strip()
+        ]
+        executable_tool_ids = [
+            str(item) for item in self._as_object_list(summary.get("enabled_tool_ids")) if str(item).strip()
+        ]
+        planning_only_tool_ids = [
+            str(item) for item in self._as_object_list(summary.get("provider_limited_tool_ids")) if str(item).strip()
+        ]
+        disabled_tool_ids = [
+            str(item) for item in self._as_object_list(summary.get("disabled_tool_ids")) if str(item).strip()
+        ]
+        planning_only_mcp_server_ids = [
+            str(item) for item in self._as_object_list(summary.get("mcp_server_ids")) if str(item).strip()
+        ]
+        missing_mcp_server_ids = [
+            str(item) for item in self._as_object_list(summary.get("missing_mcp_server_ids")) if str(item).strip()
+        ]
         tool_execution_support = str(summary.get("tool_execution_support") or "").strip()
+        tool_access_mode: Literal["mixed", "direct_execution", "planning_only", "none"]
 
         if tool_execution_support == "unsupported" and executable_tool_ids:
             planning_only_tool_ids = self._dedupe_preserve_order([*planning_only_tool_ids, *executable_tool_ids])
@@ -2410,7 +2546,7 @@ class HarnessStudioService:
     def _extract_coordination_preview_list(value: object) -> list[dict[str, object]]:
         previews: list[dict[str, object]] = []
         seen: set[str] = set()
-        for item in value or []:
+        for item in HarnessStudioService._as_object_list(value):
             if not isinstance(item, dict):
                 continue
             agent_id = str(item.get("agent_id") or "").strip()
@@ -2485,39 +2621,47 @@ class HarnessStudioService:
 
         role_hint = self._normalize_skill_key(str(agent.get("role") or ""))
         node_kind = str(agent.get("node_kind") or "agent").strip() or "agent"
-        lane_ids = [str(item).strip() for item in summary.get("delegation_lane_ids") or [] if str(item).strip()]
+        lane_ids = [
+            str(item).strip()
+            for item in self._as_object_list(summary.get("delegation_lane_ids"))
+            if str(item).strip()
+        ]
         lane_id_set = set(lane_ids)
         loaded_skill_ids = {
             str(item).strip()
-            for item in summary.get("loaded_skill_ids") or []
+            for item in self._as_object_list(summary.get("loaded_skill_ids"))
             if str(item).strip()
         }
         enabled_tool_ids = {
             str(item).strip()
-            for item in summary.get("enabled_tool_ids") or []
+            for item in self._as_object_list(summary.get("enabled_tool_ids"))
             if str(item).strip()
         }
         provider_limited_tool_ids = [
             str(item).strip()
-            for item in summary.get("provider_limited_tool_ids") or []
+            for item in self._as_object_list(summary.get("provider_limited_tool_ids"))
             if str(item).strip()
         ]
         mcp_server_ids = {
             str(item).strip()
-            for item in summary.get("mcp_server_ids") or []
+            for item in self._as_object_list(summary.get("mcp_server_ids"))
             if str(item).strip()
         }
         missing_mcp_server_ids = [
             str(item).strip()
-            for item in summary.get("missing_mcp_server_ids") or []
+            for item in self._as_object_list(summary.get("missing_mcp_server_ids"))
             if str(item).strip()
         ]
         missing_skill_ids = self._dedupe_preserve_order(
             [
-                *[str(item).strip() for item in summary.get("missing_skill_ids") or [] if str(item).strip()],
                 *[
                     str(item).strip()
-                    for item in summary.get("missing_required_skill_ids") or []
+                    for item in self._as_object_list(summary.get("missing_skill_ids"))
+                    if str(item).strip()
+                ],
+                *[
+                    str(item).strip()
+                    for item in self._as_object_list(summary.get("missing_required_skill_ids"))
                     if str(item).strip()
                 ],
             ]
@@ -2528,12 +2672,12 @@ class HarnessStudioService:
         delegation_focus = str(summary.get("delegation_focus") or "").strip() or None
         recommended_collaborators = [
             dict(item)
-            for item in summary.get("recommended_collaborators") or []
+            for item in self._as_object_list(summary.get("recommended_collaborators"))
             if isinstance(item, dict)
         ]
         downstream_handoff_scores = [
             dict(item)
-            for item in summary.get("downstream_handoff_scores") or []
+            for item in self._as_object_list(summary.get("downstream_handoff_scores"))
             if isinstance(item, dict)
         ]
 
@@ -2556,12 +2700,12 @@ class HarnessStudioService:
                 append_preview(downstream_agents, downstream_seen, other_agent_id=target_agent_id)
 
         routing_summary = (
-            dict(orchestration_summary.get("agent_routing") or {})
+            self._as_object_dict(orchestration_summary.get("agent_routing"))
             if isinstance(orchestration_summary, dict) and isinstance(orchestration_summary.get("agent_routing"), dict)
             else {}
         )
         phases = (
-            [dict(item) for item in orchestration_summary.get("phases") or [] if isinstance(item, dict)]
+            [dict(item) for item in self._as_object_list(orchestration_summary.get("phases")) if isinstance(item, dict)]
             if isinstance(orchestration_summary, dict)
             else []
         )
@@ -2713,7 +2857,7 @@ class HarnessStudioService:
 
         single_owner_dependencies: list[str] = []
         if isinstance(orchestration_summary, dict):
-            for risk in orchestration_summary.get("single_owner_capability_risks") or []:
+            for risk in self._as_object_list(orchestration_summary.get("single_owner_capability_risks")):
                 if not isinstance(risk, dict):
                     continue
                 owners = self._extract_coordination_preview_ids(risk.get("owner_agents"))
@@ -2773,10 +2917,10 @@ class HarnessStudioService:
             should_coordinate_parallel_work=should_coordinate_parallel_work,
             should_produce_final_output=should_produce_final_output,
             primary_focus=delegation_focus,
-            upstream_agents=upstream_agents,
-            downstream_agents=downstream_agents,
-            preferred_collaborators=preferred_collaborators,
-            weak_handoff_targets=weak_handoff_targets,
+            upstream_agents=cast(Any, upstream_agents),
+            downstream_agents=cast(Any, downstream_agents),
+            preferred_collaborators=cast(Any, preferred_collaborators),
+            weak_handoff_targets=cast(Any, weak_handoff_targets),
             watchouts=self._dedupe_preserve_order(watchouts)[:4],
         ).model_dump()
 
@@ -2900,14 +3044,24 @@ class HarnessStudioService:
         ).model_dump()
 
     def _build_agent_delegation_focus(self, summary: dict[str, object]) -> str:
-        loaded_skill_ids = {str(item).strip() for item in summary.get("loaded_skill_ids") or [] if str(item).strip()}
-        enabled_tool_ids = {str(item).strip() for item in summary.get("enabled_tool_ids") or [] if str(item).strip()}
-        provider_limited_tool_ids = {
-            str(item).strip() for item in summary.get("provider_limited_tool_ids") or [] if str(item).strip()
+        loaded_skill_ids = {
+            str(item).strip() for item in self._as_object_list(summary.get("loaded_skill_ids")) if str(item).strip()
         }
-        mcp_server_ids = {str(item).strip() for item in summary.get("mcp_server_ids") or [] if str(item).strip()}
+        enabled_tool_ids = {
+            str(item).strip() for item in self._as_object_list(summary.get("enabled_tool_ids")) if str(item).strip()
+        }
+        provider_limited_tool_ids = {
+            str(item).strip()
+            for item in self._as_object_list(summary.get("provider_limited_tool_ids"))
+            if str(item).strip()
+        }
+        mcp_server_ids = {
+            str(item).strip() for item in self._as_object_list(summary.get("mcp_server_ids")) if str(item).strip()
+        }
         missing_mcp_server_ids = {
-            str(item).strip() for item in summary.get("missing_mcp_server_ids") or [] if str(item).strip()
+            str(item).strip()
+            for item in self._as_object_list(summary.get("missing_mcp_server_ids"))
+            if str(item).strip()
         }
         tool_execution_support = str(summary.get("tool_execution_support") or "unknown").strip() or "unknown"
 
@@ -2949,14 +3103,24 @@ class HarnessStudioService:
         agent: dict[str, object],
         summary: dict[str, object],
     ) -> list[str]:
-        loaded_skill_ids = {str(item).strip() for item in summary.get("loaded_skill_ids") or [] if str(item).strip()}
-        enabled_tool_ids = {str(item).strip() for item in summary.get("enabled_tool_ids") or [] if str(item).strip()}
-        provider_limited_tool_ids = {
-            str(item).strip() for item in summary.get("provider_limited_tool_ids") or [] if str(item).strip()
+        loaded_skill_ids = {
+            str(item).strip() for item in self._as_object_list(summary.get("loaded_skill_ids")) if str(item).strip()
         }
-        mcp_server_ids = {str(item).strip() for item in summary.get("mcp_server_ids") or [] if str(item).strip()}
+        enabled_tool_ids = {
+            str(item).strip() for item in self._as_object_list(summary.get("enabled_tool_ids")) if str(item).strip()
+        }
+        provider_limited_tool_ids = {
+            str(item).strip()
+            for item in self._as_object_list(summary.get("provider_limited_tool_ids"))
+            if str(item).strip()
+        }
+        mcp_server_ids = {
+            str(item).strip() for item in self._as_object_list(summary.get("mcp_server_ids")) if str(item).strip()
+        }
         missing_mcp_server_ids = {
-            str(item).strip() for item in summary.get("missing_mcp_server_ids") or [] if str(item).strip()
+            str(item).strip()
+            for item in self._as_object_list(summary.get("missing_mcp_server_ids"))
+            if str(item).strip()
         }
         role_hint = self._normalize_skill_key(str(agent.get("role") or ""))
         node_kind = str(agent.get("node_kind") or "agent").strip()
@@ -3011,10 +3175,14 @@ class HarnessStudioService:
         edge_present: bool = False,
     ) -> dict[str, object]:
         source_lane_ids = [
-            str(item).strip() for item in source_summary.get("delegation_lane_ids") or [] if str(item).strip()
+            str(item).strip()
+            for item in self._as_object_list(source_summary.get("delegation_lane_ids"))
+            if str(item).strip()
         ]
         target_lane_ids = [
-            str(item).strip() for item in target_summary.get("delegation_lane_ids") or [] if str(item).strip()
+            str(item).strip()
+            for item in self._as_object_list(target_summary.get("delegation_lane_ids"))
+            if str(item).strip()
         ]
         source_lane_set = set(source_lane_ids)
         target_lane_set = set(target_lane_ids)
@@ -3025,30 +3193,44 @@ class HarnessStudioService:
             lane_id for lane_id in target_lane_ids if lane_id in source_lane_set and lane_id != "generalist"
         ]
         source_loaded_skill_ids = [
-            str(item).strip() for item in source_summary.get("loaded_skill_ids") or [] if str(item).strip()
+            str(item).strip()
+            for item in self._as_object_list(source_summary.get("loaded_skill_ids"))
+            if str(item).strip()
         ]
         source_loaded_skill_id_set = set(source_loaded_skill_ids)
         target_loaded_skill_ids = [
-            str(item).strip() for item in target_summary.get("loaded_skill_ids") or [] if str(item).strip()
+            str(item).strip()
+            for item in self._as_object_list(target_summary.get("loaded_skill_ids"))
+            if str(item).strip()
         ]
         new_skill_ids = [skill_id for skill_id in target_loaded_skill_ids if skill_id not in source_loaded_skill_id_set]
         source_enabled_tool_ids = [
-            str(item).strip() for item in source_summary.get("enabled_tool_ids") or [] if str(item).strip()
+            str(item).strip()
+            for item in self._as_object_list(source_summary.get("enabled_tool_ids"))
+            if str(item).strip()
         ]
         source_enabled_tool_id_set = set(source_enabled_tool_ids)
         target_enabled_tool_ids = [
-            str(item).strip() for item in target_summary.get("enabled_tool_ids") or [] if str(item).strip()
+            str(item).strip()
+            for item in self._as_object_list(target_summary.get("enabled_tool_ids"))
+            if str(item).strip()
         ]
         target_enabled_tool_id_set = set(target_enabled_tool_ids)
         source_mcp_server_ids = [
-            str(item).strip() for item in source_summary.get("mcp_server_ids") or [] if str(item).strip()
+            str(item).strip()
+            for item in self._as_object_list(source_summary.get("mcp_server_ids"))
+            if str(item).strip()
         ]
         source_mcp_server_id_set = set(source_mcp_server_ids)
         target_mcp_server_ids = [
-            str(item).strip() for item in target_summary.get("mcp_server_ids") or [] if str(item).strip()
+            str(item).strip()
+            for item in self._as_object_list(target_summary.get("mcp_server_ids"))
+            if str(item).strip()
         ]
         source_missing_mcp_server_ids = {
-            str(item).strip() for item in source_summary.get("missing_mcp_server_ids") or [] if str(item).strip()
+            str(item).strip()
+            for item in self._as_object_list(source_summary.get("missing_mcp_server_ids"))
+            if str(item).strip()
         }
         new_tool_ids = [tool_id for tool_id in target_enabled_tool_ids if tool_id not in source_enabled_tool_id_set]
         new_mcp_server_ids = [server_id for server_id in target_mcp_server_ids if server_id not in source_mcp_server_id_set]
@@ -3203,7 +3385,9 @@ class HarnessStudioService:
             if not source_agent_id:
                 continue
             source_lane_ids = [
-                str(item).strip() for item in summary.get("delegation_lane_ids") or [] if str(item).strip()
+                str(item).strip()
+                for item in self._as_object_list(summary.get("delegation_lane_ids"))
+                if str(item).strip()
             ]
             delegation_focus = str(summary.get("delegation_focus") or "").strip() or None
             recommendations = [
@@ -3223,11 +3407,11 @@ class HarnessStudioService:
                         source_agent_name=source_agent_name,
                         source_lane_ids=source_lane_ids,
                         delegation_focus=delegation_focus,
-                        target=non_edge_candidates[0],
+                        target=cast(Any, non_edge_candidates[0]),
                     ).model_dump()
                 )
 
-            for downstream in summary.get("downstream_handoff_scores") or []:
+            for downstream in self._as_object_list(summary.get("downstream_handoff_scores")):
                 if not isinstance(downstream, dict):
                     continue
                 if not bool(downstream.get("edge_present")):
@@ -3240,37 +3424,41 @@ class HarnessStudioService:
                         source_agent_name=source_agent_name,
                         source_lane_ids=source_lane_ids,
                         delegation_focus=delegation_focus,
-                        target=downstream,
-                        suggested_replacements=[
-                            item
-                            for item in non_edge_candidates
-                            if str(item.get("agent_id") or "").strip()
-                            != str(downstream.get("agent_id") or "").strip()
-                        ][:2],
+                        target=cast(Any, downstream),
+                        suggested_replacements=cast(
+                            Any,
+                            [
+                                item
+                                for item in non_edge_candidates
+                                if str(item.get("agent_id") or "").strip()
+                                != str(downstream.get("agent_id") or "").strip()
+                            ][:2],
+                        ),
                     ).model_dump()
                 )
 
-        weak_downstream_edges.sort(
-            key=lambda item: (
-                int(((item.get("target") or {}) if isinstance(item, dict) else {}).get("score") or 0),
+        def weak_edge_sort_key(item: dict[str, object]) -> tuple[int, str, str]:
+            target = self._as_object_dict(item.get("target"))
+            return (
+                self._coerce_int(target.get("score")),
                 str(item.get("source_agent_name") or ""),
-                str((((item.get("target") or {}) if isinstance(item, dict) else {})).get("agent_name") or ""),
+                str(target.get("agent_name") or ""),
             )
-        )
-        best_next_handoffs.sort(
-            key=lambda item: (
-                0
-                if str((((item.get("target") or {}) if isinstance(item, dict) else {})).get("fit") or "weak").strip()
-                == "strong"
-                else 1,
-                -int((((item.get("target") or {}) if isinstance(item, dict) else {})).get("score") or 0),
+
+        def best_next_sort_key(item: dict[str, object]) -> tuple[int, int, str]:
+            target = self._as_object_dict(item.get("target"))
+            return (
+                0 if str(target.get("fit") or "weak").strip() == "strong" else 1,
+                -self._coerce_int(target.get("score")),
                 str(item.get("source_agent_name") or ""),
             )
-        )
+
+        weak_downstream_edges.sort(key=weak_edge_sort_key)
+        best_next_handoffs.sort(key=best_next_sort_key)
 
         return HarnessStudioGraphDiagnostics(
-            weak_downstream_edges=weak_downstream_edges,
-            best_next_handoffs=best_next_handoffs,
+            weak_downstream_edges=cast(Any, weak_downstream_edges),
+            best_next_handoffs=cast(Any, best_next_handoffs),
             weak_edge_count=len(weak_downstream_edges),
             best_next_count=len(best_next_handoffs),
         ).model_dump()
@@ -3292,7 +3480,7 @@ class HarnessStudioService:
             return HarnessStudioGraphDiagnostics().model_dump()
 
         weak_downstream_edges: list[dict[str, object]] = []
-        for item in diagnostics.get("weak_downstream_edges") or []:
+        for item in self._as_object_list(diagnostics.get("weak_downstream_edges")):
             if not isinstance(item, dict):
                 continue
             source_agent_id = str(item.get("source_agent_id") or "").strip()
@@ -3303,14 +3491,14 @@ class HarnessStudioService:
             filtered_item = dict(item)
             filtered_item["suggested_replacements"] = [
                 dict(replacement)
-                for replacement in item.get("suggested_replacements") or []
+                for replacement in self._as_object_list(item.get("suggested_replacements"))
                 if isinstance(replacement, dict)
                 and str(replacement.get("agent_id") or "").strip() in selected
             ]
             weak_downstream_edges.append(filtered_item)
 
         best_next_handoffs: list[dict[str, object]] = []
-        for item in diagnostics.get("best_next_handoffs") or []:
+        for item in self._as_object_list(diagnostics.get("best_next_handoffs")):
             if not isinstance(item, dict):
                 continue
             source_agent_id = str(item.get("source_agent_id") or "").strip()
@@ -3321,8 +3509,8 @@ class HarnessStudioService:
             best_next_handoffs.append(dict(item))
 
         return HarnessStudioGraphDiagnostics(
-            weak_downstream_edges=weak_downstream_edges,
-            best_next_handoffs=best_next_handoffs,
+            weak_downstream_edges=cast(Any, weak_downstream_edges),
+            best_next_handoffs=cast(Any, best_next_handoffs),
             weak_edge_count=len(weak_downstream_edges),
             best_next_count=len(best_next_handoffs),
         ).model_dump()
@@ -3332,14 +3520,14 @@ class HarnessStudioService:
         graph["mcp_server_catalog"] = self._discover_mcp_server_catalog()
         loaded_skill_ids = {
             self._normalize_skill_key(str(item.get("skill_id") or ""))
-            for item in graph.get("skill_pool") or []
+            for item in self._as_object_list(graph.get("skill_pool"))
             if isinstance(item, dict)
         }
-        tool_catalog = graph.get("tool_catalog") or []
-        mcp_server_catalog = graph.get("mcp_server_catalog") or []
+        tool_catalog = self._as_object_list(graph.get("tool_catalog"))
+        mcp_server_catalog = self._as_object_list(graph.get("mcp_server_catalog"))
         skill_catalog_by_id = {
             self._normalize_skill_key(str(item.get("skill_id") or "")): dict(item)
-            for item in graph.get("skill_catalog") or []
+            for item in self._as_object_list(graph.get("skill_catalog"))
             if isinstance(item, dict) and self._normalize_skill_key(str(item.get("skill_id") or ""))
         }
         mcp_server_catalog_by_id = {
@@ -3358,7 +3546,7 @@ class HarnessStudioService:
         }
         mcp_alias_to_server_id = self._build_mcp_server_alias_lookup()
         summaries: list[dict[str, object]] = []
-        for agent in graph.get("agents") or []:
+        for agent in self._as_object_list(graph.get("agents")):
             if not isinstance(agent, dict):
                 continue
             agent_id = str(agent.get("agent_id") or "").strip()
@@ -3366,7 +3554,7 @@ class HarnessStudioService:
                 continue
             skill_ids = [
                 self._normalize_skill_key(str(skill_id))
-                for skill_id in agent.get("skill_ids") or []
+                for skill_id in self._as_object_list(agent.get("skill_ids"))
                 if self._normalize_skill_key(str(skill_id))
             ]
             loaded_for_agent = sorted(skill_id for skill_id in skill_ids if skill_id in loaded_skill_ids)
@@ -3379,7 +3567,7 @@ class HarnessStudioService:
             intent_matches = [
                 skill_id
                 for skill_id in self._match_skills_for_intents(
-                    [str(intent) for intent in agent.get("skill_intents") or []],
+                    [str(intent) for intent in self._as_object_list(agent.get("skill_intents"))],
                     graph,
                 )
                 if skill_id not in loaded_for_agent and skill_id not in missing_for_agent
@@ -3399,9 +3587,16 @@ class HarnessStudioService:
                 mcp_alias_to_server_id=mcp_alias_to_server_id,
             )
             tool_execution_support, tool_execution_support_reason = self._infer_tool_execution_support(agent, graph)
+            normalized_tool_execution_support: Literal["supported", "unsupported", "unknown"] = (
+                "supported"
+                if tool_execution_support == "supported"
+                else "unsupported"
+                if tool_execution_support == "unsupported"
+                else "unknown"
+            )
             enabled_tool_ids = list(resolved_tool_access["enabled_tool_ids"])
-            provider_limited_tool_ids = enabled_tool_ids if tool_execution_support == "unsupported" else []
-            if tool_execution_support == "unsupported":
+            provider_limited_tool_ids = enabled_tool_ids if normalized_tool_execution_support == "unsupported" else []
+            if normalized_tool_execution_support == "unsupported":
                 enabled_tool_ids = []
 
             summary = HarnessAgentCapabilitySummary(
@@ -3424,7 +3619,7 @@ class HarnessStudioService:
                 unknown_allowed_tool_ids=resolved_tool_access["unknown_allowed_tool_ids"],
                 requires_tool_calling=bool(agent.get("requires_tool_calling", False)),
                 provider_limited_tool_ids=provider_limited_tool_ids,
-                tool_execution_support=tool_execution_support,
+                tool_execution_support=normalized_tool_execution_support,
                 tool_execution_support_reason=tool_execution_support_reason or None,
                 required_mcp_server_ids=[],
                 missing_required_mcp_server_ids=[],
@@ -3480,11 +3675,11 @@ class HarnessStudioService:
         }
         agent_by_id = {
             str(agent.get("agent_id") or "").strip(): dict(agent)
-            for agent in graph.get("agents") or []
+            for agent in self._as_object_list(graph.get("agents"))
             if isinstance(agent, dict) and str(agent.get("agent_id") or "").strip()
         }
         outgoing_edges_by_source: dict[str, list[dict[str, object]]] = {}
-        for edge in graph.get("edges") or []:
+        for edge in self._as_object_list(graph.get("edges")):
             if not isinstance(edge, dict):
                 continue
             source_agent_id = str(edge.get("source_agent_id") or "").strip()
@@ -3516,13 +3711,13 @@ class HarnessStudioService:
                     interaction=str(existing_edges.get(target_agent_id, {}).get("interaction") or "").strip() or None,
                     edge_present=target_agent_id in existing_edges,
                 )
-                if int(recommendation.get("score") or 0) <= 0 and not bool(recommendation.get("edge_present")):
+                if self._coerce_int(recommendation.get("score")) <= 0 and not bool(recommendation.get("edge_present")):
                     continue
                 recommendations.append(recommendation)
 
             recommendations.sort(
                 key=lambda item: (
-                    -int(item.get("score") or 0),
+                    -self._coerce_int(item.get("score")),
                     0 if bool(item.get("edge_present")) else 1,
                     str(item.get("agent_name") or item.get("agent_id") or ""),
                 )
@@ -3550,7 +3745,7 @@ class HarnessStudioService:
                 agent=agent_by_id.get(agent_id, {}),
                 summary=summary,
                 agents_by_id=agent_by_id,
-                edges=[dict(edge) for edge in graph.get("edges") or [] if isinstance(edge, dict)],
+                edges=[dict(edge) for edge in self._as_object_list(graph.get("edges")) if isinstance(edge, dict)],
                 orchestration_summary=orchestration_summary,
             )
             summary["delegation_contract"] = delegation_contract
@@ -3575,11 +3770,18 @@ class HarnessStudioService:
             if not content:
                 continue
             active_form = str(item.get("active_form") or "").strip() or None
+            status: Literal["pending", "in_progress", "completed"] = (
+                "in_progress"
+                if str(item.get("status") or "pending").strip() == "in_progress"
+                else "completed"
+                if str(item.get("status") or "pending").strip() == "completed"
+                else "pending"
+            )
             normalized.append(
                 HarnessExecutionChecklistItem(
                     item_id=str(item.get("item_id") or f"check_{index + 1}"),
                     content=content,
-                    status=str(item.get("status") or "pending"),
+                    status=status,
                     active_form=active_form,
                 ).model_dump()
             )
@@ -3658,7 +3860,9 @@ class HarnessStudioService:
                 "edges": base.get("edges", []),
                 "graph_diagnostics": base.get("graph_diagnostics", {}),
                 "knowledge_base_ids": base.get("knowledge_base_ids", []),
-                "execution_checklist": self._normalize_execution_checklist(base.get("execution_checklist")),
+                "execution_checklist": self._normalize_execution_checklist(
+                    self._as_object_list(base.get("execution_checklist"))
+                ),
                 "skill_pool": base.get("skill_pool", []),
                 "pending_skill_requests": base.get("pending_skill_requests", []),
                 "tool_catalog": [],
@@ -3677,23 +3881,27 @@ class HarnessStudioService:
 
     def _hydrate_project(self, project: dict[str, object]) -> dict[str, object]:
         hydrated = dict(project)
-        hydrated["graph_json"] = self._normalize_graph(project.get("graph_json") if isinstance(project, dict) else None)
-        graph = hydrated["graph_json"]
-        agents = graph.get("agents") or []
-        edges = graph.get("edges") or []
+        hydrated["graph_json"] = self._normalize_graph(self._as_object_dict(project.get("graph_json")))
+        graph = self._as_object_dict(hydrated["graph_json"])
+        agents = self._as_object_list(graph.get("agents"))
+        edges = self._as_object_list(graph.get("edges"))
         hydrated["agent_count"] = len(agents)
         hydrated["edge_count"] = len(edges)
-        hydrated["checklist_count"] = len(graph.get("execution_checklist") or [])
+        hydrated["checklist_count"] = len(self._as_object_list(graph.get("execution_checklist")))
         hydrated["open_checklist_count"] = len(
             [
                 item
-                for item in graph.get("execution_checklist") or []
+                for item in self._as_object_list(graph.get("execution_checklist"))
                 if isinstance(item, dict) and str(item.get("status") or "pending") != "completed"
             ]
         )
-        hydrated["loaded_skill_count"] = len(graph.get("skill_pool") or [])
+        hydrated["loaded_skill_count"] = len(self._as_object_list(graph.get("skill_pool")))
         hydrated["pending_skill_request_count"] = len(
-            [item for item in graph.get("pending_skill_requests") or [] if item.get("status") == "pending"]
+            [
+                item
+                for item in self._as_object_list(graph.get("pending_skill_requests"))
+                if isinstance(item, dict) and item.get("status") == "pending"
+            ]
         )
         return hydrated
 
@@ -3706,7 +3914,7 @@ class HarnessStudioService:
         return project
 
     def _catalog_lookup(self, graph_json: dict[str, object]) -> dict[str, dict[str, object]]:
-        catalog = graph_json.get("skill_catalog") or []
+        catalog = self._as_object_list(graph_json.get("skill_catalog"))
         lookup: dict[str, dict[str, object]] = {}
         for item in catalog:
             if not isinstance(item, dict):
@@ -3801,18 +4009,18 @@ class HarnessStudioService:
         requested_skills: list[str],
     ) -> dict[str, object]:
         project = self._ensure_access(project_id=project_id, user_id=user_id)
-        graph = self._normalize_graph(project.get("graph_json") if isinstance(project, dict) else None)
-        agents = graph.get("agents") or []
+        graph = self._normalize_graph(self._as_object_dict(project.get("graph_json")))
+        agents = self._as_object_list(graph.get("agents"))
         if not any(str(agent.get("agent_id") or "") == agent_id for agent in agents if isinstance(agent, dict)):
             raise HarnessStudioAgentNotFoundError("Agent not found in studio project")
 
         graph = self._sync_skill_pool_with_catalog(graph)
         loaded_skill_ids = {
             self._normalize_skill_key(str(item.get("skill_id") or ""))
-            for item in graph.get("skill_pool") or []
+            for item in self._as_object_list(graph.get("skill_pool"))
             if isinstance(item, dict)
         }
-        pending_requests = list(graph.get("pending_skill_requests") or [])
+        pending_requests = self._as_object_list(graph.get("pending_skill_requests"))
         pending_skill_ids = {
             self._normalize_skill_key(str(item.get("skill_id") or ""))
             for item in pending_requests
@@ -3868,9 +4076,9 @@ class HarnessStudioService:
         approved: bool,
     ) -> dict[str, object]:
         project = self._ensure_access(project_id=project_id, user_id=user_id)
-        graph = self._normalize_graph(project.get("graph_json") if isinstance(project, dict) else None)
-        pending_requests = list(graph.get("pending_skill_requests") or [])
-        skill_pool = list(graph.get("skill_pool") or [])
+        graph = self._normalize_graph(self._as_object_dict(project.get("graph_json")))
+        pending_requests = self._as_object_list(graph.get("pending_skill_requests"))
+        skill_pool = self._as_object_list(graph.get("skill_pool"))
         catalog_lookup = self._catalog_lookup(graph)
         now = int(time.time())
 
@@ -3932,26 +4140,30 @@ class HarnessStudioService:
     ) -> dict[str, object]:
         project = self._ensure_access(project_id=project_id, user_id=user_id)
         hydrated = self._hydrate_project(project)
-        graph = hydrated["graph_json"]
-        agents = graph.get("agents") or []
+        graph = self._as_object_dict(hydrated["graph_json"])
+        agents = self._as_object_list(graph.get("agents"))
         if run_scope == "selected":
-            selected_ids = [agent_id for agent_id in agent_ids if any(str(agent.get("agent_id") or "") == agent_id for agent in agents)]
+            selected_ids = [
+                agent_id
+                for agent_id in agent_ids
+                if any(isinstance(agent, dict) and str(agent.get("agent_id") or "") == agent_id for agent in agents)
+            ]
         else:
             selected_ids = [str(agent.get("agent_id") or "") for agent in agents if isinstance(agent, dict)]
-        execution_checklist = self._normalize_execution_checklist(graph.get("execution_checklist"))
+        execution_checklist = self._normalize_execution_checklist(self._as_object_list(graph.get("execution_checklist")))
         open_checklist = [
             item
             for item in execution_checklist
             if str(item.get("status") or "pending") != "completed"
         ]
-        graph_diagnostics = graph.get("graph_diagnostics") if isinstance(graph.get("graph_diagnostics"), dict) else {}
-        agent_capability_summaries = (
-            graph.get("agent_capability_summaries")
-            if isinstance(graph.get("agent_capability_summaries"), list)
-            else []
-        )
-        weak_edge_count = int(graph_diagnostics.get("weak_edge_count") or 0)
-        best_next_count = int(graph_diagnostics.get("best_next_count") or 0)
+        graph_diagnostics = self._as_object_dict(graph.get("graph_diagnostics"))
+        agent_capability_summaries = [
+            dict(item)
+            for item in self._as_object_list(graph.get("agent_capability_summaries"))
+            if isinstance(item, dict)
+        ]
+        weak_edge_count = self._coerce_int(graph_diagnostics.get("weak_edge_count"))
+        best_next_count = self._coerce_int(graph_diagnostics.get("best_next_count"))
         graph_readiness_counts = self._summarize_agent_readiness_counts(agent_capability_summaries)
         graph_availability_counts = self._summarize_agent_availability_counts(agent_capability_summaries)
         graph_execution_contract_counts = self._summarize_agent_execution_contract_counts(
@@ -3984,12 +4196,12 @@ class HarnessStudioService:
             if run_scope == "selected"
             else graph_diagnostics
         )
-        scoped_weak_edge_count = int(scoped_graph_diagnostics.get("weak_edge_count") or 0)
-        scoped_best_next_count = int(scoped_graph_diagnostics.get("best_next_count") or 0)
+        scoped_weak_edge_count = self._coerce_int(scoped_graph_diagnostics.get("weak_edge_count"))
+        scoped_best_next_count = self._coerce_int(scoped_graph_diagnostics.get("best_next_count"))
         run_graph = dict(graph)
         if run_scope == "selected":
             run_graph["selected_scope_orchestration_summary"] = self._build_orchestration_summary(
-                graph,
+                run_graph,
                 selected_agent_ids=selected_ids,
             )
 
@@ -4004,7 +4216,7 @@ class HarnessStudioService:
                 "loop_count": loop_count,
                 "task": task or hydrated.get("name", ""),
                 "timeout_seconds": timeout_seconds,
-                "knowledge_base_ids": list(graph.get("knowledge_base_ids") or []),
+                "knowledge_base_ids": self._as_object_list(graph.get("knowledge_base_ids")),
                 "task_checklist": execution_checklist,
                 "graph": run_graph,
             },
@@ -4015,10 +4227,10 @@ class HarnessStudioService:
                 "project_name": hydrated.get("name"),
                 "selected_agent_ids": selected_ids,
                 "loop_count": loop_count,
-                "knowledge_base_ids": list(graph.get("knowledge_base_ids") or []),
+                "knowledge_base_ids": self._as_object_list(graph.get("knowledge_base_ids")),
                 "checklist_count": len(execution_checklist),
                 "open_checklist_count": len(open_checklist),
-                "review_agent_enabled": bool((graph.get("review_agent") or {}).get("enabled", True)),
+                "review_agent_enabled": bool(self._as_object_dict(graph.get("review_agent")).get("enabled", True)),
                 "pending_skill_request_count": hydrated.get("pending_skill_request_count", 0),
                 "graph_weak_edge_count": weak_edge_count,
                 "graph_best_next_count": best_next_count,

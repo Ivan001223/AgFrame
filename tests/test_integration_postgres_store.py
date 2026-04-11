@@ -8,10 +8,20 @@ import pytest
 from sqlalchemy import create_engine, delete, select, text
 from sqlalchemy.orm import sessionmaker
 
-from app.infrastructure.database.models import ChatSession, DocContent, DocEmbedding, Document, UserProfile
+from app.infrastructure.database.models import (
+    ChatSession,
+    DocContent,
+    DocEmbedding,
+    Document,
+    UserProfile,
+)
 from app.infrastructure.database.schema import ensure_schema
-from app.infrastructure.database.stores import MySQLConversationStore, MySQLDocStore, MySQLProfileStore, PgDocEmbeddingStore
-
+from app.infrastructure.database.stores import (
+    MySQLConversationStore,
+    MySQLDocStore,
+    MySQLProfileStore,
+    PgDocEmbeddingStore,
+)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 

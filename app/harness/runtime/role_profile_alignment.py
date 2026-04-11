@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 _ROLE_PROFILE_IDS = {"coordinator", "research", "implementation", "verification", "generalist"}
 _NON_SPECIFIC_LANE_IDS = {"generalist", "reasoning_only"}
 _PROFILE_SPLIT_LANE_HINTS: dict[str, list[str]] = {
@@ -196,10 +195,10 @@ def build_role_profile_alignment_diagnostics(
                 shared_lane_ids = sorted(left_lane_ids & right_lane_ids)
                 if not shared_lane_ids:
                     continue
-                unique_lane_ids = sorted((left_lane_ids ^ right_lane_ids))
-                unique_skill_ids = sorted((left_skill_ids ^ right_skill_ids))
-                unique_tool_ids = sorted((left_tool_ids ^ right_tool_ids))
-                unique_mcp_server_ids = sorted((left_mcp_server_ids ^ right_mcp_server_ids))
+                unique_lane_ids = sorted(left_lane_ids ^ right_lane_ids)
+                unique_skill_ids = sorted(left_skill_ids ^ right_skill_ids)
+                unique_tool_ids = sorted(left_tool_ids ^ right_tool_ids)
+                unique_mcp_server_ids = sorted(left_mcp_server_ids ^ right_mcp_server_ids)
                 capability_delta_count = (
                     len(unique_skill_ids) + len(unique_tool_ids) + len(unique_mcp_server_ids)
                 )

@@ -21,7 +21,7 @@ async def generate_node(state: AgentState) -> dict[str, Any]:
     system_prompt = ctx.get("system_prompt") or "你是一个助理。"
     llm = get_llm(temperature=0, streaming=True)
     messages: list[BaseMessage] = list(state.get("messages") or [])
-    
+
     # Convert BaseMessage subclasses to correct types (fix pydantic validation issue)
     raw_messages = []
     for m in messages:
@@ -34,9 +34,9 @@ async def generate_node(state: AgentState) -> dict[str, Any]:
         else:
             _log.warning(f"Unknown message type: {type(m)}, skipping")
     converted_messages = convert_to_messages(raw_messages)
-    
+
     _log.info(f"Message count: {len(converted_messages)}")
-    
+
     response = await anyio.to_thread.run_sync(
         lambda: llm.invoke([SystemMessage(content=system_prompt), *converted_messages])
     )

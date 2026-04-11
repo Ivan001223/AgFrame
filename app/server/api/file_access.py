@@ -3,7 +3,6 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 
-from app.infrastructure.config.settings import settings
 from app.infrastructure.database.models import User
 from app.infrastructure.storage.object_store import (
     build_document_storage_key,

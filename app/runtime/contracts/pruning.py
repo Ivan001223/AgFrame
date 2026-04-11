@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any, cast
 
 from typing_extensions import TypedDict
 
@@ -16,6 +17,13 @@ class ChatContextPruningPayload(TypedDict, total=False):
     context_focus_hint: str
     context_pruning: PromptPruningSummary
     retrieval_debug: RetrievalDebugPayload
+    retrieved_docs_candidates_raw: list[Any]
+    retrieved_docs_candidates: list[Any]
+    retrieved_docs: list[Any]
+    retrieved_memories: list[Any]
+    retrieved_profile_items: list[Any]
+    system_prompt: str
+    citations: list[Any]
 
 
 def build_retrieval_debug_payload(
@@ -27,7 +35,7 @@ def build_retrieval_debug_payload(
     existing = current or {}
     existing_candidate = existing.get("candidate_pruning")
     if isinstance(existing_candidate, dict):
-        payload["candidate_pruning"] = existing_candidate
+        payload["candidate_pruning"] = cast(AggregatePruningSummary, existing_candidate)
     if candidate_pruning is not None:
         payload["candidate_pruning"] = candidate_pruning
     return payload
@@ -41,7 +49,7 @@ def build_chat_context_pruning_payload(
     prompt_pruning: PromptPruningSummary | None = None,
     retrieval_debug: RetrievalDebugPayload | None = None,
 ) -> ChatContextPruningPayload:
-    payload: ChatContextPruningPayload = dict(current or {})
+    payload: ChatContextPruningPayload = cast(ChatContextPruningPayload, dict(current or {}))
     existing_session_id = payload.get("session_id")
     if isinstance(existing_session_id, str) and existing_session_id:
         payload["session_id"] = existing_session_id

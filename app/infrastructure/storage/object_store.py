@@ -4,10 +4,11 @@ import mimetypes
 import os
 import shutil
 import tempfile
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import BinaryIO, Iterator
+from typing import BinaryIO, cast
 from urllib.parse import urlsplit
 
 from app.infrastructure.config.settings import settings
@@ -229,7 +230,7 @@ class _S3ObjectStore(_BaseObjectStore):
         if self._client is not None:
             return self._client
         try:
-            import boto3
+            import boto3  # type: ignore[import-untyped]
         except ModuleNotFoundError as exc:
             raise ObjectStoreError("boto3 is required when STORAGE_BACKEND=s3") from exc
 
@@ -304,7 +305,7 @@ class _S3ObjectStore(_BaseObjectStore):
         body = response.get("Body")
         if body is None:
             raise ObjectStoreNotFoundError(f"storage object not found: {reference}")
-        return body
+        return cast(BinaryIO, body)
 
 
 _object_store: _BaseObjectStore | None = None

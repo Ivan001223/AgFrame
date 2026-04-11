@@ -1,7 +1,7 @@
 import pytest
 
-from app.harness.runtime.run_service import HarnessRunService
 from app.harness.runtime.policy_registry import UnknownHarnessTaskTypeError
+from app.harness.runtime.run_service import HarnessRunService
 
 
 def test_create_document_ingest_run():

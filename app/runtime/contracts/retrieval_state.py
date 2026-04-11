@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any, cast
 
 from langchain_core.documents import Document
 from typing_extensions import TypedDict
@@ -39,8 +40,20 @@ def build_retrieval_artifacts_payload(
     if not clear_all and current:
         for key in RETRIEVAL_ARTIFACT_KEYS:
             value = current.get(key)
-            if isinstance(value, list):
-                payload[key] = value
+            if not isinstance(value, list):
+                continue
+            if key == "retrieved_docs":
+                payload["retrieved_docs"] = cast(list[Document], value)
+            elif key == "retrieved_docs_candidates":
+                payload["retrieved_docs_candidates"] = cast(list[Document], value)
+            elif key == "retrieved_docs_candidates_raw":
+                payload["retrieved_docs_candidates_raw"] = cast(list[Document], value)
+            elif key == "retrieved_memories":
+                payload["retrieved_memories"] = cast(list[Document], value)
+            elif key == "retrieved_profile_items":
+                payload["retrieved_profile_items"] = cast(list[dict[str, Any]], value)
+            elif key == "citations":
+                payload["citations"] = cast(list[dict[str, Any]], value)
 
     if retrieved_docs is not None:
         payload["retrieved_docs"] = retrieved_docs

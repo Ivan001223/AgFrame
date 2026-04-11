@@ -174,8 +174,8 @@ async def create_memory_item(
         raise HTTPException(status_code=500, detail="Failed to create memory item")
     item = store.get_item_by_hash(
         user_id=current_user.username,
-        kind=row["kind"],
-        item_hash=row["item_hash"],
+        kind=str(row["kind"]),
+        item_hash=str(row["item_hash"]),
     )
     if item is None:
         raise HTTPException(status_code=500, detail="Memory item created but could not be reloaded")

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
@@ -10,10 +10,9 @@ from app.infrastructure.database.history_manager import history_manager
 from app.infrastructure.database.models import User
 from app.infrastructure.database.schema import ensure_schema_if_possible
 from app.infrastructure.database.stores import MySQLConversationStore
-from app.runtime.graph.state import ActionRequired
 from app.runtime.graph.resume_service import GraphResumeService
+from app.runtime.graph.state import ActionRequired
 from app.server.api.auth import get_current_active_user
-from app.server.session_history import persist_session_messages
 
 router = APIRouter(prefix="/interrupt", tags=["human-in-the-loop"])
 
@@ -69,6 +68,23 @@ def _normalize_resume_messages(messages: Any) -> list[dict[str, str]]:
     return normalized
 
 
+def _persist_interrupt_session_messages(
+    *,
+    user_id: str,
+    session_id: str,
+    messages: list[dict[str, Any]],
+    background_tasks: BackgroundTasks | None = None,
+) -> Any:
+    if ensure_schema_if_possible():
+        saved = MySQLConversationStore().save_session(user_id, session_id, messages, None)
+        if background_tasks is not None:
+            from app.server.session_history import update_memory_after_save
+
+            background_tasks.add_task(update_memory_after_save, user_id, session_id, messages)
+        return saved
+    return history_manager.save_session(user_id, session_id, messages, None)
+
+
 def _checkpoint_owner(checkpoint_data: dict[str, Any]) -> str | None:
     candidates: list[Any] = [
         checkpoint_data.get("user_id"),
@@ -112,13 +128,16 @@ def _record_interrupt_event(
     details: dict[str, Any] | None = None,
     actor: str | None = None,
 ) -> dict[str, object] | None:
-    return get_interrupt_event_service().record(
+    return cast(
+        dict[str, object] | None,
+        get_interrupt_event_service().record(
         event_type=event_type,
         event_source="interrupt",
         user_id=_interrupt_event_user_id(checkpoint_data, current_user),
         session_id=session_id,
         actor=actor or current_user.username,
         details=dict(details or {}),
+        ),
     )
 
 
@@ -289,16 +308,17 @@ async def get_resume_command(
         current_user=current_user,
     )
     action_required = checkpoint_data.get("action_required")
+    action_required_payload = action_required if isinstance(action_required, dict) else None
 
-    if not _is_approval_granted(action_required):
+    if not _is_approval_granted(action_required_payload):
         _record_interrupt_event(
             session_id=session_id,
             checkpoint_data=checkpoint_data,
             current_user=current_user,
             event_type="interrupt.resume_blocked",
             details={
-                "reason": _resume_block_reason(action_required),
-                "action_type": str(action_required.get("action_type") or "unknown"),
+                "reason": _resume_block_reason(action_required_payload),
+                "action_type": str((action_required_payload or {}).get("action_type") or "unknown"),
             },
         )
         raise HTTPException(status_code=400, detail="Action not yet approved")
@@ -337,15 +357,16 @@ async def resume_session(
         "updated_at": checkpoint.get("updated_at"),
     }
     action_required = checkpoint_data.get("action_required")
-    if not _is_approval_granted(action_required):
+    action_required_payload = action_required if isinstance(action_required, dict) else None
+    if not _is_approval_granted(action_required_payload):
         _record_interrupt_event(
             session_id=session_id,
             checkpoint_data=checkpoint_data,
             current_user=current_user,
             event_type="interrupt.resume_blocked",
             details={
-                "reason": _resume_block_reason(action_required),
-                "action_type": str(action_required.get("action_type") or "unknown"),
+                "reason": _resume_block_reason(action_required_payload),
+                "action_type": str((action_required_payload or {}).get("action_type") or "unknown"),
             },
         )
         raise HTTPException(status_code=400, detail="Action not yet approved")
@@ -378,7 +399,7 @@ async def resume_session(
 
     messages = _normalize_resume_messages(result.get("messages"))
     if messages:
-        persist_session_messages(
+        _persist_interrupt_session_messages(
             user_id=current_user.username,
             session_id=session_id,
             messages=messages,

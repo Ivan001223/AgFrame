@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, cast
 
 import anyio
 from langchain_core.messages import BaseMessage
@@ -36,7 +36,7 @@ async def retrieve_memories_node(state: AgentState) -> dict[str, Any]:
     messages = list(state.get("messages") or [])
     query = _get_last_user_query(messages)
     ctx = build_chat_context_pruning_payload(current=state.get("context"))
-    user_id = state.get("user_id") or ctx.get("user_id") or "default"
+    user_id = str(state.get("user_id") or ctx.get("user_id") or "default")
     memories = []
     if ensure_schema_if_possible():
         try:
@@ -46,11 +46,12 @@ async def retrieve_memories_node(state: AgentState) -> dict[str, Any]:
         except Exception as e:
             _log.warning(f"Failed to retrieve memories: {e}")
             memories = []
-    ctx["retrieved_memories"] = memories
+    ctx_payload = cast(dict[str, Any], dict(ctx))
+    ctx_payload["retrieved_memories"] = memories
     trace = build_agent_trace_payload(current=state.get("trace"))
-    trace_id = trace.get("trace_id") or ctx.get("trace_id")
-    session_id = ctx.get("session_id") or "-"
+    trace_id = trace.get("trace_id") or ctx_payload.get("trace_id")
+    session_id = ctx_payload.get("session_id") or "-"
     bind_logger(_log, trace_id=str(trace_id or "-"), user_id=str(user_id), session_id=str(session_id), node="retrieve_memories").info(
         "retrieved memories=%d cost_ms=%d", len(memories), int((time.perf_counter() - t0) * 1000)
     )
-    return {"retrieved_memories": memories, "context": ctx}
+    return {"retrieved_memories": memories, "context": ctx_payload}

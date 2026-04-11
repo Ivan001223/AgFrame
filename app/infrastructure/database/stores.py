@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from pgvector.sqlalchemy import Vector
+from pgvector.sqlalchemy import Vector  # type: ignore[import-untyped]
 from sqlalchemy import Float, bindparam, cast, delete, func, select, update
 
 from app.infrastructure.database.conversation_utils import (
@@ -26,9 +26,14 @@ from app.infrastructure.database.orm import get_session
 from app.infrastructure.storage.object_store import storage_display_label
 
 
+def _result_rowcount(result: Any) -> int:
+    rowcount = getattr(result, "rowcount", None)
+    return int(rowcount) if rowcount is not None else 0
+
+
 class MySQLConversationStore:
     """MySQL 对话存储实现"""
-    
+
     def save_session(
         self,
         user_id: str,
@@ -102,7 +107,7 @@ class MySQLConversationStore:
             "id": session_id,
             "title": title,
             "created_at": created_at,
-            "updated_at": now if bump_updated_at else int(existing.updated_at),
+            "updated_at": now if bump_updated_at else created_at,
             "messages": messages,
         }
 
@@ -311,7 +316,7 @@ class MySQLConversationStore:
 
 class MySQLProfileStore:
     """MySQL 用户画像存储实现"""
-    
+
     def get_profile(self, user_id: str) -> dict[str, Any] | None:
         """获取用户画像"""
         with get_session() as session:
@@ -444,7 +449,7 @@ class KnowledgeBaseStore:
     def delete_knowledge_base(self, knowledge_base_id: str) -> bool:
         with get_session() as session:
             res = session.execute(delete(KnowledgeBase).where(KnowledgeBase.knowledge_base_id == knowledge_base_id))
-            return bool(res.rowcount)
+            return _result_rowcount(res) > 0
 
 
 class KnowledgeBaseDocumentStore:
@@ -472,7 +477,7 @@ class KnowledgeBaseDocumentStore:
     def clear_document(self, *, doc_id: int) -> bool:
         with get_session() as session:
             res = session.execute(delete(KnowledgeBaseDocument).where(KnowledgeBaseDocument.doc_id == int(doc_id)))
-            return bool(res.rowcount)
+            return _result_rowcount(res) > 0
 
     def get_assignment(self, *, doc_id: int) -> dict[str, Any] | None:
         with get_session() as session:
@@ -496,7 +501,7 @@ class KnowledgeBaseDocumentStore:
 
 class MySQLDocStore:
     """MySQL 文档存储实现 (Parent Retrieval)"""
-    
+
     def upsert_document(
         self, source_path: str, created_at: int | None = None, user_id: str | None = None, checksum: str | None = None
     ) -> int:
@@ -571,7 +576,7 @@ class MySQLDocStore:
             res = session.execute(
                 delete(DocContent).where(DocContent.doc_id == int(doc_id))
             )
-            return int(res.rowcount or 0)
+            return _result_rowcount(res)
 
     def fetch_parent_chunks(self, parent_chunk_ids: list[int]) -> list[dict[str, Any]]:
         """根据 ID 列表批量获取父文档切片"""
@@ -747,14 +752,14 @@ class MySQLDocStore:
         """删除文档元数据及关联切片。"""
         with get_session() as session:
             res = session.execute(delete(Document).where(Document.doc_id == int(doc_id)))
-            return bool(res.rowcount)
+            return _result_rowcount(res) > 0
 
 
 class PgDocEmbeddingStore:
     def delete_by_doc_id(self, doc_id: int) -> int:
         with get_session() as session:
             res = session.execute(delete(DocEmbedding).where(DocEmbedding.doc_id == int(doc_id)))
-            return int(res.rowcount or 0)
+            return _result_rowcount(res)
 
     def add_embeddings(self, rows: list[dict[str, Any]]) -> int:
         if not rows:
@@ -818,7 +823,7 @@ class PgDocEmbeddingStore:
             .order_by(func.ts_rank_cd(tsv, tsq).desc())
             .limit(int(k))
         )
-        
+
         if filter:
             allowed_keys = {"user_id", "doc_id", "source", "type", "knowledge_base_id"}
             for key, value in filter.items():
@@ -864,9 +869,11 @@ class PgUserMemoryStore:
                         UserMemoryItem.item_hash.in_(hashes),
                     )
                 ).scalars().all()
-                for it in found:
-                    if it.item_hash:
-                        existing_by_key[(str(it.user_id), str(it.kind), str(it.item_hash))] = it
+                for existing_item in found:
+                    if existing_item.item_hash:
+                        existing_by_key[
+                            (str(existing_item.user_id), str(existing_item.kind), str(existing_item.item_hash))
+                        ] = existing_item
 
             for r in rows:
                 user_id = str(r.get("user_id") or "")
@@ -883,7 +890,7 @@ class PgUserMemoryStore:
                 confidence_score = r.get("confidence_score")
                 last_verified_at = r.get("last_verified_at")
 
-                it = existing_by_key.get(key)
+                it: UserMemoryItem | None = existing_by_key.get(key)
                 if it is None:
                     it = UserMemoryItem(
                         user_id=user_id,
@@ -928,7 +935,7 @@ class PgUserMemoryStore:
             if subkind:
                 stmt = stmt.where(UserMemoryItem.subkind == str(subkind))
             res = session.execute(stmt)
-            return int(res.rowcount or 0)
+            return _result_rowcount(res)
 
     def list_items(
         self,
@@ -1040,7 +1047,7 @@ class PgUserMemoryStore:
                     UserMemoryItem.item_id == int(item_id),
                 )
             )
-            return bool(res.rowcount)
+            return _result_rowcount(res) > 0
 
     def dense_search(
         self,
@@ -1172,7 +1179,7 @@ class PgChatSummaryStore:
                     UserMemoryItem.kind == "chat_summary",
                 )
             )
-            return int(res.rowcount or 0)
+            return _result_rowcount(res)
 
     def delete_by_user(self, user_id: str) -> int:
         uid = str(user_id or "").strip()
@@ -1185,4 +1192,4 @@ class PgChatSummaryStore:
                     UserMemoryItem.kind == "chat_summary",
                 )
             )
-            return int(res.rowcount or 0)
+            return _result_rowcount(res)

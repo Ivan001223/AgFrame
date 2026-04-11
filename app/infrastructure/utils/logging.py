@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import MutableMapping
 from typing import Any
 
 
@@ -14,7 +15,7 @@ class DefaultContextFilter(logging.Filter):
 
 
 class ContextLogger(logging.LoggerAdapter):
-    def process(self, msg: str, kwargs: dict[str, Any]):
+    def process(self, msg: str, kwargs: MutableMapping[str, Any]):
         extra = dict(self.extra or {})
         extra.update(kwargs.get("extra") or {})
         kwargs["extra"] = extra

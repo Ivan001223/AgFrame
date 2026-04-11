@@ -2,9 +2,9 @@
 AgFrame 测试配置
 """
 
-import sys
 import os
 import shutil
+import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -48,7 +48,7 @@ def mock_config():
 @pytest.fixture
 def sample_agent_state():
     """提供测试用的 AgentState"""
-    from langchain_core.messages import HumanMessage, AIMessage
+    from langchain_core.messages import AIMessage, HumanMessage
 
     return {
         "messages": [

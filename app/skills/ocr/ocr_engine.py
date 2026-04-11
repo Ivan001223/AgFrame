@@ -50,13 +50,13 @@ class QwenVLOCR:
             str: 提取出的文本内容
         """
         ext = os.path.splitext(file_path)[1].lower()
-        
+
         try:
             llm = get_local_qwen_provider()
         except Exception as e:
             logger.error(f"Failed to get LLM provider: {e}")
             return ""
-        
+
         full_text = []
         temp_files: list[str] = []
 
@@ -75,10 +75,10 @@ class QwenVLOCR:
                 return ""
 
             logger.info(f"Starting OCR: {len(images_paths)} images to process")
-            
+
             for i, img_path in enumerate(images_paths):
                 abs_path = os.path.abspath(img_path).replace("\\", "/")
-                image_url = f"file://{abs_path}" 
+                image_url = f"file://{abs_path}"
 
                 # 构造包含图片的多模态消息
                 message = HumanMessage(
@@ -87,7 +87,7 @@ class QwenVLOCR:
                         {"type": "text", "text": "请准确转写这张图片中的文字。"}
                     ]
                 )
-                
+
                 logger.debug(f"Processing image {i+1}/{len(images_paths)}")
                 response = llm.invoke([message], max_new_tokens=2048)
                 full_text.append(response.content)

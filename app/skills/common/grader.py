@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from langchain_core.documents import Document
 from langchain_core.messages import BaseMessage, HumanMessage
@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from app.infrastructure.config.settings import settings
 from app.infrastructure.utils.logging import bind_logger, get_logger
 from app.runtime.contracts.trace import build_agent_trace_payload
-from app.runtime.contracts.workflow_context import build_workflow_context_payload
+from app.runtime.contracts.workflow_context import GradePayload, build_workflow_context_payload
 from app.runtime.graph.registry import register_node
 from app.runtime.graph.state import AgentState
 from app.runtime.llm.structured_output import StructuredOutputMode, invoke_structured
@@ -109,7 +109,7 @@ async def grader_node(state: AgentState) -> dict[str, Any]:
             mode=_get_structured_mode(),
             sanitize_messages=False,
         )
-        ctx = build_workflow_context_payload(current=ctx, grade=result.model_dump())
+        ctx = build_workflow_context_payload(current=ctx, grade=cast(GradePayload, result.model_dump()))
         if result.verdict == "rewrite":
             ctx = build_workflow_context_payload(
                 current=ctx,
@@ -155,13 +155,13 @@ async def grader_node(state: AgentState) -> dict[str, Any]:
         errors.append(f"grader_error: {e}")
         ctx = build_workflow_context_payload(
             current=ctx,
-            grade={
+            grade=cast(GradePayload, {
                 "verdict": "rewrite",
                 "reasoning": f"Error: {e}",
                 "issues": ["grader_exception"],
                 "rewrite_instructions": "请基于已给出的上下文，重新回答用户问题；不确定的内容明确说明缺口，不要编造。",
                 "search_query": None,
-            },
+            }),
             clear_search_query=True,
             clear_web_search=True,
             self_correction="请基于已给出的上下文，重新回答用户问题；不确定的内容明确说明缺口，不要编造。",

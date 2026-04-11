@@ -1,9 +1,9 @@
 from typing import Any
 
-from app.skills.common.tools import register_tool
+from langchain_core.tools import tool
 
 
-@register_tool("python_executor")
+@tool
 async def python_executor(code: str) -> dict[str, Any]:
     """
     Execute Python code in a secure sandbox environment.

@@ -4,21 +4,22 @@ import asyncio
 import logging
 import re
 from collections import defaultdict, deque
+from collections.abc import Callable
 from inspect import isawaitable
-from typing import Annotated, Any, Callable, NotRequired, TypedDict
+from typing import Annotated, Any, Awaitable, NotRequired, TypedDict, cast
 
 import anyio
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
-from app.runtime.llm.stream_adapter import coerce_stream_text, stream_llm_events
 from app.runtime.llm.llm_factory import get_llm_for_provider
 from app.runtime.llm.provider_registry import (
     ModelProviderRegistry,
     get_provider_registry,
     infer_tool_calling_support,
 )
+from app.runtime.llm.stream_adapter import coerce_stream_text, stream_llm_events
 
 _log = logging.getLogger("runtime.graph.orchestration")
 
@@ -1123,8 +1124,12 @@ def _build_agent_output_artifact(
     tool_runs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     consumed_handoffs: list[dict[str, Any]] = []
-    outputs = (state or {}).get("agent_outputs", {}) or {}
-    artifacts = (state or {}).get("output_artifacts", {}) or {}
+    if state is None:
+        outputs: dict[str, str] = {}
+        artifacts: dict[str, dict[str, Any]] = {}
+    else:
+        outputs = cast(dict[str, str], state.get("agent_outputs") or {})
+        artifacts = state.get("output_artifacts") or {}
 
     for edge in incoming_edges or []:
         source_agent_id = str(edge.get("source_agent_id") or "").strip()
@@ -1427,13 +1432,13 @@ def _extract_member_analysis_block(content: str) -> dict[str, str]:
 
 
 def _merge_round_analysis(entries: list[dict[str, str]]) -> dict[str, str]:
-    buckets = {
+    buckets: dict[str, list[str]] = {
         "key_players": [],
         "incentive_map": [],
         "dominant_risks": [],
         "expected_equilibrium": [],
     }
-    seen = {key: set() for key in buckets}
+    seen: dict[str, set[str]] = {key: set() for key in buckets}
     for entry in entries:
         parsed = _extract_member_analysis_block(entry.get("output", ""))
         mapping = {
@@ -1701,7 +1706,7 @@ def _parse_labeled_sections(content: str, labels: list[str]) -> dict[str, str]:
             re.MULTILINE,
         )
     )
-    sections = {label: "" for label in labels}
+    sections = dict.fromkeys(labels, "")
     for index, match in enumerate(matches):
         label = match.group(1)
         start = match.end()
@@ -2131,7 +2136,7 @@ def _build_agent_node(
     is_review: bool = False,
     on_stream_chunk: Callable[[str, str, int], Any] | None = None,
     on_stream_event: Callable[[dict[str, Any]], Any] | None = None,
-) -> Callable[[OrchestrationState], dict[str, Any]]:
+) -> Callable[[OrchestrationState], Awaitable[dict[str, Any]]]:
     agent_id = str(agent_config["agent_id"])
     name = str(agent_config.get("name", agent_id))
     is_cluster_summary = bool(agent_config.get("cluster_summary"))
@@ -2512,7 +2517,7 @@ def compile_orchestration_graph(
     Uses topological sorting to determine linear execution order.
     """
     builder = StateGraph(OrchestrationState)
-    
+
     agents = graph_json.get("agents") or []
     edges = graph_json.get("edges") or []
     provider_config = graph_json.get("provider_config") or {}
@@ -2544,7 +2549,7 @@ def compile_orchestration_graph(
         # Empty graph fallback
         async def empty_node(state: OrchestrationState):
             return {"errors": ["No visible agents on canvas"]}
-        builder.add_node("empty", empty_node)
+        builder.add_node("empty", cast(Any, empty_node))
         builder.add_edge(START, "empty")
         builder.add_edge("empty", END)
         return builder.compile()
@@ -2644,7 +2649,10 @@ def compile_orchestration_graph(
         )
         node_name = f"agent_{aid}"
         node_names.append(node_name)
-        builder.add_node(node_name, _build_agent_node(enriched_agent_conf, provider_config, default_timeout, registry))
+        builder.add_node(
+            node_name,
+            cast(Any, _build_agent_node(enriched_agent_conf, provider_config, default_timeout, registry)),
+        )
 
     review_enabled = bool(review_config.get("enabled", True))
     if review_enabled:
@@ -2662,7 +2670,10 @@ def compile_orchestration_graph(
         }
         builder.add_node(
             "review_agent",
-            _build_agent_node(review_agent, provider_config, default_timeout, registry, is_review=True),
+            cast(
+                Any,
+                _build_agent_node(review_agent, provider_config, default_timeout, registry, is_review=True),
+            ),
         )
 
     # 2. Build Graph Edges
@@ -2703,7 +2714,7 @@ def compile_orchestration_graph(
                 return {}
 
             terminal_node_name = "terminal_join"
-            builder.add_node(terminal_node_name, terminal_join)
+            builder.add_node(terminal_node_name, cast(Any, terminal_join))
             for agent_id in terminal_agent_ids:
                 builder.add_edge(f"agent_{agent_id}", terminal_node_name)
             end_or_loop_node = terminal_node_name
@@ -2722,11 +2733,11 @@ def compile_orchestration_graph(
         if loop_count > 1:
             async def bump_loop(state: OrchestrationState):
                 return {"loop_index": int(state.get("loop_index", 0)) + 1}
-            builder.add_node("loop_bump", bump_loop)
+            builder.add_node("loop_bump", cast(Any, bump_loop))
             builder.add_conditional_edges(end_or_loop_node, get_loop_router(loop_count), ["loop_bump", END])
             for agent_id in start_agent_ids:
                 builder.add_edge("loop_bump", f"agent_{agent_id}")
         else:
             builder.add_edge(end_or_loop_node, END)
-    
+
     return builder.compile()

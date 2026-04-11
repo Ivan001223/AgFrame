@@ -7,8 +7,8 @@ from sqlalchemy import select
 from app.infrastructure.config.settings import settings
 from app.infrastructure.database.models import User, UserProfile
 from app.infrastructure.database.orm import get_session
-from app.server.api.dto import dump_settings_with_runtime_status
 from app.server.api.auth import get_current_active_user, get_current_admin_user
+from app.server.api.dto import dump_settings_with_runtime_status
 
 router = APIRouter()
 

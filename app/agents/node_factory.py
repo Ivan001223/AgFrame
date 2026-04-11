@@ -1,5 +1,5 @@
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, cast
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
@@ -56,7 +56,7 @@ def make_agent_node(chain, *, messages_key: str = "messages") -> Callable[[Agent
         Callable: 节点函数，输入 State，输出更新后的 State
     """
     def node(state: AgentState):
-        messages = state[messages_key]
+        messages = cast(dict[str, Any], state)[messages_key]
         response = chain.invoke({messages_key: messages})
         return {"messages": [response]}
 

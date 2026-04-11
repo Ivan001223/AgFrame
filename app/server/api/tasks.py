@@ -1,13 +1,17 @@
+from __future__ import annotations
+
 import time
 import uuid
-from typing import Annotated
+from collections.abc import Awaitable
+from inspect import isawaitable
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.infrastructure.database.models import User
 from app.infrastructure.queue.client import enqueue_ingest_pdf
-from app.infrastructure.queue.redis_client import get_redis
 from app.infrastructure.queue.redis_client import (
+    get_redis,
     get_task,
     init_task,
     list_task_incidents,
@@ -61,17 +65,25 @@ ERROR_CATALOG: dict[str, dict[str, str]] = {
     },
     "task_timeout_suspected": {
         "title": "任务疑似超时",
-        "message": "任务运行时间过长，可能已卡住。",
+        "message": "任务运行时间过长，可能已经卡住。",
         "suggested_action": "请检查依赖服务状态，必要时重新入队。",
     },
 }
 
 
 def _to_int(value: str | None) -> int | None:
+    if value is None or value == "":
+        return None
     try:
-        return int(value) if value not in {None, ""} else None
+        return int(value)
     except (TypeError, ValueError):
         return None
+
+
+async def _await_maybe[T](value: T | Awaitable[T]) -> T:
+    if isawaitable(value):
+        return await value
+    return value
 
 
 def _build_diagnostics(task: dict[str, str]) -> dict[str, object]:
@@ -86,9 +98,7 @@ def _build_diagnostics(task: dict[str, str]) -> dict[str, object]:
         age_seconds = max(0, now - created_at)
 
     timeout_exceeded = bool(
-        status == "running"
-        and age_seconds is not None
-        and age_seconds > RUNNING_TIMEOUT_SECONDS
+        status == "running" and age_seconds is not None and age_seconds > RUNNING_TIMEOUT_SECONDS
     )
 
     diagnostics: dict[str, object] = {
@@ -104,6 +114,7 @@ def _build_diagnostics(task: dict[str, str]) -> dict[str, object]:
         diagnostics["error_code"] = "task_timeout_suspected"
     if timeout_exceeded and not diagnostics["error_message"]:
         diagnostics["error_message"] = "任务运行时间过长，疑似卡住或超时"
+
     error_code = str(diagnostics["error_code"] or "")
     catalog_entry = ERROR_CATALOG.get(error_code, {})
     diagnostics["title"] = catalog_entry.get("title", "任务状态")
@@ -172,7 +183,7 @@ async def get_task_summary(
     total = 0
 
     async for key in redis.scan_iter(match="task:*"):
-        task = dict(await redis.hgetall(key))
+        task = cast(dict[str, str], dict(await _await_maybe(redis.hgetall(key))))
         if not task or not _task_visible_to_user(task, current_user):
             continue
         total += 1
@@ -187,7 +198,7 @@ async def get_task_summary(
         if diagnostics.get("timeout_exceeded"):
             slow_tasks.append(
                 {
-                    "task_id": task.get("task_id") or key.split(":", 1)[1],
+                    "task_id": task.get("task_id") or str(key).split(":", 1)[1],
                     "status": status,
                     "stage": diagnostics.get("stage"),
                     "age_seconds": diagnostics.get("age_seconds"),
@@ -195,9 +206,13 @@ async def get_task_summary(
                 }
             )
 
-    slow_tasks.sort(key=lambda item: int(item.get("age_seconds") or 0), reverse=True)
+    slow_tasks.sort(key=lambda item: cast(int, item.get("age_seconds") or 0), reverse=True)
     top_errors = [
-        {"error_code": code, "count": count, "title": ERROR_CATALOG.get(code, {}).get("title", "任务状态")}
+        {
+            "error_code": code,
+            "count": count,
+            "title": ERROR_CATALOG.get(code, {}).get("title", "任务状态"),
+        }
         for code, count in sorted(error_counts.items(), key=lambda item: (-item[1], item[0]))
     ]
     recent_incidents = [
@@ -240,14 +255,7 @@ async def update_incident_status(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ):
     incidents = await list_task_incidents(limit=200)
-    incident = next(
-        (
-            item
-            for item in incidents
-            if str(item.get("incident_id") or "") == incident_id
-        ),
-        None,
-    )
+    incident = next((item for item in incidents if str(item.get("incident_id") or "") == incident_id), None)
     if incident is None:
         raise HTTPException(status_code=404, detail="Incident not found")
     if not _incident_visible_to_user(incident, current_user):
@@ -265,34 +273,33 @@ async def update_incident_status(
 
 @router.get("/tasks/{task_id}")
 async def get_task_status(
-    task_id: str, current_user: Annotated[User, Depends(get_current_active_user)]
+    task_id: str,
+    current_user: Annotated[User, Depends(get_current_active_user)],
 ):
     task = await get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # Check isolation
-    # If task has user_id, ensure it matches current_user or admin
     task_user_id = task.get("user_id")
     if task_user_id and task_user_id != "unknown":
         if task_user_id != current_user.username and current_user.role != "admin":
-            raise HTTPException(
-                status_code=403, detail="Not authorized to view this task"
-            )
+            raise HTTPException(status_code=403, detail="Not authorized to view this task")
 
+    task_payload: dict[str, object] = dict(task)
     if task.get("status") == "failed":
-        task["can_retry"] = "true"
+        task_payload["can_retry"] = "true"
     diagnostics = _build_diagnostics(task)
-    if diagnostics["timeout_exceeded"] and task.get("status") == "running":
-        task["can_retry"] = "true"
-    task["diagnostics"] = diagnostics
+    if bool(diagnostics["timeout_exceeded"]) and task.get("status") == "running":
+        task_payload["can_retry"] = "true"
+    task_payload["diagnostics"] = diagnostics
 
-    return task
+    return task_payload
 
 
 @router.post("/tasks/{task_id}/retry")
 async def retry_task(
-    task_id: str, current_user: Annotated[User, Depends(get_current_active_user)]
+    task_id: str,
+    current_user: Annotated[User, Depends(get_current_active_user)],
 ):
     task = await get_task(task_id)
     if not task:
@@ -301,9 +308,7 @@ async def retry_task(
     task_user_id = task.get("user_id")
     if task_user_id and task_user_id != "unknown":
         if task_user_id != current_user.username and current_user.role != "admin":
-            raise HTTPException(
-                status_code=403, detail="Not authorized to retry this task"
-            )
+            raise HTTPException(status_code=403, detail="Not authorized to retry this task")
 
     if task.get("status") != "failed":
         raise HTTPException(status_code=400, detail="Only failed tasks can be retried")
@@ -313,7 +318,7 @@ async def retry_task(
         raise HTTPException(status_code=400, detail="Task is missing file_path")
 
     new_task_id = str(uuid.uuid4())
-    retry_count = int(task.get("retry_count") or 0) + 1
+    retry_count = (_to_int(task.get("retry_count")) or 0) + 1
     await init_task(
         new_task_id,
         {

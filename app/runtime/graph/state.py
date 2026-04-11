@@ -1,10 +1,9 @@
 from typing import Annotated, Any, Literal
 
-from typing_extensions import TypedDict
-
 from langchain_core.documents import Document
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
+from typing_extensions import TypedDict
 
 from app.runtime.contracts.pruning import RetrievalDebugPayload
 from app.runtime.contracts.trace import AgentTracePayload

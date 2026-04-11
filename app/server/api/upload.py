@@ -1,4 +1,3 @@
-import hashlib
 import logging
 import os
 import tempfile
@@ -8,10 +7,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
-from app.infrastructure.config.settings import settings
+from app.infrastructure.config.settings import settings as _settings
 from app.infrastructure.database.models import User
 from app.infrastructure.database.schema import ensure_schema_if_possible
-from app.infrastructure.database.stores import KnowledgeBaseDocumentStore, KnowledgeBaseStore, MySQLDocStore
+from app.infrastructure.database.stores import (
+    KnowledgeBaseDocumentStore,
+    KnowledgeBaseStore,
+    MySQLDocStore,
+)
 from app.infrastructure.queue.client import enqueue_ingest_pdf
 from app.infrastructure.queue.redis_client import (
     claim_task_operation,
@@ -30,6 +33,7 @@ from app.server.api.auth import get_current_active_user
 router = APIRouter()
 logger = logging.getLogger(__name__)
 UPLOAD_CHUNK_SIZE = 1024 * 1024
+settings = _settings
 
 
 def _get_ocr_engine():
@@ -52,7 +56,6 @@ def _safe_uploaded_name(original_name: str | None, *, fallback: str) -> str:
 
 
 async def _write_upload_to_temp_file(file: UploadFile, *, suffix: str = "") -> tuple[str, str]:
-    hasher = hashlib.sha256()
     temp_path = ""
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
@@ -61,11 +64,10 @@ async def _write_upload_to_temp_file(file: UploadFile, *, suffix: str = "") -> t
                 chunk = await file.read(UPLOAD_CHUNK_SIZE)
                 if not chunk:
                     break
-                hasher.update(chunk)
                 temp_file.write(chunk)
     finally:
         await file.close()
-    return temp_path, hasher.hexdigest()
+    return temp_path, sha256_file(temp_path)
 
 
 def _remove_temp_file(path: str | None) -> None:
@@ -91,7 +93,7 @@ async def _safe_release_task_operation(operation_key: str, task_id: str) -> None
 async def upload_documents(
     files: list[UploadFile] = File(...),
     knowledge_base_id: str | None = Form(default=None),
-    current_user: Annotated[User, Depends(get_current_active_user)] = None,
+    current_user: Annotated[User | None, Depends(get_current_active_user)] = None,
 ):
     user_id = current_user.username if current_user else "unknown"
     selected_knowledge_base_id = str(knowledge_base_id or "").strip() or None
@@ -234,7 +236,7 @@ async def upload_documents(
 @router.post("/upload/image")
 async def upload_image(
     file: UploadFile = File(...),
-    current_user: Annotated[User, Depends(get_current_active_user)] = None,
+    current_user: Annotated[User | None, Depends(get_current_active_user)] = None,
 ):
     user_id = current_user.username if current_user else "unknown"
     original_name = os.path.basename(file.filename or "")

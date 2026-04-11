@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, Literal, cast
 
 from app.harness.contracts.run import (
     HarnessRunChecklistItem,
     HarnessRunChecklistSnapshot,
+    HarnessContinuationState,
+    HarnessResearchState,
+    HarnessReviewState,
     HarnessRuntimeState,
     HarnessWorkflowProgress,
     HarnessWorkflowStep,
@@ -50,6 +53,18 @@ class HarnessRunService:
     @staticmethod
     def _normalize_metadata(value: dict[str, object] | None) -> dict[str, object] | None:
         return dict(value) if isinstance(value, dict) else None
+
+    @staticmethod
+    def _as_object_dict(value: object) -> dict[str, object]:
+        return dict(value) if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _as_object_list(value: object) -> list[object]:
+        return list(value) if isinstance(value, list) else []
+
+    @staticmethod
+    def _as_dict_list(value: object) -> list[dict[str, object]]:
+        return [cast(dict[str, object], item) for item in HarnessRunService._as_object_list(value) if isinstance(item, dict)]
 
     @staticmethod
     def _merge_metadata(
@@ -104,14 +119,16 @@ class HarnessRunService:
             return dict(graph_json)
         selected = {agent_id for agent_id in selected_agent_ids if agent_id}
         filtered = dict(graph_json)
+        agents = HarnessRunService._as_object_list(graph_json.get("agents"))
         filtered["agents"] = [
             agent
-            for agent in graph_json.get("agents") or []
+            for agent in agents
             if isinstance(agent, dict) and str(agent.get("agent_id") or "") in selected
         ]
+        edges = HarnessRunService._as_object_list(graph_json.get("edges"))
         filtered["edges"] = [
             edge
-            for edge in graph_json.get("edges") or []
+            for edge in edges
             if (
                 isinstance(edge, dict)
                 and str(edge.get("source_agent_id") or "") in selected
@@ -130,6 +147,33 @@ class HarnessRunService:
         if str(agent_config.get("cluster_agent_id") or "").strip():
             return "cluster_member"
         return "agent"
+
+    @staticmethod
+    def _workflow_step_kind_literal(
+        agent_config: dict[str, object],
+    ) -> Literal["agent", "cluster_member", "cluster_summary"]:
+        return cast(
+            Literal["agent", "cluster_member", "cluster_summary"],
+            HarnessRunService._workflow_step_kind(agent_config),
+        )
+
+    @staticmethod
+    def _normalize_checklist_status(
+        value: object,
+    ) -> Literal["pending", "in_progress", "completed"]:
+        normalized = str(value or "pending").strip()
+        if normalized in {"pending", "in_progress", "completed"}:
+            return cast(Literal["pending", "in_progress", "completed"], normalized)
+        return "pending"
+
+    @staticmethod
+    def _normalize_workflow_status(
+        value: object,
+    ) -> Literal["idle", "pending", "running", "blocked", "completed", "failed"]:
+        normalized = str(value or "idle").strip()
+        if normalized in {"idle", "pending", "running", "blocked", "completed", "failed"}:
+            return cast(Literal["idle", "pending", "running", "blocked", "completed", "failed"], normalized)
+        return "idle"
 
     @staticmethod
     def _decorate_run_context(run: dict[str, object]) -> dict[str, object]:
@@ -172,7 +216,7 @@ class HarnessRunService:
                 HarnessRunChecklistItem(
                     item_id=str(item.get("item_id") or f"check_{index + 1}"),
                     content=content,
-                    status=str(item.get("status") or "pending"),
+                    status=self._normalize_checklist_status(item.get("status")),
                     active_form=active_form,
                 )
             )
@@ -242,7 +286,7 @@ class HarnessRunService:
                         label=label,
                         execution_id=execution_id,
                         node_id=node_id,
-                        kind=self._workflow_step_kind(agent_config),
+                        kind=self._workflow_step_kind_literal(agent_config),
                     )
                 )
                 step_index += 1
@@ -255,10 +299,8 @@ class HarnessRunService:
         verification_status = str((latest_verification or {}).get("status") or "").strip()
         approval_status = str((latest_approval or {}).get("status") or "").strip()
         approval_action_type = str((latest_approval or {}).get("action_type") or "").strip()
-        approval_payload = (
-            dict(latest_approval.get("payload_json") or {})
-            if isinstance(latest_approval, dict)
-            else {}
+        approval_payload = self._as_object_dict(
+            latest_approval.get("payload_json") if isinstance(latest_approval, dict) else None
         )
 
         completed_step_indices: set[int] = set()
@@ -283,7 +325,7 @@ class HarnessRunService:
                 blocked_step_index = candidate
 
         current_step_index = None
-        workflow_status = "idle"
+        workflow_status: Literal["idle", "pending", "running", "blocked", "completed", "failed"] = "idle"
         if run_status == "completed" or verification_status == "pass":
             workflow_status = "completed"
         elif approval_action_type == "orchestration_review" and approval_status in {"pending", "rejected"}:
@@ -335,7 +377,7 @@ class HarnessRunService:
 
         return HarnessWorkflowProgress(
             enabled=True,
-            status=workflow_status,
+            status=self._normalize_workflow_status(workflow_status),
             total_steps=total_steps,
             completed_steps=sum(1 for step in serialized_steps if step.get("status") == "completed"),
             blocked_steps=sum(1 for step in serialized_steps if step.get("status") == "blocked"),
@@ -357,18 +399,12 @@ class HarnessRunService:
         latest_verification: dict[str, object] | None,
         events: list[dict[str, object]],
     ) -> dict[str, object]:
-        payload = dict(latest_approval.get("payload_json") or {}) if isinstance(latest_approval, dict) else {}
-        metadata = dict(run.get("metadata_json") or {}) if isinstance(run, dict) else {}
-        verification_artifacts = (
-            dict(latest_verification.get("artifacts_json") or {})
-            if isinstance(latest_verification, dict)
-            else {}
+        payload = self._as_object_dict(latest_approval.get("payload_json") if isinstance(latest_approval, dict) else None)
+        metadata = self._as_object_dict(run.get("metadata_json") if isinstance(run, dict) else None)
+        verification_artifacts = self._as_object_dict(
+            latest_verification.get("artifacts_json") if isinstance(latest_verification, dict) else None
         )
-        output_artifacts = (
-            dict(verification_artifacts.get("output_artifacts") or {})
-            if isinstance(verification_artifacts, dict)
-            else {}
-        )
+        output_artifacts = self._as_object_dict(verification_artifacts.get("output_artifacts"))
 
         resumed_event = next((event for event in reversed(events) if str(event.get("event_type") or "") == "orchestration.stream_continuation_resumed"), None)
         completed_event = next((event for event in reversed(events) if str(event.get("event_type") or "") == "orchestration.stream_continuation_completed"), None)
@@ -407,10 +443,10 @@ class HarnessRunService:
                 if resumed_event
                 else str(latest_approval.get("status") or "") if isinstance(latest_approval, dict) else None
             ),
-            "agent_id": str(payload.get("agent_id") or (resumed_event or {}).get("details_json", {}).get("agent_id") or "") or None,
-            "agent_name": str(payload.get("agent_name") or (resumed_event or {}).get("details_json", {}).get("agent_name") or "") or None,
-            "step_index": self._coerce_int(payload.get("step_index") or (resumed_event or {}).get("details_json", {}).get("next_step_index")),
-            "prefix_length": len(str(payload.get("partial_output") or "")) or self._coerce_int((resumed_event or {}).get("details_json", {}).get("partial_length")) or 0,
+            "agent_id": str(payload.get("agent_id") or self._as_object_dict((resumed_event or {}).get("details_json")).get("agent_id") or "") or None,
+            "agent_name": str(payload.get("agent_name") or self._as_object_dict((resumed_event or {}).get("details_json")).get("agent_name") or "") or None,
+            "step_index": self._coerce_int(payload.get("step_index") or self._as_object_dict((resumed_event or {}).get("details_json")).get("next_step_index")),
+            "prefix_length": len(str(payload.get("partial_output") or "")) or self._coerce_int(self._as_object_dict((resumed_event or {}).get("details_json")).get("partial_length")) or 0,
             "resumed_at": self._coerce_int((resumed_event or {}).get("created_at")),
             "completed_at": self._coerce_int((completed_event or {}).get("created_at")),
         }
@@ -434,16 +470,16 @@ class HarnessRunService:
                 research_mode = str(research.get("research_mode") or "") or None
 
         runtime_state = HarnessRuntimeState(
-            review=review_state,
-            continuation=continuation_state,
-            research={
-                "enabled": bool(cluster_ids),
-                "mode": research_mode,
-                "paper_count": paper_count,
-                "browser_preview_count": browser_preview_count,
-                "source_count": source_count,
-                "cluster_ids": cluster_ids,
-            },
+            review=HarnessReviewState.model_validate(review_state),
+            continuation=HarnessContinuationState.model_validate(continuation_state),
+            research=HarnessResearchState(
+                enabled=bool(cluster_ids),
+                mode=research_mode,
+                paper_count=paper_count,
+                browser_preview_count=browser_preview_count,
+                source_count=source_count,
+                cluster_ids=cluster_ids,
+            ),
         )
         return runtime_state.model_dump()
 
@@ -456,9 +492,9 @@ class HarnessRunService:
         if self.runtime_state_store is not None:
             self.runtime_state_store.upsert_state(
                 run_id=run_id,
-                review_state_json=dict(normalized.get("review") or {}),
-                continuation_state_json=dict(normalized.get("continuation") or {}),
-                research_state_json=dict(normalized.get("research") or {}),
+                review_state_json=self._as_object_dict(normalized.get("review")),
+                continuation_state_json=self._as_object_dict(normalized.get("continuation")),
+                research_state_json=self._as_object_dict(normalized.get("research")),
             )
         return normalized
 
@@ -472,8 +508,9 @@ class HarnessRunService:
         if self.runtime_state_history_store is None:
             return None
         latest = self.runtime_state_history_store.get_latest_for_run(run_id)
-        next_version = int((latest or {}).get("version") or 0) + 1
-        stage = str(((runtime_state.get("review") or {}) if isinstance(runtime_state, dict) else {}).get("stage") or "").strip() or None
+        next_version = (self._coerce_int((latest or {}).get("version")) or 0) + 1
+        review_payload = self._as_object_dict(runtime_state.get("review") if isinstance(runtime_state, dict) else None)
+        stage = str(review_payload.get("stage") or "").strip() or None
         return self.runtime_state_history_store.append_history(
             run_id=run_id,
             version=next_version,
@@ -543,15 +580,15 @@ class HarnessRunService:
             return None
         current = self._load_persisted_runtime_state(run_id) or HarnessRuntimeState().model_dump()
         if review:
-            merged = dict(current.get("review") or {})
+            merged = self._as_object_dict(current.get("review"))
             merged.update(review)
             current["review"] = merged
         if continuation:
-            merged = dict(current.get("continuation") or {})
+            merged = self._as_object_dict(current.get("continuation"))
             merged.update(continuation)
             current["continuation"] = merged
         if research:
-            merged = dict(current.get("research") or {})
+            merged = self._as_object_dict(current.get("research"))
             merged.update(research)
             current["research"] = merged
         persisted = self._persist_runtime_state(run_id, current)
@@ -603,7 +640,7 @@ class HarnessRunService:
         updated = self.run_store.update_run(run_id, status=status, **changes)
         if updated is None:
             return None
-        event_details = {
+        event_details: dict[str, object] = {
             "from_status": str(existing.get("status") or "") or None,
             "to_status": status,
         }
@@ -698,7 +735,7 @@ class HarnessRunService:
             ):
                 return False
         policy = get_policy(str(run.get("task_type") or ""))
-        retry_count = int(run.get("retry_count") or 0)
+        retry_count = self._coerce_int(run.get("retry_count")) or 0
         return retry_count < int(policy.retry_budget)
 
     def create_retry_run(self, run_id: str, *, requested_by: str) -> dict[str, object]:
@@ -720,41 +757,45 @@ class HarnessRunService:
             raise HarnessRetryNotAllowedError("Only failed or review-rejected orchestration runs can be retried")
 
         policy = get_policy(str(source_run.get("task_type") or ""))
-        retry_count = int(source_run.get("retry_count") or 0)
+        retry_count = self._coerce_int(source_run.get("retry_count")) or 0
         if retry_count >= int(policy.retry_budget):
             raise HarnessRetryNotAllowedError("Retry budget exhausted for this harness run")
 
         metadata = self._merge_metadata(
-            self._normalize_metadata(source_run.get("metadata_json") if isinstance(source_run, dict) else None),
+            self._normalize_metadata(
+                self._as_object_dict(source_run.get("metadata_json") if isinstance(source_run, dict) else None)
+            ),
             {
                 "retried_from_run_id": run_id,
                 "retry_requested_by": requested_by,
             },
         )
-        input_json = dict(source_run.get("input_json") or {})
+        input_json = self._as_object_dict(source_run.get("input_json"))
         if rejected_review:
-            orchestration_resume = dict(input_json.get("orchestration_resume") or {})
-            rollback_state = dict(orchestration_resume.get("rollback_state") or {})
-            payload_json = dict(latest_approval.get("payload_json") or {}) if isinstance(latest_approval, dict) else {}
+            orchestration_resume = self._as_object_dict(input_json.get("orchestration_resume"))
+            rollback_state = self._as_object_dict(orchestration_resume.get("rollback_state"))
+            payload_json = self._as_object_dict(latest_approval.get("payload_json") if isinstance(latest_approval, dict) else None)
             review_stage = str(payload_json.get("review_stage") or "").strip()
             continue_mode = str(orchestration_resume.get("continue_mode") or "").strip()
             if rollback_state:
                 orchestration_resume["state"] = rollback_state
-                if review_stage == "cluster_research" or continue_mode == "discard_research_evidence":
-                    orchestration_resume["next_step_index"] = int(orchestration_resume.get("next_step_index") or 0)
-                    metadata["review_recovery_mode"] = "continue_without_research"
-                elif review_stage == "agent_output_stream":
-                    orchestration_resume["next_step_index"] = int(
-                        payload_json.get("step_index")
-                        or orchestration_resume.get("next_step_index")
-                        or 0
-                    )
-                    orchestration_resume.pop("continuation", None)
-                    metadata["review_recovery_mode"] = "continue_from_stream_block"
-                else:
-                    orchestration_resume["next_step_index"] = int(orchestration_resume.get("next_step_index") or 0) - 1
-                    if orchestration_resume["next_step_index"] < 0:
-                        orchestration_resume["next_step_index"] = 0
+            if review_stage == "cluster_research" or continue_mode == "discard_research_evidence":
+                orchestration_resume["next_step_index"] = self._coerce_int(orchestration_resume.get("next_step_index")) or 0
+                metadata["review_recovery_mode"] = "continue_without_research"
+            elif review_stage == "agent_output_stream":
+                orchestration_resume["next_step_index"] = (
+                    self._coerce_int(payload_json.get("step_index"))
+                    or self._coerce_int(orchestration_resume.get("next_step_index"))
+                    or 0
+                )
+                orchestration_resume.pop("continuation", None)
+                metadata["review_recovery_mode"] = "continue_from_stream_block"
+            else:
+                orchestration_resume["next_step_index"] = (
+                    self._coerce_int(orchestration_resume.get("next_step_index")) or 0
+                ) - 1
+                if cast(int, orchestration_resume["next_step_index"]) < 0:
+                    orchestration_resume["next_step_index"] = 0
             orchestration_resume.pop("review_decision", None)
             orchestration_resume.pop("continue_mode", None)
             input_json["orchestration_resume"] = orchestration_resume
@@ -806,7 +847,7 @@ class HarnessRunService:
         run = self.run_store.get_run(run_id)
         if run is None:
             return None
-        resume_count = int(run.get("resume_count") or 0) + 1
+        resume_count = (self._coerce_int(run.get("resume_count")) or 0) + 1
         return self._transition_run_status(
             run_id,
             status="resumed",
@@ -905,7 +946,7 @@ class HarnessRunService:
             run_id=run_id,
             status=str(verification_result.get("status") or "fail"),
             checks_json={"checks_run": verification_result.get("checks_run") or []},
-            artifacts_json=verification_result.get("artifacts"),
+            artifacts_json=self._as_object_dict(verification_result.get("artifacts")),
             summary=str(verification_result.get("summary") or ""),
         )
         self._record_event_for_run(
@@ -1155,16 +1196,16 @@ class HarnessRunService:
         detail["runtime_state"] = self._load_persisted_runtime_state(run_id) or self.sync_runtime_state(
             run_id,
             run=detail,
-            latest_approval=detail["latest_approval"],
-            latest_verification=detail["latest_verification"],
-            events=list(detail["events"] or []),
+            latest_approval=cast(dict[str, object] | None, detail["latest_approval"]),
+            latest_verification=cast(dict[str, object] | None, detail["latest_verification"]),
+            events=self._as_dict_list(detail["events"]),
             transition_type="detail_sync",
         )
         detail["workflow_progress"] = self._build_workflow_progress(
             run=detail,
-            latest_approval=detail["latest_approval"],
-            latest_verification=detail["latest_verification"],
-            events=list(detail["events"] or []),
+            latest_approval=cast(dict[str, object] | None, detail["latest_approval"]),
+            latest_verification=cast(dict[str, object] | None, detail["latest_verification"]),
+            events=cast(list[dict[str, object]], self._as_object_list(detail["events"])),
         )
         detail["checklist_snapshot"] = self._build_checklist_snapshot(run=detail)
         return detail
@@ -1198,16 +1239,16 @@ class HarnessRunService:
                 else self.sync_runtime_state(
                     run_id,
                     run=summary,
-                    latest_approval=summary["latest_approval"],
-                    latest_verification=summary["latest_verification"],
+                    latest_approval=cast(dict[str, object] | None, summary["latest_approval"]),
+                    latest_verification=cast(dict[str, object] | None, summary["latest_verification"]),
                     transition_type="list_sync",
                 )
             )
             summary_events = self.list_run_events(run_id=run_id, limit=500) if run_id else []
             summary["workflow_progress"] = self._build_workflow_progress(
                 run=summary,
-                latest_approval=summary["latest_approval"],
-                latest_verification=summary["latest_verification"],
+                latest_approval=cast(dict[str, object] | None, summary["latest_approval"]),
+                latest_verification=cast(dict[str, object] | None, summary["latest_verification"]),
                 events=summary_events,
             )
             summary["checklist_snapshot"] = self._build_checklist_snapshot(run=summary)

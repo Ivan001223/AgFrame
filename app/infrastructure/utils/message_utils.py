@@ -31,17 +31,17 @@ def sanitize_messages_for_routing(messages: Iterable[BaseMessage]) -> list[BaseM
         List[BaseMessage]: 清洗后的纯文本消息列表
     """
     # Convert messages to dict format and back to ensure correct types
-    raw_messages = []
+    raw_messages: list[dict[str, Any]] = []
     for msg in messages:
         if hasattr(msg, 'dict'):
             raw_messages.append(msg.dict())
         elif hasattr(msg, '__dict__'):
             raw_messages.append({'type': getattr(msg, 'type', 'unknown'), 'content': getattr(msg, 'content', '')})
         else:
-            raw_messages.append(msg)
-    
+            raw_messages.append({'type': 'unknown', 'content': str(msg)})
+
     converted_messages = convert_to_messages(raw_messages)
-    
+
     sanitized: list[BaseMessage] = []
     for msg in converted_messages:
         content = _content_to_text(getattr(msg, "content", ""))

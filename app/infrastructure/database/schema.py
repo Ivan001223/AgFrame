@@ -17,8 +17,8 @@ def ensure_schema() -> None:
     Base.metadata.create_all(bind=engine)
 
 
-_db_ready_cache = None
-_last_check_time = 0
+_db_ready_cache: bool | None = None
+_last_check_time = 0.0
 CHECK_INTERVAL = 30  # seconds
 
 

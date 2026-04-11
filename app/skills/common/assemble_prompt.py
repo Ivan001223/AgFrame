@@ -25,7 +25,7 @@ _log = get_logger("workflow.assemble_prompt")
 async def assemble_prompt_node(state: AgentState) -> dict[str, Any]:
     t0 = time.perf_counter()
     ctx = build_chat_context_pruning_payload(current=state.get("context"))
-    user_id = state.get("user_id") or ctx.get("user_id") or "default"
+    user_id = str(state.get("user_id") or ctx.get("user_id") or "default")
     session_id = ctx.get("session_id")
 
     recent_history_lines: list[str] = []
@@ -96,6 +96,13 @@ async def assemble_prompt_node(state: AgentState) -> dict[str, Any]:
     pruning_cfg = prompt_cfg.context_pruning
     pruning = build_pruning_config(pruning_cfg)
 
+    web_search = ctx.get("web_search")
+    if not isinstance(web_search, dict):
+        web_search = None
+    self_correction = ctx.get("self_correction")
+    if self_correction is not None:
+        self_correction = str(self_correction)
+
     system_prompt, citations, pruning_summary = build_system_prompt(
         profile=profile_view,
         recent_history_lines=recent_history_lines,
@@ -103,8 +110,8 @@ async def assemble_prompt_node(state: AgentState) -> dict[str, Any]:
         memories=memories,
         query=latest_user_query,
         focus_hint=focus_hint,
-        web_search=ctx.get("web_search"),
-        self_correction=ctx.get("self_correction"),
+        web_search=web_search,
+        self_correction=self_correction,
         budget=budget,
         pruning=pruning,
     )

@@ -1,9 +1,16 @@
 from __future__ import annotations
 
-from typing import Any
+from inspect import isawaitable
+from typing import Any, cast
 
 from app.runtime.graph.nodes.human_interrupt import check_approval_node
-from app.server.chat_runtime import get_chat_graph_app
+from app.runtime.graph.state import AgentState
+
+
+def _get_default_chat_graph_app() -> Any:
+    from app.server.chat_runtime import get_chat_graph_app
+
+    return get_chat_graph_app()
 
 
 def _normalize_message_content(value: Any) -> str:
@@ -17,12 +24,12 @@ def _normalize_message_content(value: Any) -> str:
             elif isinstance(item, dict) and "text" in item:
                 parts.append(str(item.get("text") or ""))
             elif hasattr(item, "text"):
-                parts.append(str(getattr(item, "text") or ""))
+                parts.append(str(item.text or ""))
         return "\n".join(part for part in parts if part)
     if isinstance(value, dict) and "text" in value:
         return str(value.get("text") or "")
     if hasattr(value, "text"):
-        return str(getattr(value, "text") or "")
+        return str(value.text or "")
     return str(value or "")
 
 
@@ -66,7 +73,7 @@ def extract_last_assistant_reply(messages: list[dict[str, str]]) -> str | None:
 
 class GraphResumeService:
     def __init__(self, graph_app: Any | None = None):
-        self.graph_app = graph_app or get_chat_graph_app()
+        self.graph_app = graph_app or _get_default_chat_graph_app()
 
     async def resume_approved_session(
         self,
@@ -104,7 +111,11 @@ class GraphResumeService:
 
         state_snapshot = await self.graph_app.aget_state(config)
         state_values = dict(state_snapshot.values or {})
-        resume_values = await check_approval_node(state_values)
+        approval_result = check_approval_node(cast(AgentState, state_values))
+        if isawaitable(approval_result):
+            resume_values = await approval_result
+        else:
+            resume_values = approval_result
         updated_config = await self.graph_app.aupdate_state(
             state_snapshot.config,
             resume_values,

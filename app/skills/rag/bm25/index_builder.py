@@ -1,21 +1,20 @@
 import json
 import os
-from typing import List, Optional
 
-from app.skills.rag.bm25.tokenizer import Tokenizer
-from app.skills.rag.bm25.inverted_index import InvertedIndex
 from app.skills.rag.bm25.bm25_scorer import BM25Scorer
+from app.skills.rag.bm25.inverted_index import InvertedIndex
+from app.skills.rag.bm25.tokenizer import Tokenizer
 
 
 class IndexBuilder:
-    def __init__(self, tokenizer: Tokenizer, persist_path: Optional[str] = None):
+    def __init__(self, tokenizer: Tokenizer, persist_path: str | None = None):
         self.tokenizer = tokenizer
         self.index = InvertedIndex(tokenizer)
         self.scorer = BM25Scorer(self.index)
-        self.documents: List[str] = []
+        self.documents: list[str] = []
         self.persist_path = persist_path
 
-    def build(self, documents: List[str]) -> None:
+    def build(self, documents: list[str]) -> None:
         self.documents = documents
         self.index.build(documents)
 

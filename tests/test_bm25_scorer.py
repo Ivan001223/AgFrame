@@ -1,7 +1,6 @@
-import pytest
-from app.skills.rag.bm25.tokenizer import Tokenizer
-from app.skills.rag.bm25.inverted_index import InvertedIndex
 from app.skills.rag.bm25.bm25_scorer import BM25Scorer
+from app.skills.rag.bm25.inverted_index import InvertedIndex
+from app.skills.rag.bm25.tokenizer import Tokenizer
 
 
 def test_bm25_score():

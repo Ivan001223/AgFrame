@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 from langchain_openai import ChatOpenAI
 
 from app.infrastructure.config.settings import settings
@@ -56,7 +58,7 @@ def get_llm(temperature: float = 0, streaming: bool = True, json_mode: bool = Fa
         model=model_name,
         temperature=temperature,
         base_url=llm_config.base_url,
-        api_key=llm_config.api_key,
+        api_key=cast(Any, llm_config.api_key or None),
         streaming=streaming,
         model_kwargs=model_kwargs,
     )
@@ -101,8 +103,8 @@ def get_llm_for_provider(
         model=model,
         temperature=temperature,
         base_url=base_url,
-        api_key=api_key,
+        api_key=cast(Any, api_key or None),
         streaming=streaming,
         model_kwargs=model_kwargs,
-        request_timeout=timeout_seconds,
+        timeout=timeout_seconds,
     )

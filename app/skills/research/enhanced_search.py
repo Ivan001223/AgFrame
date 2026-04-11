@@ -8,12 +8,12 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from html.parser import HTMLParser
+from typing import cast
 from urllib.parse import urlencode
 
-from defusedxml import ElementTree
-
 import redis
-import requests
+import requests  # type: ignore[import-untyped]
+from defusedxml import ElementTree  # type: ignore[import-untyped]
 
 from app.infrastructure.config.settings import settings
 
@@ -71,7 +71,8 @@ class SearchCache:
     def get(self, query: str, provider: str) -> str | None:
         key = self._make_key(query, provider)
         try:
-            return self.client.get(key)
+            cached = self.client.get(key)
+            return cast(str | None, cached)
         except Exception as exc:
             logger.warning("search cache get failed provider=%s query=%s error=%s", provider, query, exc)
             return None
@@ -104,7 +105,7 @@ class ArxivProvider(SearchProvider):
         super().__init__("arxiv")
         self.max_results = max_results
 
-    async def search(self, query: str, max_results: int = None) -> list[SearchResult]:
+    async def search(self, query: str, max_results: int | None = None) -> list[SearchResult]:
         try:
             return _search_arxiv(query, max_results=max_results or self.max_results)
         except Exception as e:
@@ -118,7 +119,7 @@ class TavilyProvider(SearchProvider):
         self.api_key = api_key
         self.max_results = max_results
 
-    async def search(self, query: str, max_results: int = None) -> list[SearchResult]:
+    async def search(self, query: str, max_results: int | None = None) -> list[SearchResult]:
         try:
             from langchain_community.tools.tavily_search import TavilySearchResults
             tool = TavilySearchResults(tavily_api_key=self.api_key, max_results=max_results or self.max_results)
@@ -143,10 +144,10 @@ class DuckDuckGoProvider(SearchProvider):
         super().__init__("duckduckgo")
         self.max_results = max_results
 
-    async def search(self, query: str, max_results: int = None) -> list[SearchResult]:
+    async def search(self, query: str, max_results: int | None = None) -> list[SearchResult]:
         try:
             from langchain_community.tools import DuckDuckGoSearchResults
-            tool = DuckDuckGoSearchResults(max_results=max_results or self.max_results)
+            tool = DuckDuckGoSearchResults(num_results=max_results or self.max_results)
             raw_results = tool.invoke(query)
             parsed = json.loads(raw_results) if isinstance(raw_results, str) else raw_results
             return [
@@ -170,9 +171,9 @@ class SerpAPIProvider(SearchProvider):
         self.api_key = api_key
         self.max_results = max_results
 
-    async def search(self, query: str, max_results: int = None) -> list[SearchResult]:
+    async def search(self, query: str, max_results: int | None = None) -> list[SearchResult]:
         try:
-            from serpapi import GoogleSearch
+            from serpapi import GoogleSearch  # type: ignore[import-not-found]
             params = {
                 "q": query,
                 "api_key": self.api_key,
@@ -204,7 +205,6 @@ class EnhancedSearchService:
 
     def _init_providers(self):
         config = settings.search
-        provider = config.provider
         tavily_key = config.tavily_api_key or os.getenv("TAVILY_API_KEY")
         serpapi_key = os.getenv("SERPAPI_API_KEY")
 
@@ -216,31 +216,34 @@ class EnhancedSearchService:
         if serpapi_key:
             self._providers["serpapi"] = SerpAPIProvider(serpapi_key)
 
-    def get_provider(self, name: str = None) -> SearchProvider:
+    def get_provider(self, name: str | None = None) -> SearchProvider:
         provider_name = name or settings.search.provider
-        return self._providers.get(provider_name, self._providers.get("duckduckgo"))
+        provider = self._providers.get(provider_name) or self._providers.get("duckduckgo")
+        if provider is None:
+            raise RuntimeError("No search provider is configured")
+        return provider
 
     async def search(
         self,
         query: str,
-        provider: str = None,
+        provider: str | None = None,
         use_cache: bool = True,
         max_results: int = 5,
     ) -> SearchResponse:
         start_time = time.perf_counter()
         prov = self.get_provider(provider)
-        cache_key = f"{prov.name}:{query}"
 
         if use_cache:
             cached = self.cache.get(query, prov.name)
             if cached:
                 parsed = json.loads(cached)
+                parsed_list = parsed if isinstance(parsed, list) else []
                 return SearchResponse(
                     query=query,
-                    results=[SearchResult(**r) for r in parsed],
+                    results=[SearchResult(**r) for r in parsed_list if isinstance(r, dict)],
                     provider=prov.name,
                     cached=True,
-                    total_results=len(parsed),
+                    total_results=len(parsed_list),
                     response_time_ms=int((time.perf_counter() - start_time) * 1000),
                 )
 
@@ -375,7 +378,7 @@ def _fetch_browser_previews_playwright(
     timeout_seconds: int = 8,
 ) -> list[BrowserPreview]:
     try:
-        from playwright.sync_api import sync_playwright
+        from playwright.sync_api import sync_playwright  # type: ignore[import-not-found]
     except Exception as exc:
         logger.warning("playwright import unavailable for browser previews error=%s", exc)
         return []
@@ -477,7 +480,7 @@ def format_search_results(response: SearchResponse, max_length: int = 2000) -> s
 
 async def enhanced_web_search(
     query: str,
-    provider: str = None,
+    provider: str | None = None,
     use_cache: bool = True,
     max_results: int = 5,
 ) -> str:
@@ -487,7 +490,7 @@ async def enhanced_web_search(
 
 async def enhanced_search_response(
     query: str,
-    provider: str = None,
+    provider: str | None = None,
     use_cache: bool = True,
     max_results: int = 5,
 ) -> SearchResponse:

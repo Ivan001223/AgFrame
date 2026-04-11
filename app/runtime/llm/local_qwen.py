@@ -5,9 +5,6 @@ from logging import getLogger
 from threading import Thread
 from typing import Any
 
-os.environ.setdefault("OBJC_PRINT_DUPLICATE_CLASSES", "NO")
-
-logger = getLogger(__name__)
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
@@ -20,8 +17,13 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
+
 from app.infrastructure.config.settings import settings
 from app.runtime.llm.model_importer import require_pinned_revision
+
+os.environ.setdefault("OBJC_PRINT_DUPLICATE_CLASSES", "NO")
+
+logger = getLogger(__name__)
 
 
 def _require_torch() -> Any:
@@ -55,15 +57,15 @@ class LocalQwen3VL(BaseChatModel):
     model_name: str = "Qwen/Qwen3-VL-2B-Instruct"
     model: Any = None
     processor: Any = None
-    
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         config_model = settings.local_models.ocr_model
         if config_model:
             self.model_name = config_model
-            
+
         self._load_model()
-        
+
     def _load_model(self):
         if self.model is None:
             logger.info(f"Loading local Qwen3-VL: {self.model_name}")
@@ -76,7 +78,7 @@ class LocalQwen3VL(BaseChatModel):
 
             try:
                 from huggingface_hub import HfApi
-                from tqdm.auto import tqdm
+                from tqdm.auto import tqdm  # type: ignore[import-untyped]
 
                 tqdm.write(f"📦 正在下载视觉语言模型 {self.model_name}...")
 
@@ -91,11 +93,10 @@ class LocalQwen3VL(BaseChatModel):
                             filename = sibling.rfilename if hasattr(sibling, 'rfilename') else sibling
                             try:
                                 api.hf_hub_download(
-                                    filename=filename,
                                     repo_id=self.model_name,
+                                    filename=filename,
                                     repo_type="model",
                                     revision=revision,
-                                    resume_download=True,
                                 )
                             except Exception as e:
                                 logger.debug(f"Failed to download file: {e}")
@@ -104,15 +105,15 @@ class LocalQwen3VL(BaseChatModel):
                     logger.debug(f"Download error: {e}")
 
                 self.model = transformers.AutoModelForImageTextToText.from_pretrained(
-                    self.model_name, 
+                    self.model_name,
                     revision=revision,
-                    torch_dtype=dtype, 
+                    torch_dtype=dtype,
                     device_map="auto" if device == "cuda" else None,
                     trust_remote_code=True
                 )
                 if device == "cpu":
                     self.model = self.model.to("cpu")
-                    
+
                 self.processor = transformers.AutoProcessor.from_pretrained(
                     self.model_name,
                     revision=revision,
@@ -133,7 +134,7 @@ class LocalQwen3VL(BaseChatModel):
         """
         logger.warning("LocalQwen3VL does not support native tool binding, tools will be ignored")
         return self
-    
+
     def _messages_to_conversation(self, messages: list[BaseMessage]) -> list[dict[str, Any]]:
         conversation: list[dict[str, Any]] = []
         for msg in messages:
@@ -181,23 +182,23 @@ class LocalQwen3VL(BaseChatModel):
             TextIteratorStreamer = _require_transformers().TextIteratorStreamer
             conversation = self._messages_to_conversation(messages)
             inputs = self._prepare_inputs(conversation)
-            
+
             # 配置流式输出
             streamer = TextIteratorStreamer(self.processor.tokenizer, skip_prompt=True, skip_special_tokens=True)
-            
+
             # 在单独线程中执行生成
             max_new_tokens = kwargs.get("max_new_tokens", 1024)
             generation_kwargs = dict(inputs, max_new_tokens=max_new_tokens, streamer=streamer)
             thread = Thread(target=self.model.generate, kwargs=generation_kwargs)
             thread.start()
-            
+
             # 逐块产出结果
             for new_text in streamer:
                 chunk = ChatGenerationChunk(message=AIMessageChunk(content=new_text))
                 if run_manager:
                     run_manager.on_llm_new_token(new_text, chunk=chunk)
                 yield chunk
-                
+
         except Exception as e:
             logger.warning(f"Streaming generation failed: {e}")
             yield ChatGenerationChunk(message=AIMessageChunk(content=f"Error: {str(e)}"))
@@ -218,18 +219,18 @@ class LocalQwen3VL(BaseChatModel):
             with torch.no_grad():
                 max_new_tokens = kwargs.get("max_new_tokens", 1024)
                 generated_ids = self.model.generate(**inputs, max_new_tokens=max_new_tokens)
-            
+
             # 裁剪输入 token
             generated_ids_trimmed = [
-                out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+                out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids, strict=False)
             ]
-            
+
             output_text = self.processor.batch_decode(
                 generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
             )[0]
-            
+
             return ChatResult(generations=[ChatGeneration(message=AIMessage(content=output_text))])
-            
+
         except Exception as e:
             logger.warning(f"Generation failed: {e}")
             return ChatResult(generations=[ChatGeneration(message=AIMessage(content=f"Error: {str(e)}"))])

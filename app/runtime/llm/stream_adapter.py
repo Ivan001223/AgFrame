@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Callable
 from inspect import isawaitable
-from typing import Any, AsyncIterator, Callable
+from typing import Any
 
 
 def coerce_stream_text(chunk: Any) -> str:

@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scripts import eval_context_pruning
 from app.runtime.prompts.context_pruner import ContextPruningConfig as RealContextPruningConfig
+from scripts import eval_context_pruning
 
 
 def test_eval_context_pruning_generates_summary(tmp_path: Path, monkeypatch):

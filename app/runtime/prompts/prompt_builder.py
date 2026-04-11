@@ -8,7 +8,6 @@ from typing import Any
 from langchain_core.documents import Document
 
 from app.runtime.prompts.context_pruner import (
-    AggregatePruningSummary,
     ContextPruningConfig,
     PromptPruningSummary,
     build_prompt_pruning_summary,

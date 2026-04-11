@@ -1,8 +1,7 @@
 import os
 
-import pytest
-from app.skills.rag.bm25.tokenizer import Tokenizer
 from app.skills.rag.bm25.index_builder import IndexBuilder
+from app.skills.rag.bm25.tokenizer import Tokenizer
 
 
 def test_index_builder_persist(tmp_path):

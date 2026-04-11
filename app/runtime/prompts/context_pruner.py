@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Sequence
-
-from typing_extensions import NotRequired, TypedDict
+from typing import Any, NotRequired, cast
 
 from langchain_core.documents import Document
+from typing_extensions import TypedDict
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_]{2,}")
 
@@ -481,7 +481,7 @@ def prune_document_content(
     effective_method = requested_method
     scoring_source = "heuristic"
     if not config.enabled or len(lines) <= config.min_keep_lines:
-        stats: DocumentPruningStats = {
+        early_stats: DocumentPruningStats = {
             "enabled": config.enabled,
             "method": effective_method,
             "scoring_source": scoring_source,
@@ -493,11 +493,11 @@ def prune_document_content(
             "char_savings": _build_savings(before=raw_chars, after=raw_chars),
             "line_savings": _build_savings(before=len(lines), after=len(lines)),
         }
-        return content, stats
+        return content, early_stats
 
     keywords = _unique_keywords(focus_hint or "", query, min_keywords=config.min_keywords)
     if not keywords:
-        stats: DocumentPruningStats = {
+        no_keyword_stats: DocumentPruningStats = {
             "enabled": config.enabled,
             "method": effective_method,
             "scoring_source": scoring_source,
@@ -509,7 +509,7 @@ def prune_document_content(
             "char_savings": _build_savings(before=raw_chars, after=raw_chars),
             "line_savings": _build_savings(before=len(lines), after=len(lines)),
         }
-        return content, stats
+        return content, no_keyword_stats
 
     scoring_query = (focus_hint or query).strip() or query
     scores = [_line_score(line, keywords) for line in lines]
@@ -534,6 +534,7 @@ def prune_document_content(
                     scores,
                     reranker_scores,
                     window_scores,
+                    strict=False,
                 )
             ]
         except Exception:
@@ -549,7 +550,7 @@ def prune_document_content(
         keyword_sets=_line_keyword_sets(lines, keywords),
     )
     if not keep_indexes:
-        stats: DocumentPruningStats = {
+        no_keep_stats: DocumentPruningStats = {
             "enabled": config.enabled,
             "method": effective_method,
             "scoring_source": scoring_source,
@@ -561,7 +562,7 @@ def prune_document_content(
             "char_savings": _build_savings(before=raw_chars, after=raw_chars),
             "line_savings": _build_savings(before=len(lines), after=len(lines)),
         }
-        return content, stats
+        return content, no_keep_stats
 
     kept_lines: list[str] = []
     previous = None
@@ -573,7 +574,7 @@ def prune_document_content(
     pruned = "\n".join(kept_lines).strip()
     if not pruned:
         pruned = content
-    stats: DocumentPruningStats = {
+    final_stats: DocumentPruningStats = {
         "enabled": config.enabled,
         "method": effective_method,
         "scoring_source": scoring_source,
@@ -586,7 +587,7 @@ def prune_document_content(
         "line_savings": _build_savings(before=len(lines), after=len(pruned.splitlines())),
         "kept_indexes": keep_indexes,
     }
-    return pruned, stats
+    return pruned, final_stats
 
 
 def prune_documents(
@@ -651,7 +652,21 @@ def prune_documents(
         before=totals["line_count_before"],
         after=totals["line_count_after"],
     )
-    summary: AggregatePruningSummary = totals
+    summary: AggregatePruningSummary = {
+        "items": int(totals["items"]),
+        "items_pruned": int(totals["items_pruned"]),
+        "char_count_before": int(totals["char_count_before"]),
+        "char_count_after": int(totals["char_count_after"]),
+        "line_count_before": int(totals["line_count_before"]),
+        "line_count_after": int(totals["line_count_after"]),
+        "ratio": float(totals["ratio"]),
+        "focus_hint": str(totals["focus_hint"]),
+        "enabled": bool(totals["enabled"]),
+        "method": str(totals["method"]),
+        "scoring_source": str(totals["scoring_source"]),
+        "char_savings": cast(SavingsSummary, totals["char_savings"]),
+        "line_savings": cast(SavingsSummary, totals["line_savings"]),
+    }
     return pruned_documents, summary
 
 

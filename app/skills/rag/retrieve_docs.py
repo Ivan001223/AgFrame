@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, cast
 
 import anyio
 from langchain_core.messages import BaseMessage
@@ -54,7 +54,8 @@ def _build_focus_hint(state: AgentState, query: str) -> str:
     if explicit_hint:
         return explicit_hint
     route = state.get("route") or ctx.get("route") or {}
-    reasoning = str(route.get("reasoning") or state.get("reasoning") or "").strip()
+    route_payload = route if isinstance(route, dict) else {}
+    reasoning = str(route_payload.get("reasoning") or state.get("reasoning") or "").strip()
     if reasoning:
         return f"{query}\nFocus: {reasoning}"
     return query
@@ -72,7 +73,7 @@ async def retrieve_docs_node(state: AgentState) -> dict[str, Any]:
     # 从 context 中获取 user_id (通常由 server 在 invoke 时传入 state)
     ctx = build_chat_context_pruning_payload(current=state.get("context"))
     # 优先从 state 顶层取，其次 context
-    user_id = state.get("user_id") or ctx.get("user_id")
+    user_id = str(state.get("user_id") or ctx.get("user_id") or "")
 
     docs = await anyio.to_thread.run_sync(
         lambda: get_rag_engine().retrieve_candidates(
@@ -98,11 +99,12 @@ async def retrieve_docs_node(state: AgentState) -> dict[str, Any]:
         current=state.get("trace"),
         candidate_pruning=build_candidate_pruning_trace(pruning_summary),
     )
-    ctx["retrieved_docs_candidates_raw"] = docs
-    ctx["retrieved_docs_candidates"] = pruned_docs
-    ctx["retrieved_docs"] = restored_docs
+    ctx_payload = cast(dict[str, Any], dict(ctx))
+    ctx_payload["retrieved_docs_candidates_raw"] = docs
+    ctx_payload["retrieved_docs_candidates"] = pruned_docs
+    ctx_payload["retrieved_docs"] = restored_docs
     ctx = build_chat_context_pruning_payload(
-        current=ctx,
+        current=cast(Any, ctx_payload),
         focus_hint=focus_hint,
         retrieval_debug=retrieval_debug,
     )

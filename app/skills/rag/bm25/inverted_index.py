@@ -1,6 +1,5 @@
 import math
 from collections import defaultdict
-from typing import Dict, List, Tuple
 
 from app.skills.rag.bm25.tokenizer import Tokenizer
 
@@ -8,17 +7,17 @@ from app.skills.rag.bm25.tokenizer import Tokenizer
 class InvertedIndex:
     def __init__(self, tokenizer: Tokenizer):
         self.tokenizer = tokenizer
-        self.term_dict: Dict[str, int] = {}
-        self.posting_lists: List[List[Tuple[int, int]]] = []
+        self.term_dict: dict[str, int] = {}
+        self.posting_lists: list[list[tuple[int, int]]] = []
         self.doc_count: int = 0
         self.avg_doc_len: float = 0.0
-        self.doc_lens: Dict[int, int] = {}
-        self.df: Dict[str, int] = {}
-        self.idf: Dict[str, float] = {}
+        self.doc_lens: dict[int, int] = {}
+        self.df: dict[str, int] = {}
+        self.idf: dict[str, float] = {}
 
-    def build(self, documents: List[str]) -> None:
+    def build(self, documents: list[str]) -> None:
         self.doc_count = len(documents)
-        term_doc_freq: Dict[str, Dict[int, int]] = defaultdict(lambda: defaultdict(int))
+        term_doc_freq: dict[str, dict[int, int]] = defaultdict(lambda: defaultdict(int))
 
         for doc_id, doc in enumerate(documents):
             tokens = self.tokenizer.tokenize(doc)
@@ -35,7 +34,7 @@ class InvertedIndex:
         self._compute_idf()
         self.avg_doc_len = sum(self.doc_lens.values()) / max(1, self.doc_count)
 
-    def _build_term_dict(self, term_doc_freq: Dict[str, Dict[int, int]]) -> None:
+    def _build_term_dict(self, term_doc_freq: dict[str, dict[int, int]]) -> None:
         for term, doc_freqs in term_doc_freq.items():
             term_id = len(self.term_dict)
             self.term_dict[term] = term_id
@@ -48,7 +47,7 @@ class InvertedIndex:
                 (self.doc_count - df + 0.5) / (df + 0.5) + 1
             )
 
-    def get_postings(self, term: str) -> List[Tuple[int, int]]:
+    def get_postings(self, term: str) -> list[tuple[int, int]]:
         term_id = self.term_dict.get(term)
         if term_id is None:
             return []

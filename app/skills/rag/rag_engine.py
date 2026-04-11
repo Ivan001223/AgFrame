@@ -4,7 +4,7 @@ import tempfile
 from dataclasses import replace
 from importlib import import_module
 from shutil import which
-from typing import Any
+from typing import Any, cast
 
 os.environ.setdefault("OBJC_PRINT_DUPLICATE_CLASSES", "NO")
 
@@ -15,9 +15,9 @@ from langchain_community.document_loaders import (
 )
 from langchain_core.documents import Document
 from pypdf import PdfReader
+from sqlalchemy import delete
 
 from app.infrastructure.config.settings import settings
-
 from app.infrastructure.database.models import (
     DocContent,
     DocEmbedding,
@@ -27,12 +27,15 @@ from app.infrastructure.database.models import (
 )
 from app.infrastructure.database.orm import get_session
 from app.infrastructure.database.schema import ensure_schema_if_possible
-from app.infrastructure.database.stores import KnowledgeBaseDocumentStore, MySQLDocStore, PgDocEmbeddingStore
+from app.infrastructure.database.stores import (
+    KnowledgeBaseDocumentStore,
+    MySQLDocStore,
+    PgDocEmbeddingStore,
+)
 from app.infrastructure.utils.files import sha256_file
 from app.infrastructure.utils.logging import get_logger
 from app.infrastructure.utils.text_split import split_text_by_chars
 from app.memory.vector_stores.pgvector_vectorstore import PgVectorVectorStore
-
 from app.runtime.llm.embeddings import get_embeddings
 from app.skills.rag.hybrid_retriever_service import (
     HybridRetrievalConfig,
@@ -192,17 +195,13 @@ def load_documents_from_path(file_path: str) -> list[Document]:
             logger.warning(f"OCR 未从 {file_path} 提取到文本")
             docs = []
     elif ext == ".docx":
-        loader = Docx2txtLoader(file_path)
-        docs = loader.load()
+        docs = Docx2txtLoader(file_path).load()
     elif ext == ".xlsx":
-        loader = UnstructuredExcelLoader(file_path)
-        docs = loader.load()
+        docs = UnstructuredExcelLoader(file_path).load()
     elif ext == ".md":
-        loader = TextLoader(file_path, encoding="utf-8")
-        docs = loader.load()
+        docs = TextLoader(file_path, encoding="utf-8").load()
     elif ext == ".txt":
-        loader = TextLoader(file_path, encoding="utf-8")
-        docs = loader.load()
+        docs = TextLoader(file_path, encoding="utf-8").load()
     else:
         raise ValueError(f"不支持的文件类型: {ext}")
 
@@ -239,13 +238,18 @@ class RAGEngine:
 
     def _get_hybrid_config(self) -> HybridRetrievalConfig:
         retrieval_cfg = settings.rag.retrieval
+        raw_weights = tuple(float(weight) for weight in retrieval_cfg.weights)
+        weights: tuple[float, float] = (
+            raw_weights[0] if len(raw_weights) > 0 else 1.0,
+            raw_weights[1] if len(raw_weights) > 1 else 1.0,
+        )
         return HybridRetrievalConfig(
             mode=retrieval_cfg.mode,
             dense_k=retrieval_cfg.dense_k,
             sparse_k=retrieval_cfg.sparse_k,
             candidate_k=retrieval_cfg.candidate_k,
             rrf_k=retrieval_cfg.rrf_k,
-            weights=tuple(retrieval_cfg.weights),
+            weights=weights,
         )
 
     def _success(self, **extra: Any) -> dict[str, Any]:
@@ -345,7 +349,7 @@ class RAGEngine:
 
             doc_store.delete_parent_chunks(doc_id)
             parent_ids = doc_store.insert_parent_chunks(doc_id, parent_chunks)
-            for parent_id, parent in zip(parent_ids, parent_chunks):
+            for parent_id, parent in zip(parent_ids, parent_chunks, strict=False):
                 child_parts = split_text_by_chars(
                     parent["content"], chunk_size=1400, overlap=120
                 )
@@ -385,7 +389,7 @@ class RAGEngine:
                     logger.error(f"批量向量化失败：{embedding_error}")
                     return self._failure("embedding_failed", str(embedding_error), stage="embedding")
 
-                for d, v in zip(batch, batch_vectors):
+                for d, v in zip(batch, batch_vectors, strict=False):
                     meta = dict(getattr(d, "metadata", {}) or {})
                     rows.append(
                         {
@@ -426,7 +430,7 @@ class RAGEngine:
         query: str,
         *,
         fetch_k: int = 20,
-        user_id: str = None,
+        user_id: str | None = None,
         knowledge_base_ids: list[str] | None = None,
     ) -> list[Document]:
         if self._vectorstore is None:
@@ -461,7 +465,7 @@ class RAGEngine:
         query: str,
         k: int = 3,
         fetch_k: int = 20,
-        user_id: str = None,
+        user_id: str | None = None,
         knowledge_base_ids: list[str] | None = None,
     ) -> list[Document]:
         """
@@ -568,9 +572,9 @@ class RAGEngine:
                 self._vectorstore = None
                 return
             with get_session() as session:
-                session.execute(DocEmbedding.__table__.delete())
-                session.execute(DocContent.__table__.delete())
-                session.execute(DocumentRow.__table__.delete())
+                session.execute(delete(cast(Any, DocEmbedding)))
+                session.execute(delete(cast(Any, DocContent)))
+                session.execute(delete(cast(Any, DocumentRow)))
             self._vectorstore = PgVectorVectorStore(embeddings=self.embeddings)
             self._hybrid_retriever = HybridRetrieverService(
                 vectorstore=self._vectorstore

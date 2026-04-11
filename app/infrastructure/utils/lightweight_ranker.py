@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from typing import Sequence
+from collections.abc import Sequence
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_\u4e00-\u9fff]{2,}")
 

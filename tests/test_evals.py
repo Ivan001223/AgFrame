@@ -1,8 +1,8 @@
-import pytest
-import sys
-import os
 import json
-from unittest.mock import MagicMock, patch
+import os
+import sys
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -18,7 +18,7 @@ class TestEvaluationFramework:
             "golden_cases.json"
         )
 
-        with open(fixture_path, "r", encoding="utf-8") as f:
+        with open(fixture_path, encoding="utf-8") as f:
             data = json.load(f)
 
         assert "cases" in data
@@ -39,7 +39,7 @@ class TestEvaluationFramework:
             "golden_cases.json"
         )
 
-        with open(fixture_path, "r", encoding="utf-8") as f:
+        with open(fixture_path, encoding="utf-8") as f:
             data = json.load(f)
 
         for case in data["cases"]:
@@ -56,9 +56,9 @@ class TestEvaluationFramework:
     def test_deepeval_import(self):
         """测试 DeepEval 导入"""
         try:
-            from deepeval.test_case import LLMTestCase
+            from deepeval.dataset import EvaluationDataset, Golden
             from deepeval.metrics import AnswerRelevancyMetric, FaithfulnessMetric
-            from deepeval.dataset import Golden, EvaluationDataset
+            from deepeval.test_case import LLMTestCase
 
             assert LLMTestCase is not None
             assert AnswerRelevancyMetric is not None
@@ -91,7 +91,7 @@ class TestEvaluationRunner:
             "golden_cases.json"
         )
 
-        with open(fixture_path, "r", encoding="utf-8") as f:
+        with open(fixture_path, encoding="utf-8") as f:
             data = json.load(f)
 
         for case in data["cases"]:
@@ -110,7 +110,7 @@ class TestEvaluationRunner:
             "golden_cases.json"
         )
 
-        with open(fixture_path, "r", encoding="utf-8") as f:
+        with open(fixture_path, encoding="utf-8") as f:
             data = json.load(f)
 
         expected_tools = set()
@@ -125,7 +125,7 @@ class TestPromptA_B:
 
     def test_prompt_registry_import(self):
         """测试 Prompt 注册表导入"""
-        from app.runtime.prompts.prompt_registry import PromptRegistry, get_prompt_registry
+        from app.runtime.prompts.prompt_registry import get_prompt_registry
 
         registry = get_prompt_registry()
         assert registry is not None
@@ -161,7 +161,7 @@ class TestPromptA_B:
 
     def test_prompt_registration(self):
         """测试 Prompt 注册"""
-        from app.runtime.prompts.prompt_registry import PromptTemplate, PromptRegistry
+        from app.runtime.prompts.prompt_registry import PromptRegistry, PromptTemplate
 
         registry = PromptRegistry()
         initial_count = len(registry._prompts)

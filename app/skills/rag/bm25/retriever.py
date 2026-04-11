@@ -1,11 +1,10 @@
 import threading
-from typing import Dict, List, Tuple
 
 from langchain_core.documents import Document
 
-from app.skills.rag.bm25.tokenizer import Tokenizer
-from app.skills.rag.bm25.index_builder import IndexBuilder
 from app.skills.rag.bm25.bm25_scorer import BM25Scorer
+from app.skills.rag.bm25.index_builder import IndexBuilder
+from app.skills.rag.bm25.tokenizer import Tokenizer
 
 
 class BM25Retriever:
@@ -13,20 +12,20 @@ class BM25Retriever:
         self,
         k1: float = 1.5,
         b: float = 0.75,
-        persist_path: str = None,
+        persist_path: str | None = None,
         cache_size: int = 100,
     ):
         self.tokenizer = Tokenizer()
         self.builder = IndexBuilder(self.tokenizer, persist_path)
         self.k1 = k1
         self.b = b
-        self._documents: List[Document] = []
+        self._documents: list[Document] = []
         self._indexed = False
-        self._cache: Dict[str, List[Tuple[Document, float]]] = {}
+        self._cache: dict[str, list[tuple[Document, float]]] = {}
         self._cache_lock = threading.Lock()
         self._cache_size = cache_size
 
-    def add_documents(self, documents: List[Document]) -> None:
+    def add_documents(self, documents: list[Document]) -> None:
         self._documents = documents
         texts = [doc.page_content for doc in documents]
         self.builder.build(texts)
@@ -34,7 +33,7 @@ class BM25Retriever:
         self._indexed = True
         self.clear_cache()
 
-    def search(self, query: str, top_k: int = 10) -> List[Tuple[Document, float]]:
+    def search(self, query: str, top_k: int = 10) -> list[tuple[Document, float]]:
         cache_key = f"{query}:{top_k}"
 
         with self._cache_lock:
@@ -75,8 +74,8 @@ class BM25Retriever:
         return results
 
     def batch_search(
-        self, queries: List[str], top_k: int = 10
-    ) -> List[List[Tuple[Document, float]]]:
+        self, queries: list[str], top_k: int = 10
+    ) -> list[list[tuple[Document, float]]]:
         return [self.search(q, top_k) for q in queries]
 
     def clear_cache(self) -> None:

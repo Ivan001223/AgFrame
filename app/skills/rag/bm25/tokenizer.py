@@ -1,14 +1,13 @@
 import re
-from typing import List
 
-import jieba
+import jieba  # type: ignore[import-untyped]
 
 
 class Tokenizer:
     def __init__(self, language: str = "mixed"):
         self.language = language
 
-    def tokenize(self, text: str) -> List[str]:
+    def tokenize(self, text: str) -> list[str]:
         if not text:
             return []
 

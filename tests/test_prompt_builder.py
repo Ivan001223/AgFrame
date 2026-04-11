@@ -3,7 +3,6 @@ from __future__ import annotations
 from langchain_core.documents import Document
 
 from app.runtime.prompts import prompt_builder
-from app.runtime.prompts import context_pruner
 from app.runtime.prompts.context_pruner import ContextPruningConfig, prune_document_content
 from app.runtime.prompts.prompt_builder import PromptBudget, build_citations, build_system_prompt
 

@@ -1,6 +1,5 @@
 import time
 
-import pytest
 from langchain_core.documents import Document
 
 from app.skills.rag.bm25.retriever import BM25Retriever

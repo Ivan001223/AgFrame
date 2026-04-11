@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-import time
-from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
@@ -90,9 +89,9 @@ def _rrf_fuse(
         meta = dict(getattr(d, "metadata", {}) or {})
         meta["retrieval_rrf_score"] = float(score)
         for name, _, _ in ranked_lists:
-            rank = ranks.get(key, {}).get(name)
-            if rank is not None:
-                meta[f"retrieval_{name}_rank"] = int(rank)
+            retrieval_rank = ranks.get(key, {}).get(name)
+            if retrieval_rank is not None:
+                meta[f"retrieval_{name}_rank"] = int(retrieval_rank)
         d.metadata = meta
         out.append(d)
     return out
@@ -111,8 +110,8 @@ class HybridRetrievalConfig:
 class HybridRetrieverService:
     def __init__(self, *, vectorstore: Any):
         self._vectorstore = vectorstore
-        self._bm25 = None
-        self._bm25_doc_count = -1
+        self._bm25: BM25RetrieverCustom | None = None
+        self._bm25_doc_count: int = -1
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="hybrid-retrieval")
 
     def _ensure_bm25(self) -> bool:
@@ -211,10 +210,13 @@ class HybridRetrieverService:
         # This is suboptimal for multi-tenancy if BM25 index is shared.
         # Ideally, we shouldn't use shared in-memory BM25 for multi-tenant.
         # But for now, let's filter the results.
+        if self._bm25 is None:
+            dense_docs = list(dense_future.result())
+            return dense_docs[:candidate_k]
         sparse_future = self._executor.submit(self._bm25.search, query, sparse_k * 2)
         dense_docs = list(dense_future.result())
         all_sparse_results = sparse_future.result()
-        all_sparse_docs = [doc for doc, score in all_sparse_results]
+        all_sparse_docs = [doc for doc, _score in all_sparse_results]
 
         sparse_docs = []
         if filter:

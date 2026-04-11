@@ -63,12 +63,11 @@ def _download_with_progress(
                 filename = sibling.rfilename if hasattr(sibling, 'rfilename') else sibling
                 try:
                     api.hf_hub_download(
-                        filename=filename,
                         repo_id=pretrained_source,
+                        filename=filename,
                         repo_type="model",
                         cache_dir=cache_dir,
                         revision=revision,
-                        resume_download=True,
                     )
                 except Exception as e:
                     logger.debug(f"Failed to download {filename}: {e}")

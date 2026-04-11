@@ -3,8 +3,8 @@ from __future__ import annotations
 from langchain_core.messages import HumanMessage
 
 from app.infrastructure.config.settings import settings
-from app.runtime.llm.dev_stub import DevStubChatModel
 from app.runtime.llm import llm_factory
+from app.runtime.llm.dev_stub import DevStubChatModel
 
 
 def test_get_llm_returns_dev_stub_when_requested(monkeypatch):

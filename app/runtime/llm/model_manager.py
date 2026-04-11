@@ -4,13 +4,15 @@ import importlib
 import logging
 import os
 from dataclasses import dataclass
+from types import ModuleType
 from typing import Any
 
-logger = logging.getLogger(__name__)
 from app.runtime.llm.model_importer import resolve_pretrained_source
 
+logger = logging.getLogger(__name__)
+
 try:
-    torch = importlib.import_module("torch")
+    torch: ModuleType | None = importlib.import_module("torch")
 except ModuleNotFoundError:
     torch = None
 

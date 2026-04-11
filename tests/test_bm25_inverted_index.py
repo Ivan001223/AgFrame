@@ -1,6 +1,5 @@
-import pytest
-from app.skills.rag.bm25.tokenizer import Tokenizer
 from app.skills.rag.bm25.inverted_index import InvertedIndex
+from app.skills.rag.bm25.tokenizer import Tokenizer
 
 
 def test_inverted_index_build():

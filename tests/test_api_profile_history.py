@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from app.server.api import history as history_api
 from app.server.api import profile as profile_api
+from app.server.api.auth import get_current_active_user
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,7 @@ def test_profile_returns_none_when_db_unavailable(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(profile_api, "ensure_schema_if_possible", lambda: False)
     app = FastAPI()
     app.include_router(profile_api.router)
+    app.dependency_overrides[get_current_active_user] = lambda: _U(username="u1")
     c = TestClient(app)
     r = c.get("/profile/u1")
     assert r.status_code == 200
@@ -45,10 +47,48 @@ def test_profile_returns_value_when_db_available(monkeypatch: pytest.MonkeyPatch
 
     app = FastAPI()
     app.include_router(profile_api.router)
+    app.dependency_overrides[get_current_active_user] = lambda: _U(username="u1")
     c = TestClient(app)
     r = c.get("/profile/u1")
     assert r.status_code == 200
     assert r.json()["profile"] == {"k": "u1"}
+
+
+def test_profile_forbids_other_user_access(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(profile_api, "ensure_schema_if_possible", lambda: True)
+    app = FastAPI()
+    app.include_router(profile_api.router)
+    app.dependency_overrides[get_current_active_user] = lambda: _U(username="u1", role="user")
+    c = TestClient(app)
+
+    r = c.get("/profile/u2")
+
+    assert r.status_code == 403
+
+
+def test_profile_allows_admin_access(monkeypatch: pytest.MonkeyPatch):
+    import sys
+    import types
+
+    monkeypatch.setattr(profile_api, "ensure_schema_if_possible", lambda: True)
+
+    class _Eng:
+        def get_profile(self, user_id: str):
+            return {"k": user_id}
+
+    fake_mod = types.ModuleType("app.skills.profile.profile_engine")
+    fake_mod.UserProfileEngine = lambda: _Eng()
+    monkeypatch.setitem(sys.modules, "app.skills.profile.profile_engine", fake_mod)
+
+    app = FastAPI()
+    app.include_router(profile_api.router)
+    app.dependency_overrides[get_current_active_user] = lambda: _U(username="admin", role="admin")
+    c = TestClient(app)
+
+    r = c.get("/profile/u2")
+
+    assert r.status_code == 200
+    assert r.json()["profile"] == {"k": "u2"}
 
 
 def test_history_endpoints_file_store(tmp_path: Any, monkeypatch: pytest.MonkeyPatch):

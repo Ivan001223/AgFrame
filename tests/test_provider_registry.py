@@ -1,5 +1,10 @@
+import base64
+
 import pytest
+
+from app.infrastructure.utils.secrets import encrypt_secret
 from app.runtime.llm.provider_registry import ModelProviderRegistry, RegisteredProvider
+
 
 def test_registry_fallback_resolution():
     registry = ModelProviderRegistry()
@@ -47,3 +52,46 @@ def test_registry_system_fallback():
     res = registry.resolve("unknown-model", preferred_provider_id="third")
     assert res.provider_id is None
     assert res.model == "unknown-model"
+
+
+def test_registry_loads_legacy_base64_provider_secrets():
+    registry = ModelProviderRegistry()
+
+    loaded = registry.load_from_store_rows(
+        [
+            {
+                "provider_id": "legacy",
+                "name": "Legacy",
+                "base_url": "https://legacy.example",
+                "api_key_encrypted": base64.b64encode(b"legacy-key").decode("ascii"),
+                "models_json": ["gpt-4o"],
+                "is_default": True,
+                "enabled": True,
+            }
+        ]
+    )
+
+    assert loaded == 1
+    assert registry.get_provider("legacy").api_key == "legacy-key"
+
+
+def test_registry_loads_encrypted_provider_secrets():
+    pytest.importorskip("cryptography.fernet")
+    registry = ModelProviderRegistry()
+
+    loaded = registry.load_from_store_rows(
+        [
+            {
+                "provider_id": "encrypted",
+                "name": "Encrypted",
+                "base_url": "https://encrypted.example",
+                "api_key_encrypted": encrypt_secret("encrypted-key"),
+                "models_json": ["gpt-4o"],
+                "is_default": True,
+                "enabled": True,
+            }
+        ]
+    )
+
+    assert loaded == 1
+    assert registry.get_provider("encrypted").api_key == "encrypted-key"

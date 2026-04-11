@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -29,6 +29,7 @@ from app.harness.runtime.studio_service import (
 )
 from app.infrastructure.database.models import User
 from app.infrastructure.queue.client import enqueue_harness_run
+from app.infrastructure.utils.secrets import encrypt_secret
 from app.server.api.auth import get_current_active_user
 
 router = APIRouter(prefix="/harness", tags=["harness"])
@@ -53,8 +54,16 @@ def get_studio_service():
 def _serialize_provider(provider: dict[str, object]) -> dict[str, object]:
     payload = dict(provider)
     payload.pop("api_key_encrypted", None)
-    payload["models"] = list(payload.pop("models_json", []) or [])
+    raw_models = payload.pop("models_json", [])
+    payload["models"] = list(raw_models) if isinstance(raw_models, list) else []
     return payload
+
+
+def _encrypt_provider_api_key(api_key: str) -> str:
+    try:
+        return encrypt_secret(api_key)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 def _run_visible_to_user(run: dict[str, object], current_user: User) -> bool:
@@ -68,7 +77,7 @@ def _require_authorized_run(*, service, run_id: str, current_user: User) -> dict
         raise HTTPException(status_code=404, detail="Run not found")
     if not _run_visible_to_user(run, current_user):
         raise HTTPException(status_code=403, detail="Not authorized to access this harness run")
-    return run
+    return cast(dict[str, object], run)
 
 
 @router.post("/runs")
@@ -379,16 +388,15 @@ async def create_harness_model_provider(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ):
     import uuid
-    from app.runtime.llm.provider_registry import _obfuscate_key
     store = get_provider_store()
-    
+
     provider_id = f"provider_{uuid.uuid4().hex[:8]}"
     provider = store.create_provider(
         provider_id=provider_id,
         user_id=current_user.username,
         name=payload.name,
         base_url=payload.base_url,
-        api_key_encrypted=_obfuscate_key(payload.api_key),
+        api_key_encrypted=_encrypt_provider_api_key(payload.api_key),
         models_json=payload.models,
         is_default=payload.is_default,
         enabled=payload.enabled,
@@ -402,29 +410,28 @@ async def update_harness_model_provider(
     payload: HarnessModelProviderUpdate,
     current_user: Annotated[User, Depends(get_current_active_user)],
 ):
-    from app.runtime.llm.provider_registry import _obfuscate_key
     store = get_provider_store()
     existing = store.get_provider(provider_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Provider not found")
-        
+
     if existing["user_id"] != current_user.username and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Not authorized")
-        
-    changes = {}
+
+    changes: dict[str, object] = {}
     if payload.name is not None:
         changes["name"] = payload.name
     if payload.base_url is not None:
         changes["base_url"] = payload.base_url
     if payload.api_key is not None:
-        changes["api_key_encrypted"] = _obfuscate_key(payload.api_key)
+        changes["api_key_encrypted"] = _encrypt_provider_api_key(payload.api_key)
     if payload.models is not None:
         changes["models_json"] = payload.models
     if payload.is_default is not None:
         changes["is_default"] = payload.is_default
     if payload.enabled is not None:
         changes["enabled"] = payload.enabled
-        
+
     updated = store.update_provider(provider_id, **changes)
     if updated is None:
         raise HTTPException(status_code=404, detail="Provider not found")
@@ -440,9 +447,9 @@ async def delete_harness_model_provider(
     existing = store.get_provider(provider_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Provider not found")
-        
+
     if existing["user_id"] != current_user.username and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Not authorized")
-        
+
     store.delete_provider(provider_id)
     return {"success": True}

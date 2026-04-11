@@ -57,6 +57,7 @@ dependencies = [
     "tiktoken",
     "transformers>=4.46.3,<6",
     "uvicorn",
+    "cryptography>=46.0.5",
 ]
 
 [dependency-groups]

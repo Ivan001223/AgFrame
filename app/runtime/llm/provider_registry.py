@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import base64
 import logging
 from dataclasses import dataclass
 from typing import Any
 
 from app.infrastructure.config.settings import settings
+from app.infrastructure.utils.secrets import decrypt_secret
 
 _log = logging.getLogger("runtime.llm.provider_registry")
 
@@ -67,23 +67,6 @@ def infer_tool_calling_support(
         return "supported", "This provider route is labeled as OpenAI-compatible for tool calling."
 
     return "unknown", "Tool calling support is not verified for this provider route yet."
-
-
-def _obfuscate_key(api_key: str) -> str:
-    """简单 base64 混淆（非加密），用于 DB 存储。生产环境应替换为 KMS。"""
-    if not api_key:
-        return ""
-    return base64.b64encode(api_key.encode("utf-8")).decode("ascii")
-
-
-def _deobfuscate_key(stored: str) -> str:
-    """反混淆 base64"""
-    if not stored:
-        return ""
-    try:
-        return base64.b64decode(stored.encode("ascii")).decode("utf-8")
-    except Exception:
-        return stored
 
 
 class ModelProviderRegistry:
@@ -190,11 +173,17 @@ class ModelProviderRegistry:
         """从 DB store 的行列表加载 providers 到内存。返回加载数量。"""
         count = 0
         for row in rows:
+            provider_id = str(row.get("provider_id") or "")
+            try:
+                api_key = decrypt_secret(str(row.get("api_key_encrypted") or ""))
+            except (RuntimeError, ValueError) as exc:
+                _log.warning("skipping provider %s because its API key could not be decrypted: %s", provider_id, exc)
+                continue
             provider = RegisteredProvider(
-                provider_id=str(row.get("provider_id") or ""),
+                provider_id=provider_id,
                 name=str(row.get("name") or ""),
                 base_url=str(row.get("base_url") or ""),
-                api_key=_deobfuscate_key(str(row.get("api_key_encrypted") or "")),
+                api_key=api_key,
                 models=list(row.get("models_json") or []),
                 is_default=bool(row.get("is_default", False)),
                 enabled=bool(row.get("enabled", True)),

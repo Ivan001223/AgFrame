@@ -4,7 +4,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from app.infrastructure.database.models import User
@@ -17,18 +17,25 @@ from app.infrastructure.queue.redis_client import (
     init_task,
     release_task_operation,
 )
+from app.infrastructure.storage.object_store import (
+    get_object_store,
+    storage_display_label,
+    storage_filename,
+    storage_media_type,
+)
 from app.server.api.auth import get_current_active_user
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 
 def _serialize_document(row: dict) -> dict:
-    source_path = str(row.get("source_path") or "")
+    source_reference = str(row.get("source_path") or "")
+    filename = storage_filename(source_reference) or os.path.basename(source_reference)
     return {
         "doc_id": row.get("doc_id"),
         "user_id": row.get("user_id"),
-        "filename": os.path.basename(source_path),
-        "source_path": source_path,
+        "filename": filename,
+        "source_path": storage_display_label(source_reference),
         "download_url": f"/documents/{row.get('doc_id')}/download" if row.get("doc_id") is not None else None,
         "checksum": row.get("checksum"),
         "created_at": row.get("created_at"),
@@ -37,6 +44,24 @@ def _serialize_document(row: dict) -> dict:
         "knowledge_base_id": row.get("knowledge_base_id"),
         "knowledge_base_name": row.get("knowledge_base_name"),
     }
+
+
+def _build_download_response(source_reference: str, *, filename: str):
+    storage = get_object_store()
+    media_type = storage_media_type(filename)
+    local_path = storage.get_local_path(source_reference)
+    if local_path:
+        if not os.path.isfile(local_path):
+            raise HTTPException(status_code=404, detail="Document source file is missing")
+        return FileResponse(local_path, filename=filename, media_type=media_type)
+
+    if not storage.exists(source_reference):
+        raise HTTPException(status_code=404, detail="Document source file is missing")
+    return StreamingResponse(
+        storage.iter_bytes(source_reference),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 class DocumentKnowledgeBaseAssignmentPayload(BaseModel):
@@ -95,11 +120,14 @@ async def download_document(
     if current_user.role != "admin" and doc.get("user_id") != current_user.username:
         raise HTTPException(status_code=403, detail="Not authorized to access this document")
 
-    source_path = str(doc.get("source_path") or "").strip()
-    if not source_path or not os.path.isfile(source_path):
+    source_reference = str(doc.get("source_path") or "").strip()
+    if not source_reference:
         raise HTTPException(status_code=404, detail="Document source file is missing")
 
-    return FileResponse(source_path, filename=os.path.basename(source_path))
+    return _build_download_response(
+        source_reference,
+        filename=storage_filename(source_reference) or f"document-{doc_id}",
+    )
 
 
 @router.delete("/{doc_id}")
@@ -117,18 +145,17 @@ async def delete_document(
     if current_user.role != "admin" and doc.get("user_id") != current_user.username:
         raise HTTPException(status_code=403, detail="Not authorized to delete this document")
 
+    source_reference = str(doc.get("source_path") or "").strip()
+    file_deleted = False
+    if source_reference:
+        storage = get_object_store()
+        if storage.exists(source_reference):
+            storage.delete(source_reference)
+            file_deleted = True
+
     deleted = store.delete_document(doc_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Document not found")
-
-    source_path = str(doc.get("source_path") or "").strip()
-    file_deleted = False
-    if source_path and os.path.exists(source_path):
-        try:
-            os.remove(source_path)
-            file_deleted = True
-        except OSError:
-            file_deleted = False
 
     return {
         "message": "Deleted",
@@ -185,8 +212,8 @@ async def reindex_document(
     if current_user.role != "admin" and doc.get("user_id") != current_user.username:
         raise HTTPException(status_code=403, detail="Not authorized to reindex this document")
 
-    source_path = str(doc.get("source_path") or "").strip()
-    if not source_path or not os.path.exists(source_path):
+    source_reference = str(doc.get("source_path") or "").strip()
+    if not source_reference or not get_object_store().exists(source_reference):
         raise HTTPException(status_code=400, detail="Document source file is missing")
 
     task_id = str(uuid.uuid4())
@@ -215,9 +242,10 @@ async def reindex_document(
             "status": "queued",
             "progress": 0,
             "step": "queued",
-            "message": "文档重建索引已入队",
-            "file_path": source_path,
-            "filename": os.path.basename(source_path),
+            "message": "鏂囨。閲嶅缓绱㈠紩宸插叆闃?",
+            "file_path": source_reference,
+            "storage_uri": source_reference,
+            "filename": storage_filename(source_reference),
             "created_at": int(time.time()),
             "user_id": doc.get("user_id") or current_user.username,
             "task_type": "reindex_document",
@@ -230,7 +258,7 @@ async def reindex_document(
     )
     await enqueue_ingest_pdf(
         task_id,
-        source_path,
+        source_reference,
         user_id=doc.get("user_id") or current_user.username,
         knowledge_base_id=doc.get("knowledge_base_id"),
     )

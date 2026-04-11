@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/http/client';
+import { getSessionCacheScope } from '@/lib/auth/session';
 
 export type KnowledgeBaseDTO = {
   knowledge_base_id: string;
@@ -12,12 +13,13 @@ export type KnowledgeBaseDTO = {
 };
 
 export const KNOWLEDGE_BASE_KEYS = {
-  all: ['knowledge-bases'] as const,
+  all: (scope: string) => ['knowledge-bases', scope] as const,
 };
 
 export function useKnowledgeBasesQuery() {
+  const scope = getSessionCacheScope();
   return useQuery({
-    queryKey: KNOWLEDGE_BASE_KEYS.all,
+    queryKey: KNOWLEDGE_BASE_KEYS.all(scope),
     queryFn: async () => {
       const response = await apiClient<{ knowledge_bases: KnowledgeBaseDTO[] }>('/knowledge-bases');
       return response.knowledge_bases;
@@ -27,6 +29,7 @@ export function useKnowledgeBasesQuery() {
 
 export function useCreateKnowledgeBaseMutation() {
   const queryClient = useQueryClient();
+  const scope = getSessionCacheScope();
 
   return useMutation({
     mutationFn: async ({ name, description }: { name: string; description?: string }) =>
@@ -35,14 +38,15 @@ export function useCreateKnowledgeBaseMutation() {
         body: JSON.stringify({ name, description }),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: KNOWLEDGE_BASE_KEYS.all });
-      queryClient.invalidateQueries({ queryKey: ['documents'] });
+      queryClient.invalidateQueries({ queryKey: KNOWLEDGE_BASE_KEYS.all(scope) });
+      queryClient.invalidateQueries({ queryKey: ['documents', scope] });
     },
   });
 }
 
 export function useUpdateKnowledgeBaseMutation() {
   const queryClient = useQueryClient();
+  const scope = getSessionCacheScope();
 
   return useMutation({
     mutationFn: async ({ knowledgeBaseId, name, description }: { knowledgeBaseId: string; name?: string; description?: string | null }) =>
@@ -51,15 +55,16 @@ export function useUpdateKnowledgeBaseMutation() {
         body: JSON.stringify({ name, description }),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: KNOWLEDGE_BASE_KEYS.all });
-      queryClient.invalidateQueries({ queryKey: ['documents'] });
-      queryClient.invalidateQueries({ queryKey: ['harness', 'studio', 'projects'] });
+      queryClient.invalidateQueries({ queryKey: KNOWLEDGE_BASE_KEYS.all(scope) });
+      queryClient.invalidateQueries({ queryKey: ['documents', scope] });
+      queryClient.invalidateQueries({ queryKey: ['harness', scope, 'studio', 'projects'] });
     },
   });
 }
 
 export function useDeleteKnowledgeBaseMutation() {
   const queryClient = useQueryClient();
+  const scope = getSessionCacheScope();
 
   return useMutation({
     mutationFn: async (knowledgeBaseId: string) =>
@@ -67,9 +72,9 @@ export function useDeleteKnowledgeBaseMutation() {
         method: 'DELETE',
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: KNOWLEDGE_BASE_KEYS.all });
-      queryClient.invalidateQueries({ queryKey: ['documents'] });
-      queryClient.invalidateQueries({ queryKey: ['harness', 'studio', 'projects'] });
+      queryClient.invalidateQueries({ queryKey: KNOWLEDGE_BASE_KEYS.all(scope) });
+      queryClient.invalidateQueries({ queryKey: ['documents', scope] });
+      queryClient.invalidateQueries({ queryKey: ['harness', scope, 'studio', 'projects'] });
     },
   });
 }

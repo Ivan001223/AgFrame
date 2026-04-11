@@ -34,6 +34,8 @@ cd "$PROJECT_ROOT"
   -s \
   --json-report \
   --json-report-file="$OUT_DIR/pytest.json" \
+  --cov=app.harness \
+  --cov=app.runtime.graph \
   --cov=app.runtime.prompts \
   --cov=app.runtime.llm.model_manager \
   --cov=app.infrastructure.utils \
@@ -77,15 +79,20 @@ if [[ -n "${LIVE_SMOKE_BASE_URL:-}" ]]; then
 fi
 
 if [[ -f "$PROJECT_ROOT/frontend/package.json" ]]; then
-  if [[ -d "$PROJECT_ROOT/frontend/node_modules" ]]; then
-    (
-      cd "$PROJECT_ROOT/frontend"
-      npm run lint -- --max-warnings=0 > "$OUT_DIR/frontend_lint.log"
-      npm run build > "$OUT_DIR/frontend_build.log"
-    )
-  else
-    echo "frontend checks skipped: node_modules not installed" > "$OUT_DIR/frontend_checks.log"
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "frontend checks failed: npm is not installed" >&2
+    exit 1
   fi
+  if [[ ! -d "$PROJECT_ROOT/frontend/node_modules" ]]; then
+    echo "frontend checks failed: node_modules not installed" >&2
+    exit 1
+  fi
+  (
+    cd "$PROJECT_ROOT/frontend"
+    npm run lint -- --max-warnings=0 > "$OUT_DIR/frontend_lint.log"
+    npm run typecheck > "$OUT_DIR/frontend_typecheck.log"
+    npm run build > "$OUT_DIR/frontend_build.log"
+  )
 fi
 
 echo "$OUT_DIR"

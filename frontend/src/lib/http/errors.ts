@@ -24,6 +24,12 @@ export type ApiErrorResponse = {
   detail?: string | object;
   code?: string;
   message?: string;
+  error?: {
+    code?: string;
+    message?: string;
+    details?: string | object;
+    request_id?: string;
+  };
 };
 
 export function getErrorMessage(error: unknown, fallback: string): string {
@@ -34,4 +40,8 @@ export function getErrorMessage(error: unknown, fallback: string): string {
     return error.message;
   }
   return fallback;
+}
+
+export function isAuthApiError(error: unknown): error is ApiError {
+  return error instanceof ApiError && (error.status === 401 || error.status === 403);
 }

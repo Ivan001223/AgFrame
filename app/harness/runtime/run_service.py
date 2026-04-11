@@ -131,6 +131,24 @@ class HarnessRunService:
             return "cluster_member"
         return "agent"
 
+    @staticmethod
+    def _decorate_run_context(run: dict[str, object]) -> dict[str, object]:
+        payload = dict(run)
+        input_json = payload.get("input_json")
+        metadata_json = payload.get("metadata_json")
+        project_id = None
+        project_name = None
+        if isinstance(input_json, dict):
+            project_id = str(input_json.get("project_id") or "").strip() or None
+            project_name = str(input_json.get("project_name") or "").strip() or None
+        if project_id is None and isinstance(metadata_json, dict):
+            project_id = str(metadata_json.get("project_id") or "").strip() or None
+        if project_name is None and isinstance(metadata_json, dict):
+            project_name = str(metadata_json.get("project_name") or "").strip() or None
+        payload["project_id"] = project_id
+        payload["project_name"] = project_name
+        return payload
+
     def _build_checklist_snapshot(self, *, run: dict[str, object]) -> dict[str, object] | None:
         if str(run.get("task_type") or "") != "agent_orchestration":
             return None
@@ -499,7 +517,7 @@ class HarnessRunService:
             resolved_events = events
         else:
             try:
-                resolved_events = self.list_run_events(run_id=run_id, limit=20)
+                resolved_events = self.list_run_events(run_id=run_id, limit=500)
             except AttributeError:
                 resolved_events = []
         runtime_state = self._build_runtime_state(
@@ -1127,13 +1145,13 @@ class HarnessRunService:
         run = self.run_store.get_run(run_id)
         if run is None:
             return None
-        detail = dict(run)
+        detail = self._decorate_run_context(run)
         policy = get_policy(str(run.get("task_type") or ""))
         detail["policy"] = self._policy_summary(policy)
         detail["can_retry"] = self.can_retry_run(run_id)
         detail["latest_approval"] = self.get_latest_approval(run_id)
         detail["latest_verification"] = self.get_latest_verification(run_id)
-        detail["events"] = self.list_run_events(run_id=run_id, limit=20)
+        detail["events"] = self.list_run_events(run_id=run_id, limit=500)
         detail["runtime_state"] = self._load_persisted_runtime_state(run_id) or self.sync_runtime_state(
             run_id,
             run=detail,
@@ -1161,7 +1179,7 @@ class HarnessRunService:
         summaries: list[dict[str, object]] = []
         for run in runs:
             run_id = str(run.get("run_id") or "").strip()
-            summary = dict(run)
+            summary = self._decorate_run_context(run)
             policy = get_policy(str(run.get("task_type") or ""))
             summary["policy"] = self._policy_summary(policy)
             summary["can_retry"] = self.can_retry_run(run_id) if run_id else False
@@ -1185,11 +1203,12 @@ class HarnessRunService:
                     transition_type="list_sync",
                 )
             )
+            summary_events = self.list_run_events(run_id=run_id, limit=500) if run_id else []
             summary["workflow_progress"] = self._build_workflow_progress(
                 run=summary,
                 latest_approval=summary["latest_approval"],
                 latest_verification=summary["latest_verification"],
-                events=None,
+                events=summary_events,
             )
             summary["checklist_snapshot"] = self._build_checklist_snapshot(run=summary)
             summaries.append(summary)

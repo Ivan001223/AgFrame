@@ -20,6 +20,7 @@ function buildRegisterSchema(passwordsMismatch: string) {
       username: z.string().min(1),
       password: z.string().min(6),
       confirmPassword: z.string().min(6),
+      bootstrapAdminToken: z.string().optional(),
     })
     .refine((value) => value.password === value.confirmPassword, {
       message: passwordsMismatch,
@@ -60,6 +61,7 @@ export default function RegisterPage() {
       await registerMutation.mutateAsync({
         username: data.username,
         password: data.password,
+        bootstrapAdminToken: data.bootstrapAdminToken?.trim() || undefined,
       });
       await loginMutation.mutateAsync({
         username: data.username,
@@ -107,6 +109,15 @@ export default function RegisterPage() {
               {errors.username && (
                 <p className="mt-2 text-sm text-red-600">{text.usernameRequired}</p>
               )}
+            </div>
+            <div>
+              <input
+                type="password"
+                autoComplete="off"
+                className="relative block w-full appearance-none rounded-md border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-500 focus:z-10 focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                placeholder={text.bootstrapToken}
+                {...register('bootstrapAdminToken')}
+              />
             </div>
             <div>
               <input

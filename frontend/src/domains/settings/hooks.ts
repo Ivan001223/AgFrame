@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/http/client';
+import { getSessionCacheScope } from '@/lib/auth/session';
 
 export type UserSettingsDTO = Record<string, unknown>;
 export type AdminSettingsDTO = Record<string, unknown>;
@@ -55,19 +56,21 @@ export type RerankerAvailability = {
 };
 
 export const SETTINGS_KEYS = {
-  user: ['settings', 'user'] as const,
-  admin: ['settings', 'admin'] as const,
+  user: (scope: string) => ['settings', scope, 'user'] as const,
+  admin: (scope: string) => ['settings', scope, 'admin'] as const,
 };
 
 export function useUserSettingsQuery() {
+  const scope = getSessionCacheScope();
   return useQuery({
-    queryKey: SETTINGS_KEYS.user,
+    queryKey: SETTINGS_KEYS.user(scope),
     queryFn: async () => apiClient<UserSettingsDTO>('/settings/user'),
   });
 }
 
 export function useUpdateUserSettingsMutation() {
   const queryClient = useQueryClient();
+  const scope = getSessionCacheScope();
 
   return useMutation({
     mutationFn: async (settings: UserSettingsDTO) =>
@@ -76,14 +79,15 @@ export function useUpdateUserSettingsMutation() {
         body: JSON.stringify(settings),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: SETTINGS_KEYS.user });
+      queryClient.invalidateQueries({ queryKey: SETTINGS_KEYS.user(scope) });
     },
   });
 }
 
 export function useAdminSettingsQuery(enabled = true) {
+  const scope = getSessionCacheScope();
   return useQuery({
-    queryKey: SETTINGS_KEYS.admin,
+    queryKey: SETTINGS_KEYS.admin(scope),
     queryFn: async () => apiClient<AdminSettingsDTO>('/settings'),
     enabled,
     retry: false,
@@ -92,6 +96,7 @@ export function useAdminSettingsQuery(enabled = true) {
 
 export function useUpdateAdminSettingsMutation() {
   const queryClient = useQueryClient();
+  const scope = getSessionCacheScope();
 
   return useMutation({
     mutationFn: async (settings: AdminSettingsDTO) =>
@@ -100,7 +105,7 @@ export function useUpdateAdminSettingsMutation() {
         body: JSON.stringify(settings),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: SETTINGS_KEYS.admin });
+      queryClient.invalidateQueries({ queryKey: SETTINGS_KEYS.admin(scope) });
     },
   });
 }

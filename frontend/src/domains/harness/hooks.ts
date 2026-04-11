@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/http/client';
+import { getSessionCacheScope } from '@/lib/auth/session';
 
 export type HarnessApprovalDTO = {
   approval_id?: string;
@@ -118,6 +119,8 @@ export type HarnessRunChecklistSnapshotDTO = {
 export type HarnessRunSummaryDTO = {
   run_id: string;
   user_id: string;
+  project_id?: string | null;
+  project_name?: string | null;
   session_id?: string | null;
   task_type?: string;
   status?: string;
@@ -543,17 +546,29 @@ export type HarnessProjectDetailDTO = HarnessProjectSummaryDTO & {
   resolved_skill_request?: HarnessSkillRequestDTO;
 };
 
+export const HARNESS_KEYS = {
+  runs: (scope: string) => ['harness', scope, 'runs'] as const,
+  run: (scope: string, runId: string | null) => ['harness', scope, 'run', runId] as const,
+  policies: (scope: string) => ['harness', scope, 'policies'] as const,
+  studioProjects: (scope: string) => ['harness', scope, 'studio', 'projects'] as const,
+  currentProject: (scope: string) => ['harness', scope, 'studio', 'current-project'] as const,
+  project: (scope: string, projectId: string | null) => ['harness', scope, 'studio', 'project', projectId] as const,
+  modelProviders: (scope: string) => ['harness', scope, 'model-providers'] as const,
+};
+
 export function useHarnessRunsQuery() {
+  const scope = getSessionCacheScope();
   return useQuery({
-    queryKey: ['harness', 'runs'],
+    queryKey: HARNESS_KEYS.runs(scope),
     queryFn: async () => apiClient<{ runs: HarnessRunSummaryDTO[] }>('/harness/runs'),
     refetchInterval: 5000,
   });
 }
 
 export function useHarnessRunDetailQuery(runId: string | null) {
+  const scope = getSessionCacheScope();
   return useQuery({
-    queryKey: ['harness', 'run', runId],
+    queryKey: HARNESS_KEYS.run(scope, runId),
     queryFn: async () => apiClient<HarnessRunDetailDTO>(`/harness/runs/${runId}`),
     enabled: !!runId,
     refetchInterval: 5000,
@@ -561,30 +576,34 @@ export function useHarnessRunDetailQuery(runId: string | null) {
 }
 
 export function useHarnessPoliciesQuery() {
+  const scope = getSessionCacheScope();
   return useQuery({
-    queryKey: ['harness', 'policies'],
+    queryKey: HARNESS_KEYS.policies(scope),
     queryFn: async () => apiClient<{ policies: HarnessPolicyDTO[] }>('/harness/policies'),
     staleTime: 5 * 60 * 1000,
   });
 }
 
 export function useHarnessStudioProjectsQuery() {
+  const scope = getSessionCacheScope();
   return useQuery({
-    queryKey: ['harness', 'studio', 'projects'],
+    queryKey: HARNESS_KEYS.studioProjects(scope),
     queryFn: async () => apiClient<{ projects: HarnessProjectSummaryDTO[] }>('/harness/studio/projects'),
   });
 }
 
 export function useHarnessCurrentStudioProjectQuery() {
+  const scope = getSessionCacheScope();
   return useQuery({
-    queryKey: ['harness', 'studio', 'current-project'],
+    queryKey: HARNESS_KEYS.currentProject(scope),
     queryFn: async () => apiClient<HarnessProjectDetailDTO>('/harness/studio/projects/current'),
   });
 }
 
 export function useHarnessStudioProjectQuery(projectId: string | null) {
+  const scope = getSessionCacheScope();
   return useQuery({
-    queryKey: ['harness', 'studio', 'project', projectId],
+    queryKey: HARNESS_KEYS.project(scope, projectId),
     queryFn: async () => apiClient<HarnessProjectDetailDTO>(`/harness/studio/projects/${projectId}`),
     enabled: !!projectId,
   });
@@ -592,6 +611,7 @@ export function useHarnessStudioProjectQuery(projectId: string | null) {
 
 export function useHarnessCreateStudioProjectMutation() {
   const queryClient = useQueryClient();
+  const scope = getSessionCacheScope();
 
   return useMutation({
     mutationFn: async ({ name, description }: { name: string; description?: string }) =>
@@ -601,9 +621,9 @@ export function useHarnessCreateStudioProjectMutation() {
       }),
     onSuccess: async (payload) => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['harness', 'studio', 'projects'] }),
-        queryClient.invalidateQueries({ queryKey: ['harness', 'studio', 'current-project'] }),
-        queryClient.invalidateQueries({ queryKey: ['harness', 'studio', 'project', payload.project_id] }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.studioProjects(scope) }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.currentProject(scope) }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.project(scope, payload.project_id) }),
       ]);
     },
   });
@@ -611,6 +631,7 @@ export function useHarnessCreateStudioProjectMutation() {
 
 export function useHarnessUpdateStudioProjectMutation() {
   const queryClient = useQueryClient();
+  const scope = getSessionCacheScope();
 
   return useMutation({
     mutationFn: async ({
@@ -634,9 +655,9 @@ export function useHarnessUpdateStudioProjectMutation() {
       }),
     onSuccess: async (payload) => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['harness', 'studio', 'projects'] }),
-        queryClient.invalidateQueries({ queryKey: ['harness', 'studio', 'current-project'] }),
-        queryClient.invalidateQueries({ queryKey: ['harness', 'studio', 'project', payload.project_id] }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.studioProjects(scope) }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.currentProject(scope) }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.project(scope, payload.project_id) }),
       ]);
     },
   });
@@ -644,6 +665,7 @@ export function useHarnessUpdateStudioProjectMutation() {
 
 export function useHarnessSkillRequestMutation() {
   const queryClient = useQueryClient();
+  const scope = getSessionCacheScope();
 
   return useMutation({
     mutationFn: async ({
@@ -664,9 +686,9 @@ export function useHarnessSkillRequestMutation() {
       }),
     onSuccess: async (payload) => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['harness', 'studio', 'projects'] }),
-        queryClient.invalidateQueries({ queryKey: ['harness', 'studio', 'current-project'] }),
-        queryClient.invalidateQueries({ queryKey: ['harness', 'studio', 'project', payload.project_id] }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.studioProjects(scope) }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.currentProject(scope) }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.project(scope, payload.project_id) }),
       ]);
     },
   });
@@ -674,6 +696,7 @@ export function useHarnessSkillRequestMutation() {
 
 export function useHarnessSkillDecisionMutation() {
   const queryClient = useQueryClient();
+  const scope = getSessionCacheScope();
 
   return useMutation({
     mutationFn: async ({
@@ -691,9 +714,9 @@ export function useHarnessSkillDecisionMutation() {
       }),
     onSuccess: async (payload) => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['harness', 'studio', 'projects'] }),
-        queryClient.invalidateQueries({ queryKey: ['harness', 'studio', 'current-project'] }),
-        queryClient.invalidateQueries({ queryKey: ['harness', 'studio', 'project', payload.project_id] }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.studioProjects(scope) }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.currentProject(scope) }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.project(scope, payload.project_id) }),
       ]);
     },
   });
@@ -701,6 +724,7 @@ export function useHarnessSkillDecisionMutation() {
 
 export function useHarnessStudioRunMutation() {
   const queryClient = useQueryClient();
+  const scope = getSessionCacheScope();
 
   return useMutation({
     mutationFn: async ({
@@ -730,8 +754,8 @@ export function useHarnessStudioRunMutation() {
       }),
     onSuccess: async (payload) => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['harness', 'runs'] }),
-        queryClient.invalidateQueries({ queryKey: ['harness', 'run', payload.run_id] }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.runs(scope) }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.run(scope, payload.run_id) }),
       ]);
     },
   });
@@ -739,6 +763,7 @@ export function useHarnessStudioRunMutation() {
 
 export function useHarnessCreateRunMutation() {
   const queryClient = useQueryClient();
+  const scope = getSessionCacheScope();
 
   return useMutation({
     mutationFn: async ({
@@ -763,9 +788,9 @@ export function useHarnessCreateRunMutation() {
       }),
     onSuccess: async (payload) => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['harness', 'runs'] }),
-        queryClient.invalidateQueries({ queryKey: ['harness', 'policies'] }),
-        queryClient.invalidateQueries({ queryKey: ['harness', 'run', payload.run_id] }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.runs(scope) }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.policies(scope) }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.run(scope, payload.run_id) }),
       ]);
     },
   });
@@ -773,6 +798,7 @@ export function useHarnessCreateRunMutation() {
 
 export function useHarnessApprovalMutation() {
   const queryClient = useQueryClient();
+  const scope = getSessionCacheScope();
 
   return useMutation({
     mutationFn: async ({
@@ -790,8 +816,8 @@ export function useHarnessApprovalMutation() {
       }),
     onSuccess: async (_payload, variables) => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['harness', 'runs'] }),
-        queryClient.invalidateQueries({ queryKey: ['harness', 'run', variables.runId] }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.runs(scope) }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.run(scope, variables.runId) }),
       ]);
     },
   });
@@ -799,6 +825,7 @@ export function useHarnessApprovalMutation() {
 
 export function useHarnessRetryRunMutation() {
   const queryClient = useQueryClient();
+  const scope = getSessionCacheScope();
 
   return useMutation({
     mutationFn: async ({ runId }: { runId: string }) =>
@@ -807,23 +834,25 @@ export function useHarnessRetryRunMutation() {
       }),
     onSuccess: async (payload, variables) => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['harness', 'runs'] }),
-        queryClient.invalidateQueries({ queryKey: ['harness', 'run', variables.runId] }),
-        queryClient.invalidateQueries({ queryKey: ['harness', 'run', payload.run_id] }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.runs(scope) }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.run(scope, variables.runId) }),
+        queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.run(scope, payload.run_id) }),
       ]);
     },
   });
 }
 
 export function useHarnessModelProvidersQuery() {
+  const scope = getSessionCacheScope();
   return useQuery({
-    queryKey: ['harness', 'model-providers'],
+    queryKey: HARNESS_KEYS.modelProviders(scope),
     queryFn: async () => apiClient<{ providers: HarnessModelProviderDTO[] }>('/harness/model-providers'),
   });
 }
 
 export function useHarnessCreateModelProviderMutation() {
   const queryClient = useQueryClient();
+  const scope = getSessionCacheScope();
 
   return useMutation({
     mutationFn: async (payload: {
@@ -839,13 +868,14 @@ export function useHarnessCreateModelProviderMutation() {
         body: JSON.stringify(payload),
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['harness', 'model-providers'] });
+      await queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.modelProviders(scope) });
     },
   });
 }
 
 export function useHarnessUpdateModelProviderMutation() {
   const queryClient = useQueryClient();
+  const scope = getSessionCacheScope();
 
   return useMutation({
     mutationFn: async ({ providerId, ...payload }: { providerId: string } & Partial<{
@@ -861,13 +891,14 @@ export function useHarnessUpdateModelProviderMutation() {
         body: JSON.stringify(payload),
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['harness', 'model-providers'] });
+      await queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.modelProviders(scope) });
     },
   });
 }
 
 export function useHarnessDeleteModelProviderMutation() {
   const queryClient = useQueryClient();
+  const scope = getSessionCacheScope();
 
   return useMutation({
     mutationFn: async (providerId: string) =>
@@ -875,7 +906,7 @@ export function useHarnessDeleteModelProviderMutation() {
         method: 'DELETE',
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['harness', 'model-providers'] });
+      await queryClient.invalidateQueries({ queryKey: HARNESS_KEYS.modelProviders(scope) });
     },
   });
 }

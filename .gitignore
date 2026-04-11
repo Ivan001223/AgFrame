@@ -33,6 +33,10 @@ CLAUDE.md
 *.egg
 
 .pytest_cache/
+.pytest-tmp/
+.test-tmp/
+.pip-audit-cache/
+pytest-cache-files-*/
 .coverage
 .coverage.*
 htmlcov/
@@ -109,3 +113,4 @@ frontend/*.tsbuildinfo
 *.rej
 *.retry
 tmp/
+tmp*/

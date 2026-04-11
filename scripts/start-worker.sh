@@ -18,5 +18,22 @@ else
   exit 1
 fi
 
-echo "启动 ARQ Worker..."
-exec "${ARQ_BIN[@]}" app.infrastructure.queue.worker_settings.WorkerSettings
+echo "启动 ARQ Workers..."
+
+pids=()
+
+"${ARQ_BIN[@]}" app.infrastructure.queue.worker_settings.IngestWorkerSettings &
+pids+=("$!")
+"${ARQ_BIN[@]}" app.infrastructure.queue.worker_settings.RuntimeWorkerSettings &
+pids+=("$!")
+"${ARQ_BIN[@]}" app.infrastructure.queue.worker_settings.ResumeWorkerSettings &
+pids+=("$!")
+
+cleanup() {
+  for pid in "${pids[@]}"; do
+    kill "$pid" 2>/dev/null || true
+  done
+}
+
+trap cleanup EXIT INT TERM
+wait

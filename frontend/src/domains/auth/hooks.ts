@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/http/client';
+import { ApiError } from '@/lib/http/errors';
 import {
   clearStoredSession,
+  getSessionCacheScope,
   getStoredToken,
   setStoredSession,
 } from '@/lib/auth/session';
@@ -14,6 +16,7 @@ export type LoginRequest = {
 export type RegisterRequest = {
   username: string;
   password: string;
+  bootstrapAdminToken?: string;
 };
 
 export type TokenResponse = {
@@ -33,12 +36,18 @@ export const AUTH_KEYS = {
 
 export function useCurrentUserQuery() {
   const token = getStoredToken();
+  const scope = getSessionCacheScope();
 
   return useQuery({
-    queryKey: AUTH_KEYS.currentUser,
+    queryKey: [...AUTH_KEYS.currentUser, scope],
     queryFn: async () => apiClient<CurrentUser>('/auth/users/me'),
     enabled: !!token,
-    retry: false,
+    retry: (failureCount, error) => {
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        return false;
+      }
+      return failureCount < 2;
+    },
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -72,6 +81,11 @@ export function useRegisterMutation() {
     mutationFn: async (data: RegisterRequest) => {
       return apiClient<CurrentUser>('/auth/register', {
         method: 'POST',
+        headers: data.bootstrapAdminToken
+          ? {
+              'X-Bootstrap-Admin-Token': data.bootstrapAdminToken,
+            }
+          : undefined,
         body: JSON.stringify(data),
       });
     },
@@ -83,6 +97,6 @@ export function useLogout() {
 
   return () => {
     clearStoredSession();
-    queryClient.removeQueries({ queryKey: AUTH_KEYS.currentUser });
+    queryClient.clear();
   };
 }

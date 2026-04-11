@@ -275,6 +275,7 @@ class RAGEngine:
     def add_knowledge_base(
         self,
         file_path: str,
+        source_uri: str | None = None,
         user_id: str | None = None,
         knowledge_base_id: str | None = None,
     ) -> dict[str, Any]:
@@ -318,9 +319,10 @@ class RAGEngine:
 
             doc_store = MySQLDocStore()
             checksum = sha256_file(file_path)
+            stored_source = str(source_uri or file_path)
             # 传入 user_id 写入 Document 表
             doc_id = doc_store.upsert_document(
-                source_path=file_path, checksum=checksum, user_id=user_id
+                source_path=stored_source, checksum=checksum, user_id=user_id
             )
             if knowledge_base_id:
                 KnowledgeBaseDocumentStore().assign_document(
@@ -353,7 +355,8 @@ class RAGEngine:
                                 "doc_id": doc_id,
                                 "parent_chunk_id": parent_id,
                                 "child_index": idx,
-                                "source": file_path,
+                                "source": stored_source,
+                                "source_label": os.path.basename(stored_source),
                                 "user_id": user_id or "",  # 写入 vector metadata
                                 "knowledge_base_id": str(knowledge_base_id or ""),
                             },
@@ -531,6 +534,7 @@ class RAGEngine:
                                 "parent_chunk_id": parent_id,
                                 "page_num": p.get("page_num"),
                                 "source": p.get("source_path"),
+                                "source_label": os.path.basename(str(p.get("source_path") or "")),
                                 "knowledge_base_id": p.get("knowledge_base_id"),
                                 "knowledge_base_name": p.get("knowledge_base_name"),
                                 "retrieval_rrf_score": parent_scores.get(parent_id),

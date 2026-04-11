@@ -1,8 +1,8 @@
 import { ApiError, ApiErrorResponse } from './errors';
 import { clearStoredSession, getStoredToken } from '@/lib/auth/session';
 
-// Read backend URL from env, fallback to relative path (proxy) or localhost
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+// Read backend URL from env and otherwise use same-origin relative paths.
+export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || '').trim();
 
 interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined | null>;
@@ -79,12 +79,13 @@ export async function apiClient<T>(
         // failed to parse JSON error
       }
 
+      const normalizedError = errorData.error ?? {};
       throw new ApiError(
-        errorData.message || 'An error occurred during the request.',
+        errorData.message || normalizedError.message || 'An error occurred during the request.',
         response.status,
-        errorData.code || 'UNKNOWN_ERROR',
-        requestId,
-        errorData.detail
+        errorData.code || normalizedError.code || 'UNKNOWN_ERROR',
+        requestId || normalizedError.request_id,
+        errorData.detail ?? normalizedError.details
       );
     }
 

@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/http/client';
+import { getSessionCacheScope } from '@/lib/auth/session';
 
 export type TaskStatus = 'queued' | 'running' | 'failed' | 'unknown';
 
@@ -59,22 +60,25 @@ export type TaskDetailDTO = {
 };
 
 export const TASK_KEYS = {
-  summary: ['tasks', 'summary'] as const,
-  incidents: (filters: { handled?: boolean; archived?: boolean }) => ['tasks', 'incidents', filters] as const,
-  detail: (id: string) => ['tasks', id] as const,
+  summary: (scope: string) => ['tasks', scope, 'summary'] as const,
+  incidents: (scope: string, filters: { handled?: boolean; archived?: boolean }) =>
+    ['tasks', scope, 'incidents', filters] as const,
+  detail: (scope: string, id: string) => ['tasks', scope, id] as const,
 };
 
 export function useTaskSummaryQuery() {
+  const scope = getSessionCacheScope();
   return useQuery({
-    queryKey: TASK_KEYS.summary,
+    queryKey: TASK_KEYS.summary(scope),
     queryFn: async () => apiClient<TaskSummaryDTO>('/tasks/summary'),
     refetchInterval: 10000,
   });
 }
 
 export function useTaskIncidentsQuery(filters: { handled?: boolean; archived?: boolean } = {}) {
+  const scope = getSessionCacheScope();
   return useQuery({
-    queryKey: TASK_KEYS.incidents(filters),
+    queryKey: TASK_KEYS.incidents(scope, filters),
     queryFn: async () => {
       const params: Record<string, boolean | undefined> = {
         handled: filters.handled,
@@ -91,8 +95,9 @@ export function useTaskIncidentsQuery(filters: { handled?: boolean; archived?: b
 }
 
 export function useTaskDetailQuery(taskId: string) {
+  const scope = getSessionCacheScope();
   return useQuery({
-    queryKey: TASK_KEYS.detail(taskId),
+    queryKey: TASK_KEYS.detail(scope, taskId),
     queryFn: async () => {
       return apiClient<TaskDetailDTO>(`/tasks/${taskId}`);
     },

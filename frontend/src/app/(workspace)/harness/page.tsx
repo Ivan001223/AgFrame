@@ -2629,19 +2629,31 @@ export default function HarnessPage() {
   const projectQuery = useHarnessStudioProjectQuery(activeProjectId);
   const runs = useMemo(() => runsQuery.data?.runs ?? [], [runsQuery.data?.runs]);
   const sortedRuns = useMemo(() => [...runs].sort(compareHarnessRuns), [runs]);
+  const projectScopedRuns = useMemo(() => {
+    if (!activeProjectId) {
+      return sortedRuns;
+    }
+    return sortedRuns.filter((run) => {
+      if (run.task_type !== 'agent_orchestration') {
+        return true;
+      }
+      const runProjectId = typeof run.project_id === 'string' ? run.project_id : '';
+      return !runProjectId || runProjectId === activeProjectId;
+    });
+  }, [activeProjectId, sortedRuns]);
   const filteredRuns = useMemo(
-    () => sortedRuns.filter((run) => matchesRunFilter(run, runFilter)),
-    [runFilter, sortedRuns]
+    () => projectScopedRuns.filter((run) => matchesRunFilter(run, runFilter)),
+    [projectScopedRuns, runFilter]
   );
   const runFilterCounts = useMemo(
     () => ({
-      all: sortedRuns.length,
-      attention: sortedRuns.filter((run) => matchesRunFilter(run, 'attention')).length,
-      active: sortedRuns.filter((run) => matchesRunFilter(run, 'active')).length,
-      checklist: sortedRuns.filter((run) => matchesRunFilter(run, 'checklist')).length,
-      completed: sortedRuns.filter((run) => matchesRunFilter(run, 'completed')).length,
+      all: projectScopedRuns.length,
+      attention: projectScopedRuns.filter((run) => matchesRunFilter(run, 'attention')).length,
+      active: projectScopedRuns.filter((run) => matchesRunFilter(run, 'active')).length,
+      checklist: projectScopedRuns.filter((run) => matchesRunFilter(run, 'checklist')).length,
+      completed: projectScopedRuns.filter((run) => matchesRunFilter(run, 'completed')).length,
     }),
-    [sortedRuns]
+    [projectScopedRuns]
   );
   const activeRunId = useMemo(() => {
     if (selectedRunId && filteredRuns.some((run) => run.run_id === selectedRunId)) {

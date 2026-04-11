@@ -1,36 +1,33 @@
 import os
-import tempfile
 
 import pytest
 from app.skills.rag.bm25.tokenizer import Tokenizer
 from app.skills.rag.bm25.index_builder import IndexBuilder
 
 
-def test_index_builder_persist():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        builder = IndexBuilder(Tokenizer(), persist_path=tmpdir)
-        docs = ["hello world", "python programming"]
+def test_index_builder_persist(tmp_path):
+    builder = IndexBuilder(Tokenizer(), persist_path=str(tmp_path))
+    docs = ["hello world", "python programming"]
 
-        builder.build(docs)
-        builder.save()
+    builder.build(docs)
+    builder.save()
 
-        assert os.path.exists(os.path.join(tmpdir, "bm25_index.json"))
+    assert os.path.exists(os.path.join(tmp_path, "bm25_index.json"))
 
 
-def test_index_builder_load():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        builder = IndexBuilder(Tokenizer(), persist_path=tmpdir)
-        docs = ["hello world", "python programming"]
+def test_index_builder_load(tmp_path):
+    builder = IndexBuilder(Tokenizer(), persist_path=str(tmp_path))
+    docs = ["hello world", "python programming"]
 
-        builder.build(docs)
-        builder.save()
+    builder.build(docs)
+    builder.save()
 
-        builder2 = IndexBuilder(Tokenizer(), persist_path=tmpdir)
-        builder2.load(tmpdir)
+    builder2 = IndexBuilder(Tokenizer(), persist_path=str(tmp_path))
+    builder2.load(str(tmp_path))
 
-        assert builder2.index.doc_count == 2
-        assert builder2.documents == docs
-        assert "hello" in builder2.index.term_dict
+    assert builder2.index.doc_count == 2
+    assert builder2.documents == docs
+    assert "hello" in builder2.index.term_dict
 
 
 def test_index_builder_load_nonexistent():

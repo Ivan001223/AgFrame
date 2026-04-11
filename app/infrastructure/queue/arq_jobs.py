@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import time
+import uuid
 from typing import Any
 
 import anyio
@@ -13,10 +14,12 @@ from app.harness.runtime.run_service import build_run_service
 from app.harness.runtime.verification_service import VerificationService
 from app.infrastructure.queue.redis_client import (
     append_task_incident,
+    claim_task_operation,
     get_task,
     release_task_operation,
     update_task,
 )
+from app.infrastructure.storage.object_store import get_object_store
 from app.infrastructure.database.schema import ensure_schema_if_possible
 from app.infrastructure.utils.logging import bind_logger, get_logger
 from app.memory.long_term.user_memory_engine import UserMemoryEngine
@@ -62,20 +65,39 @@ def _normalize_ingest_result(result: Any) -> dict[str, Any]:
 
 def _add_knowledge_base_with_optional_library(
     file_path: str,
+    source_uri: str | None,
     user_id: str | None,
     knowledge_base_id: str | None,
 ) -> Any:
     rag_engine = get_rag_engine()
-    try:
-        return rag_engine.add_knowledge_base(
-            file_path,
-            user_id=user_id,
-            knowledge_base_id=knowledge_base_id,
-        )
-    except TypeError as exc:
-        if "knowledge_base_id" not in str(exc):
-            raise
-        return rag_engine.add_knowledge_base(file_path, user_id=user_id)
+    attempts = [
+        {
+            "source_uri": source_uri,
+            "user_id": user_id,
+            "knowledge_base_id": knowledge_base_id,
+        },
+        {
+            "user_id": user_id,
+            "knowledge_base_id": knowledge_base_id,
+        },
+        {
+            "source_uri": source_uri,
+            "user_id": user_id,
+        },
+        {
+            "user_id": user_id,
+        },
+    ]
+    last_error: TypeError | None = None
+    for kwargs in attempts:
+        try:
+            return rag_engine.add_knowledge_base(file_path, **kwargs)
+        except TypeError as exc:
+            last_error = exc
+            continue
+    if last_error is not None:
+        raise last_error
+    return rag_engine.add_knowledge_base(file_path)
 
 
 def _normalize_skill_key(value: str) -> str:
@@ -1839,7 +1861,7 @@ def _persist_cluster_research_memory(
 async def ingest_pdf(
     ctx: dict[str, Any],
     task_id: str,
-    file_path: str,
+    storage_uri: str,
     user_id: str = None,
     knowledge_base_id: str | None = None,
 ) -> bool:
@@ -1874,15 +1896,17 @@ async def ingest_pdf(
             task_id, {"progress": 85, "step": "finalizing", "message": "写入结果"}
         )
         # 传递 user_id 给 RAG 引擎
-        result = await anyio.to_thread.run_sync(
-            lambda: _normalize_ingest_result(
-                _add_knowledge_base_with_optional_library(
-                    file_path,
-                    user_id=user_id,
-                    knowledge_base_id=knowledge_base_id,
+        with get_object_store().materialize_to_local_path(storage_uri) as local_path:
+            result = await anyio.to_thread.run_sync(
+                lambda: _normalize_ingest_result(
+                    _add_knowledge_base_with_optional_library(
+                        file_path=local_path,
+                        source_uri=storage_uri,
+                        user_id=user_id,
+                        knowledge_base_id=knowledge_base_id,
+                    )
                 )
             )
-        )
         finished_at = int(time.time())
         if result.get("ok"):
             await update_task(
@@ -1897,7 +1921,7 @@ async def ingest_pdf(
                     "result_stage": str(result.get("stage") or ""),
                 },
             )
-            logger.info("task succeeded file_path=%s", file_path)
+            logger.info("task succeeded storage_uri=%s", storage_uri)
             await release_task_operation(operation_key, expected_task_id=task_id)
             return True
 
@@ -1922,13 +1946,13 @@ async def ingest_pdf(
                 "error_code": str(result.get("error_code") or "ingest_returned_false"),
                 "error_message": str(result.get("error_message") or "add_knowledge_base 返回 False"),
                 "stage": str(result.get("stage") or ""),
-                "file_path": file_path,
+                "file_path": storage_uri,
                 "timestamp": finished_at,
             }
         )
         logger.info(
-            "task failed file_path=%s error_code=%s stage=%s",
-            file_path,
+            "task failed storage_uri=%s error_code=%s stage=%s",
+            storage_uri,
             result.get("error_code"),
             result.get("stage"),
         )
@@ -1955,11 +1979,11 @@ async def ingest_pdf(
                 "error_code": "task_exception",
                 "error_message": str(e),
                 "stage": "exception",
-                "file_path": file_path,
+                "file_path": storage_uri,
                 "timestamp": finished_at,
             }
         )
-        logger.exception("task exception file_path=%s", file_path)
+        logger.exception("task exception storage_uri=%s", storage_uri)
         await release_task_operation(operation_key, expected_task_id=task_id)
         return False
 
@@ -1972,6 +1996,26 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
 
     verification_service = VerificationService()
     task_type = str(run.get("task_type") or "")
+    run_status = str(run.get("status") or "").strip()
+    if run_status in {"completed", "failed"}:
+        return run_status == "completed"
+
+    execution_lock_key = f"harness_run:{task_type}:{run_id}"
+    execution_lock_owner = f"{run_id}:{uuid.uuid4()}"
+    execution_lock_acquired = False
+    try:
+        claimed_owner = await claim_task_operation(
+            execution_lock_key,
+            execution_lock_owner,
+            ttl_seconds=2 * 60 * 60,
+        )
+        if claimed_owner != execution_lock_owner:
+            _log.info("skipping duplicate harness execution run_id=%s task_type=%s", run_id, task_type)
+            return False
+        execution_lock_acquired = True
+    except Exception as exc:
+        _log.warning("harness execution lock unavailable run_id=%s error=%s", run_id, exc)
+
     if task_type != HarnessTaskType.SESSION_RESUME_APPROVAL.value:
         _maybe_call(service, "mark_running", run_id)
 
@@ -1979,19 +2023,21 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
         if task_type == HarnessTaskType.DOCUMENT_INGEST.value:
             _maybe_call(service, "set_current_step", run_id, "ingest_document")
             input_json = run.get("input_json") or {}
-            file_path = str(input_json.get("file_path") or "")
+            storage_uri = str(input_json.get("storage_uri") or input_json.get("file_path") or "")
             user_id = str(run.get("user_id") or "") or None
             knowledge_base_id = str(input_json.get("knowledge_base_id") or "").strip() or None
 
-            result = await anyio.to_thread.run_sync(
-                lambda: _normalize_ingest_result(
-                    _add_knowledge_base_with_optional_library(
-                        file_path,
-                        user_id=user_id,
-                        knowledge_base_id=knowledge_base_id,
+            with get_object_store().materialize_to_local_path(storage_uri) as local_path:
+                result = await anyio.to_thread.run_sync(
+                    lambda: _normalize_ingest_result(
+                        _add_knowledge_base_with_optional_library(
+                            file_path=local_path,
+                            source_uri=storage_uri,
+                            user_id=user_id,
+                            knowledge_base_id=knowledge_base_id,
+                        )
                     )
                 )
-            )
             verification = verification_service.build_document_ingest_result(
                 ok=bool(result.get("ok")),
                 stage=str(result.get("stage") or "") or None,
@@ -2036,6 +2082,11 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                 active_agent_ids=active_agent_ids,
                 handoff_scope="selected_agents" if selected_agent_ids else "all_agents",
             )
+            capability_by_agent_id = {
+                str(item.get("agent_id") or "").strip(): dict(item)
+                for item in capability_snapshot.get("agent_capabilities") or []
+                if isinstance(item, dict) and str(item.get("agent_id") or "").strip()
+            }
             if not active_agents:
                 verification = verification_service.build_agent_orchestration_result(
                     ok=False,
@@ -2069,21 +2120,30 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
             blocked_agents: list[dict[str, object]] = []
             for agent in active_agents:
                 agent_id = str(agent.get("agent_id") or "")
-                required_skills = [
+                capability = capability_by_agent_id.get(agent_id, {})
+                required_skills = _normalize_string_list(capability.get("required_skill_ids")) or [
                     _normalize_skill_key(str(skill_id))
                     for skill_id in (agent.get("skill_ids") or [])
                     if str(skill_id).strip()
+                ]
+                missing_skills = _normalize_string_list(capability.get("missing_required_skill_ids")) or [
+                    skill_id for skill_id in required_skills if skill_id not in loaded_skill_ids
                 ]
                 required_skill_details = [
                     _build_skill_requirement_detail(skill_id, skill_catalog_lookup=skill_catalog_lookup)
                     for skill_id in required_skills
                 ]
-                missing_skills = [skill_id for skill_id in required_skills if skill_id not in loaded_skill_ids]
                 missing_skill_details = [
                     detail
                     for detail in required_skill_details
                     if str(detail.get("skill_id") or "") in set(missing_skills)
                 ]
+                missing_required_tool_ids = _normalize_string_list(capability.get("missing_required_tool_ids"))
+                missing_required_mcp_server_ids = _normalize_string_list(
+                    capability.get("missing_required_mcp_server_ids")
+                )
+                availability_blockers = _normalize_string_list(capability.get("availability_blockers"))
+                readiness_blockers = _normalize_string_list(capability.get("readiness_blockers"))
                 _maybe_call(
                     service,
                     "record_event",
@@ -2097,27 +2157,52 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                         "skill_details": required_skill_details,
                         "missing_skills": missing_skills,
                         "missing_skill_details": missing_skill_details,
+                        "missing_required_tool_ids": missing_required_tool_ids,
+                        "missing_required_mcp_server_ids": missing_required_mcp_server_ids,
+                        "availability_blockers": availability_blockers,
+                        "readiness_blockers": readiness_blockers,
                     },
                 )
-                if missing_skills:
+                if (
+                    missing_skills
+                    or missing_required_tool_ids
+                    or missing_required_mcp_server_ids
+                    or availability_blockers
+                    or readiness_blockers
+                ):
                     blocked_agents.append(
                         {
                             "agent_id": agent_id,
                             "agent_name": str(agent.get("name") or agent_id),
                             "missing_skills": missing_skills,
                             "missing_skill_details": missing_skill_details,
+                            "missing_required_tool_ids": missing_required_tool_ids,
+                            "missing_required_mcp_server_ids": missing_required_mcp_server_ids,
+                            "availability_blockers": availability_blockers,
+                            "readiness_blockers": readiness_blockers,
                         }
                     )
 
             if blocked_agents:
+                capability_blocked = any(
+                    item.get("missing_required_tool_ids")
+                    or item.get("missing_required_mcp_server_ids")
+                    or item.get("availability_blockers")
+                    or item.get("readiness_blockers")
+                    for item in blocked_agents
+                )
                 verification = verification_service.build_agent_orchestration_result(
                     ok=False,
                     active_agent_ids=active_agent_ids,
                     blocked_agents=blocked_agents,
                     loop_count=loop_count,
                     review_agent_enabled=review_agent_enabled,
-                    error_code="missing_skill_approval",
-                    error_message="one or more agents are blocked by missing skills",
+                    error_code="agent_capability_blocked" if capability_blocked else "missing_skill_approval",
+                    error_message=(
+                        "one or more agents are blocked by missing capabilities"
+                        if capability_blocked
+                        else "one or more agents are blocked by missing skills"
+                    ),
                     capability_snapshot=capability_snapshot,
                     handoff_scope="selected_agents" if selected_agent_ids else "all_agents",
                     selected_agent_ids=[str(agent_id) for agent_id in selected_agent_ids],
@@ -3026,6 +3111,12 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
             )
         service.complete_with_verification(run_id, verification)
         return False
+    finally:
+        if execution_lock_acquired:
+            await release_task_operation(
+                execution_lock_key,
+                expected_task_id=execution_lock_owner,
+            )
 
 
 async def resume_harness_task(ctx: dict[str, Any], run_id: str) -> bool:

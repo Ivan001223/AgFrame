@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { API_BASE_URL, apiClient } from '@/lib/http/client';
-import { getStoredToken } from '@/lib/auth/session';
+import { getSessionCacheScope, getStoredToken } from '@/lib/auth/session';
 
 export type DocumentDTO = {
   doc_id: number;
@@ -21,8 +21,8 @@ export type DocumentDTO = {
 };
 
 export const DOCUMENT_KEYS = {
-  all: ['documents'] as const,
-  detail: (id: string | number) => ['documents', String(id)] as const,
+  all: (scope: string) => ['documents', scope] as const,
+  detail: (scope: string, id: string | number) => ['documents', scope, String(id)] as const,
 };
 
 export type UploadDocumentRequest = {
@@ -33,8 +33,9 @@ export type UploadDocumentRequest = {
 
 // 1. Fetch all documents
 export function useDocumentsQuery() {
+  const scope = getSessionCacheScope();
   return useQuery({
-    queryKey: DOCUMENT_KEYS.all,
+    queryKey: DOCUMENT_KEYS.all(scope),
     queryFn: async () => {
       const response = await apiClient<{ documents: DocumentDTO[] }>('/documents');
       return response.documents;
@@ -44,8 +45,9 @@ export function useDocumentsQuery() {
 
 // 2. Fetch one document
 export function useDocumentDetailQuery(docId: string) {
+  const scope = getSessionCacheScope();
   return useQuery({
-    queryKey: DOCUMENT_KEYS.detail(docId),
+    queryKey: DOCUMENT_KEYS.detail(scope, docId),
     queryFn: async () => {
       return apiClient<DocumentDTO>(`/documents/${docId}`);
     },
@@ -56,19 +58,21 @@ export function useDocumentDetailQuery(docId: string) {
 // 3. Delete a document
 export function useDeleteDocumentMutation() {
   const queryClient = useQueryClient();
+  const scope = getSessionCacheScope();
 
   return useMutation({
     mutationFn: async (docId: number) => {
       return apiClient(`/documents/${docId}`, { method: 'DELETE' });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: DOCUMENT_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: DOCUMENT_KEYS.all(scope) });
     },
   });
 }
 
 export function useAssignDocumentKnowledgeBaseMutation() {
   const queryClient = useQueryClient();
+  const scope = getSessionCacheScope();
 
   return useMutation({
     mutationFn: async ({ docId, knowledgeBaseId }: { docId: number; knowledgeBaseId?: string | null }) =>
@@ -77,9 +81,9 @@ export function useAssignDocumentKnowledgeBaseMutation() {
         body: JSON.stringify({ knowledge_base_id: knowledgeBaseId ?? null }),
       }),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: DOCUMENT_KEYS.all });
-      queryClient.invalidateQueries({ queryKey: DOCUMENT_KEYS.detail(variables.docId) });
-      queryClient.invalidateQueries({ queryKey: ['knowledge-bases'] });
+      queryClient.invalidateQueries({ queryKey: DOCUMENT_KEYS.all(scope) });
+      queryClient.invalidateQueries({ queryKey: DOCUMENT_KEYS.detail(scope, variables.docId) });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-bases', scope] });
     },
   });
 }
@@ -87,6 +91,7 @@ export function useAssignDocumentKnowledgeBaseMutation() {
 // 4. Reindex a document
 export function useReindexDocumentMutation() {
   const queryClient = useQueryClient();
+  const scope = getSessionCacheScope();
 
   return useMutation({
     mutationFn: async (docId: number) => {
@@ -95,8 +100,8 @@ export function useReindexDocumentMutation() {
       });
     },
     onSuccess: (_, docId) => {
-      queryClient.invalidateQueries({ queryKey: DOCUMENT_KEYS.detail(docId) });
-      queryClient.invalidateQueries({ queryKey: DOCUMENT_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: DOCUMENT_KEYS.detail(scope, docId) });
+      queryClient.invalidateQueries({ queryKey: DOCUMENT_KEYS.all(scope) });
       // In a real app we would also invalidate the 'tasks' query
     },
   });
@@ -105,6 +110,7 @@ export function useReindexDocumentMutation() {
 // 5. Upload document (multipart/form-data)
 export function useUploadDocumentMutation() {
   const queryClient = useQueryClient();
+  const scope = getSessionCacheScope();
 
   return useMutation({
     mutationFn: async ({ file, knowledgeBaseId, onProgress }: UploadDocumentRequest) => {
@@ -157,8 +163,8 @@ export function useUploadDocumentMutation() {
       });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: DOCUMENT_KEYS.all });
-      queryClient.invalidateQueries({ queryKey: ['knowledge-bases'] });
+      queryClient.invalidateQueries({ queryKey: DOCUMENT_KEYS.all(scope) });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-bases', scope] });
     },
   });
 }

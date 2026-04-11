@@ -27,6 +27,7 @@ class PgVectorVectorStore:
                 meta.setdefault("child_index", int(r.child_index))
             if r.source_path:
                 meta.setdefault("source", r.source_path)
+                meta.setdefault("source_label", r.source_path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1])
             out.append(Document(page_content=r.content, metadata=meta))
         return out
 
@@ -45,6 +46,7 @@ class PgVectorVectorStore:
                 meta.setdefault("child_index", int(r.child_index))
             if r.source_path:
                 meta.setdefault("source", r.source_path)
+                meta.setdefault("source_label", r.source_path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1])
             out.append(Document(page_content=r.content, metadata=meta))
         return out
 

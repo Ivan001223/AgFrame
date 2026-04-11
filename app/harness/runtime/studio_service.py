@@ -4011,6 +4011,7 @@ class HarnessStudioService:
             session_id=None,
             metadata_json={
                 "source": "harness_studio",
+                "project_id": project_id,
                 "project_name": hydrated.get("name"),
                 "selected_agent_ids": selected_ids,
                 "loop_count": loop_count,

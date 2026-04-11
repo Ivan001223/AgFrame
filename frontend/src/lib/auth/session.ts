@@ -21,6 +21,11 @@ export function getStoredUsername(): string {
   return localStorage.getItem(USERNAME_KEY) || '';
 }
 
+export function getSessionCacheScope(): string {
+  const username = getStoredUsername().trim();
+  return username || 'anonymous';
+}
+
 export function setStoredSession(token: string, username: string) {
   if (!hasWindow()) {
     return;

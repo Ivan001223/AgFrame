@@ -105,6 +105,7 @@ Supported environment variables:
 cd frontend
 export NEXT_PUBLIC_API_URL='http://127.0.0.1:8000'
 npm run lint -- --max-warnings=0
+npm run typecheck
 npm run build
 ```
 

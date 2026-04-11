@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/http/client';
-import { getStoredUsername } from '@/lib/auth/session';
+import { getSessionCacheScope, getStoredUsername } from '@/lib/auth/session';
 
 export type ConversationDTO = {
   id: string;
@@ -16,13 +16,14 @@ export type ConversationDTO = {
 };
 
 export const CONVERSATION_KEYS = {
-  all: ['conversations'] as const,
-  detail: (id: string) => ['conversations', id] as const,
+  all: (scope: string) => ['conversations', scope] as const,
+  detail: (scope: string, id: string) => ['conversations', scope, id] as const,
 };
 
 export function useConversationsQuery() {
+  const scope = getSessionCacheScope();
   return useQuery({
-    queryKey: CONVERSATION_KEYS.all,
+    queryKey: CONVERSATION_KEYS.all(scope),
     queryFn: async () => {
       const username = getStoredUsername();
       if (!username) {
@@ -36,8 +37,9 @@ export function useConversationsQuery() {
 }
 
 export function useConversationDetailQuery(id: string) {
+  const scope = getSessionCacheScope();
   return useQuery({
-    queryKey: CONVERSATION_KEYS.detail(id),
+    queryKey: CONVERSATION_KEYS.detail(scope, id),
     queryFn: async () => {
       const username = getStoredUsername();
       if (!username) {

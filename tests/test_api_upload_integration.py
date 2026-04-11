@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import builtins
 from dataclasses import dataclass
 from typing import Any
 
@@ -72,10 +71,11 @@ def test_upload_documents_sanitizes_filename_and_queues_task(client: TestClient)
 
 
 def test_upload_documents_error_branch(client: TestClient, monkeypatch: pytest.MonkeyPatch):
-    def _boom(*args: Any, **kwargs: Any):
-        raise OSError("disk error")
+    class _BrokenStore:
+        def store_file(self, *args: Any, **kwargs: Any):
+            raise OSError("disk error")
 
-    monkeypatch.setattr(builtins, "open", _boom)
+    monkeypatch.setattr(upload_api, "get_object_store", lambda: _BrokenStore())
     r = client.post(
         "/upload",
         files=[("files", ("ok.pdf", b"%PDF-1.4", "application/pdf"))],

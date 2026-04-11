@@ -139,6 +139,7 @@ def test_list_documents_is_user_scoped(tmp_path: Any, monkeypatch: Any):
     assert len(docs) == 1
     assert docs[0]["user_id"] == "u1"
     assert docs[0]["filename"] == "u1-a.pdf"
+    assert docs[0]["source_path"] == "u1-a.pdf"
     assert docs[0]["parent_chunk_count"] == 1
     assert docs[0]["embedding_count"] == 1
     assert docs[0]["knowledge_base_id"] == "kb-u1"

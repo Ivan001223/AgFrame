@@ -133,6 +133,8 @@ class AuthConfig(BaseSettings):
     secret_key: str = Field(default="set-auth-secret-key-before-production", alias="AUTH_SECRET_KEY")
     algorithm: str = Field(default="HS256", alias="AUTH_ALGORITHM")
     access_token_expire_minutes: int = 30
+    allow_open_registration: bool = Field(default=True, alias="ALLOW_OPEN_REGISTRATION")
+    bootstrap_admin_token: str = Field(default="", alias="AUTH_BOOTSTRAP_ADMIN_TOKEN")
 
 
 class GeneralConfig(BaseSettings):
@@ -214,7 +216,7 @@ class FeatureFlagsConfig(BaseSettings):
 class SandboxConfig(BaseSettings):
     """沙箱配置"""
     enabled: bool = False
-    image: str = "python:3.11-slim"
+    image: str = "python:3.12-slim"
     timeout: int = 30
     memory_limit: str = "256m"
     cpu_limit: float = 0.5
@@ -286,6 +288,7 @@ class Settings(BaseSettings):
     search: SearchConfig = Field(default_factory=SearchConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     queue: QueueConfig = Field(default_factory=QueueConfig)
+    storage_backend: str = Field(default="local", alias="STORAGE_BACKEND")
     storage_s3: StorageS3Config = Field(default_factory=StorageS3Config, alias="storage_s3")
     storage_local: StorageLocalConfig = Field(default_factory=StorageLocalConfig, alias="storage_local")
     auth: AuthConfig = Field(default_factory=AuthConfig)

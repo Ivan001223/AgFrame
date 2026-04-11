@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { getStoredToken } from '@/lib/auth/session';
 import { useCurrentUserQuery, useLogout } from '@/domains/auth/hooks';
+import { getErrorMessage, isAuthApiError } from '@/lib/http/errors';
 import { useMessages } from '@/lib/i18n';
 import { APP_SHELL_MESSAGES } from './messages';
 
@@ -32,11 +33,11 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   }, [logout, router, token]);
 
   useEffect(() => {
-    if (token && currentUserQuery.isError) {
+    if (token && isAuthApiError(currentUserQuery.error)) {
       logout();
       router.replace('/login');
     }
-  }, [currentUserQuery.isError, logout, router, token]);
+  }, [currentUserQuery.error, logout, router, token]);
 
   if (!token || currentUserQuery.isLoading) {
     return (
@@ -49,6 +50,15 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   }
 
   if (!currentUserQuery.data) {
+    if (currentUserQuery.isError) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-gray-50 px-6 dark:bg-gray-950">
+          <div className="rounded-xl border border-amber-200 bg-white px-6 py-5 text-sm text-gray-600 shadow-sm dark:border-amber-900/40 dark:bg-gray-900 dark:text-gray-300">
+            {getErrorMessage(currentUserQuery.error, text.verifyingSession)}
+          </div>
+        </div>
+      );
+    }
     return null;
   }
 

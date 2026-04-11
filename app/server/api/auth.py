@@ -1,7 +1,8 @@
 import time
+from datetime import timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -22,7 +23,6 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 
 
-# --- Pydantic Schemas ---
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -46,7 +46,6 @@ class UserResponse(BaseModel):
         from_attributes = True
 
 
-# --- Dependencies ---
 def get_db():
     SessionLocal = get_sessionmaker()
     session = SessionLocal()
@@ -98,7 +97,20 @@ async def get_current_admin_user(
     return current_user
 
 
-# --- Routes ---
+def _require_bootstrap_token(first_user_missing: bool, provided_bootstrap_token: str | None) -> None:
+    if not first_user_missing:
+        return
+    configured_token = str(settings.auth.bootstrap_admin_token or "").strip()
+    if not configured_token:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Bootstrap admin token is not configured",
+        )
+    if str(provided_bootstrap_token or "").strip() != configured_token:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bootstrap admin token is required to create the first admin user",
+        )
 
 
 @router.post("/token", response_model=Token)
@@ -116,31 +128,37 @@ async def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    auth_config = settings.auth
-    access_token_expires_minutes = auth_config.access_token_expire_minutes
-
     access_token = create_access_token(
         data={"sub": user.username, "role": user.role},
-        expires_delta=None,  # uses default in utils
+        expires_delta=timedelta(minutes=settings.auth.access_token_expire_minutes),
     )
     return {"access_token": access_token, "token_type": "bearer"}  # nosec B105
 
 
 @router.post("/register", response_model=UserResponse)
-async def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
+async def register_user(
+    user_in: UserCreate,
+    db: Session = Depends(get_db),
+    x_bootstrap_admin_token: str | None = Header(default=None),
+):
     stmt = select(User).where(User.username == user_in.username)
     existing_user = db.execute(stmt).scalar_one_or_none()
     if existing_user:
         raise HTTPException(status_code=400, detail="Username already registered")
 
     hashed_password = get_password_hash(user_in.password)
+    first_user = db.execute(select(User).limit(1)).scalar_one_or_none()
+    is_first_user = first_user is None
 
-    # 检查是否是第一个用户
-    count_stmt = select(User).limit(1)
-    first_user = db.execute(count_stmt).scalar_one_or_none()
+    _require_bootstrap_token(is_first_user, x_bootstrap_admin_token)
 
-    role = "admin" if first_user is None else "user"
+    if not is_first_user and not bool(settings.auth.allow_open_registration):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Open registration is disabled",
+        )
 
+    role = "admin" if is_first_user else "user"
     new_user = User(
         username=user_in.username,
         hashed_password=hashed_password,

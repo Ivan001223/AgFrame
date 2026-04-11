@@ -45,17 +45,40 @@ READ_ONLY_TOOL_IDS = frozenset(
 )
 
 
+def _merge_string(left: str, right: str) -> str:
+    return str(right or left or "")
+
+
+def _merge_string_dict(left: dict[str, str], right: dict[str, str]) -> dict[str, str]:
+    merged = dict(left or {})
+    merged.update(dict(right or {}))
+    return merged
+
+
+def _merge_artifact_dict(
+    left: dict[str, dict[str, Any]],
+    right: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    merged = dict(left or {})
+    merged.update(dict(right or {}))
+    return merged
+
+
+def _merge_error_list(left: list[str], right: list[str]) -> list[str]:
+    return [*list(left or []), *list(right or [])]
+
+
 class OrchestrationState(TypedDict):
     """
     Studio canvas orchestration multi-agent shared state.
     """
     messages: Annotated[list[BaseMessage], add_messages]
     task: str
-    agent_outputs: dict[str, str]
-    output_artifacts: dict[str, dict[str, Any]]
-    current_agent: str
+    agent_outputs: Annotated[dict[str, str], _merge_string_dict]
+    output_artifacts: Annotated[dict[str, dict[str, Any]], _merge_artifact_dict]
+    current_agent: Annotated[str, _merge_string]
     loop_index: int
-    errors: list[str]
+    errors: Annotated[list[str], _merge_error_list]
     knowledge_base_ids: NotRequired[list[str]]
     knowledge_context: NotRequired[str]
     continuation: NotRequired[dict[str, Any]]
@@ -1307,6 +1330,41 @@ def _topological_sort(agents: list[dict[str, Any]], edges: list[dict[str, Any]])
     return ordered
 
 
+def _build_execution_stages(agents: list[dict[str, Any]], edges: list[dict[str, Any]]) -> list[list[str]]:
+    in_degree: dict[str, int] = {str(agent["agent_id"]): 0 for agent in agents}
+    adjacency: dict[str, list[str]] = defaultdict(list)
+
+    for edge in edges:
+        source = str(edge.get("source_agent_id") or "")
+        target = str(edge.get("target_agent_id") or "")
+        if source in in_degree and target in in_degree:
+            adjacency[source].append(target)
+            in_degree[target] += 1
+
+    ready = [node for node, degree in in_degree.items() if degree == 0]
+    stages: list[list[str]] = []
+    seen: set[str] = set()
+
+    while ready:
+        current_stage = list(ready)
+        ready = []
+        stages.append(current_stage)
+        for node in current_stage:
+            seen.add(node)
+            for neighbor in adjacency.get(node, []):
+                in_degree[neighbor] -= 1
+                if in_degree[neighbor] == 0:
+                    ready.append(neighbor)
+
+    if len(seen) != len(in_degree):
+        for agent in agents:
+            agent_id = str(agent.get("agent_id") or "")
+            if agent_id and agent_id not in seen:
+                stages.append([agent_id])
+
+    return stages
+
+
 def _build_cluster_member_prompt(cluster_config: dict[str, Any], member_config: dict[str, Any]) -> str:
     cluster_name = str(cluster_config.get("name") or "cluster")
     cluster_strategy = str(cluster_config.get("cluster_strategy") or "custom")
@@ -1875,6 +1933,12 @@ def build_orchestration_execution_plan(graph_json: dict[str, Any]) -> tuple[list
     tool_catalog_by_id = _build_tool_catalog_lookup(graph_json)
     mcp_catalog_by_id = _build_mcp_catalog_lookup(graph_json)
     execution_order = _topological_sort(expanded_agents, expanded_edges)
+    execution_stages = _build_execution_stages(expanded_agents, expanded_edges)
+    stage_index_by_agent_id = {
+        agent_id: index
+        for index, stage in enumerate(execution_stages)
+        for agent_id in stage
+    }
     agent_by_id = {str(agent.get("agent_id") or ""): agent for agent in expanded_agents}
     team_capability_roster = _build_team_capability_roster(
         agents=expanded_agents,
@@ -1949,6 +2013,7 @@ def build_orchestration_execution_plan(graph_json: dict[str, Any]) -> tuple[list
             )
         enriched_agent["team_capability_roster"] = team_capability_roster
         enriched_agent["orchestration_summary_brief"] = orchestration_summary_brief
+        enriched_agent["execution_stage_index"] = stage_index_by_agent_id.get(str(agent_id), 0)
         enriched_agent["agent_directory"] = agent_by_id
         enriched_agent["incoming_edges"] = [
             dict(edge)
@@ -2485,6 +2550,12 @@ def compile_orchestration_graph(
         return builder.compile()
 
     execution_order = _topological_sort(agents, edges)
+    execution_stages = _build_execution_stages(agents, edges)
+    stage_index_by_agent_id = {
+        agent_id: index
+        for index, stage in enumerate(execution_stages)
+        for agent_id in stage
+    }
     agent_by_id = {str(a["agent_id"]): a for a in agents}
 
     # 1. Build Nodes
@@ -2553,6 +2624,7 @@ def compile_orchestration_graph(
             )
         enriched_agent_conf["team_capability_roster"] = team_capability_roster
         enriched_agent_conf["orchestration_summary_brief"] = orchestration_summary_brief
+        enriched_agent_conf["execution_stage_index"] = stage_index_by_agent_id.get(str(aid), 0)
         enriched_agent_conf["agent_directory"] = agent_by_id
         enriched_agent_conf["incoming_edges"] = [
             dict(edge)
@@ -2593,19 +2665,50 @@ def compile_orchestration_graph(
             _build_agent_node(review_agent, provider_config, default_timeout, registry, is_review=True),
         )
 
-    # 2. Build Linear Edges
+    # 2. Build Graph Edges
     if node_names:
-        builder.add_edge(START, node_names[0])
-        for i in range(len(node_names) - 1):
-            builder.add_edge(node_names[i], node_names[i+1])
-            
-        last_agent_node = node_names[-1]
-        
+        incoming_counts = {str(agent.get("agent_id") or ""): 0 for agent in agents}
+        outgoing_counts = {str(agent.get("agent_id") or ""): 0 for agent in agents}
+        for edge in edges:
+            source_agent_id = str(edge.get("source_agent_id") or "").strip()
+            target_agent_id = str(edge.get("target_agent_id") or "").strip()
+            if source_agent_id in outgoing_counts:
+                outgoing_counts[source_agent_id] += 1
+            if target_agent_id in incoming_counts:
+                incoming_counts[target_agent_id] += 1
+            if source_agent_id and target_agent_id:
+                builder.add_edge(f"agent_{source_agent_id}", f"agent_{target_agent_id}")
+
+        start_agent_ids = [
+            str(agent_id)
+            for agent_id in execution_order
+            if incoming_counts.get(str(agent_id), 0) == 0
+        ] or [execution_order[0]]
+        terminal_agent_ids = [
+            str(agent_id)
+            for agent_id in execution_order
+            if outgoing_counts.get(str(agent_id), 0) == 0
+        ] or [execution_order[-1]]
+
+        for agent_id in start_agent_ids:
+            builder.add_edge(START, f"agent_{agent_id}")
+
+        terminal_node_name = None
         if review_enabled:
-            builder.add_edge(last_agent_node, "review_agent")
+            for agent_id in terminal_agent_ids:
+                builder.add_edge(f"agent_{agent_id}", "review_agent")
             end_or_loop_node = "review_agent"
+        elif len(terminal_agent_ids) > 1:
+            async def terminal_join(state: OrchestrationState):
+                return {}
+
+            terminal_node_name = "terminal_join"
+            builder.add_node(terminal_node_name, terminal_join)
+            for agent_id in terminal_agent_ids:
+                builder.add_edge(f"agent_{agent_id}", terminal_node_name)
+            end_or_loop_node = terminal_node_name
         else:
-            end_or_loop_node = last_agent_node
+            end_or_loop_node = f"agent_{terminal_agent_ids[0]}"
 
         # 3. Add looping logic
         def get_loop_router(max_loops: int):
@@ -2621,7 +2724,8 @@ def compile_orchestration_graph(
                 return {"loop_index": int(state.get("loop_index", 0)) + 1}
             builder.add_node("loop_bump", bump_loop)
             builder.add_conditional_edges(end_or_loop_node, get_loop_router(loop_count), ["loop_bump", END])
-            builder.add_edge("loop_bump", node_names[0])
+            for agent_id in start_agent_ids:
+                builder.add_edge("loop_bump", f"agent_{agent_id}")
         else:
             builder.add_edge(end_or_loop_node, END)
     

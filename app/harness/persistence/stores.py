@@ -368,14 +368,16 @@ class HarnessEventStore:
         limit: int = 100,
     ) -> list[dict[str, object]]:
         with get_session() as session:
-            stmt = select(HarnessEvent).order_by(HarnessEvent.created_at.asc()).limit(int(limit))
+            stmt = select(HarnessEvent)
             if user_id is not None:
                 stmt = stmt.where(HarnessEvent.user_id == user_id)
             if session_id is not None:
                 stmt = stmt.where(HarnessEvent.session_id == session_id)
             if run_id is not None:
                 stmt = stmt.where(HarnessEvent.run_id == run_id)
+            stmt = stmt.order_by(HarnessEvent.created_at.desc()).limit(int(limit))
             rows = session.execute(stmt).scalars().all()
+            rows.reverse()
             return [self._to_dict(row) for row in rows]
 
     @staticmethod

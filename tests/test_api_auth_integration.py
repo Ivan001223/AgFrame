@@ -18,6 +18,9 @@ from app.server.api import auth as auth_api
 class _AuthCfg:
     secret_key: str = "test_secret_key_012345678901234567890123456789"
     algorithm: str = "HS256"
+    access_token_expire_minutes: int = 42
+    allow_open_registration: bool = True
+    bootstrap_admin_token: str = "bootstrap-secret"
 
 
 @pytest.fixture
@@ -37,6 +40,7 @@ def test_app(monkeypatch: pytest.MonkeyPatch) -> tuple[FastAPI, sessionmaker]:
     from app.infrastructure.utils import security
 
     monkeypatch.setattr(security, "get_auth_config", lambda: _AuthCfg())
+    monkeypatch.setattr(auth_api.settings, "auth", _AuthCfg())
 
     app = FastAPI()
     app.include_router(auth_api.router)
@@ -56,7 +60,11 @@ def test_register_and_login_flow(test_app: tuple[FastAPI, sessionmaker]):
     app, _ = test_app
     client = TestClient(app)
 
-    r1 = client.post("/auth/register", json={"username": "u1", "password": "p1"})
+    r1 = client.post(
+        "/auth/register",
+        json={"username": "u1", "password": "p1"},
+        headers={"X-Bootstrap-Admin-Token": "bootstrap-secret"},
+    )
     assert r1.status_code == 200
     assert r1.json()["role"] == "admin"
 
@@ -85,6 +93,16 @@ def test_users_me_rejects_invalid_token(test_app: tuple[FastAPI, sessionmaker]):
     client = TestClient(app)
     r = client.get("/auth/users/me", headers={"Authorization": "Bearer invalid"})
     assert r.status_code == 401
+
+
+def test_first_admin_requires_bootstrap_token(test_app: tuple[FastAPI, sessionmaker]):
+    app, _ = test_app
+    client = TestClient(app)
+
+    response = client.post("/auth/register", json={"username": "u1", "password": "p1"})
+
+    assert response.status_code == 403
+    assert "Bootstrap admin token" in response.json()["detail"]
 
 
 def test_users_me_rejects_missing_sub(test_app: tuple[FastAPI, sessionmaker]):

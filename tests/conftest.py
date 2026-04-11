@@ -4,6 +4,8 @@ AgFrame 测试配置
 
 import sys
 import os
+import shutil
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -68,3 +70,23 @@ def sample_conversation_history():
         {"role": "user", "content": "Hello", "created_at": 1234567890},
         {"role": "assistant", "content": "Hi there!", "created_at": 1234567891},
     ]
+
+
+@pytest.fixture
+def tmp_path():
+    """Use a workspace-local temp directory instead of pytest's default temp root."""
+    base_dir = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) / ".test-tmp"
+    base_dir.mkdir(exist_ok=True)
+    index = 0
+    while True:
+        candidate = base_dir / f"case-{index}"
+        index += 1
+        if candidate.exists():
+            continue
+        candidate.mkdir(parents=True, exist_ok=False)
+        path = candidate
+        break
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)

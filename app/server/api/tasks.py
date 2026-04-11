@@ -308,8 +308,8 @@ async def retry_task(
     if task.get("status") != "failed":
         raise HTTPException(status_code=400, detail="Only failed tasks can be retried")
 
-    file_path = str(task.get("file_path") or "").strip()
-    if not file_path:
+    storage_reference = str(task.get("storage_uri") or task.get("file_path") or "").strip()
+    if not storage_reference:
         raise HTTPException(status_code=400, detail="Task is missing file_path")
 
     new_task_id = str(uuid.uuid4())
@@ -322,7 +322,8 @@ async def retry_task(
             "progress": 0,
             "step": "queued",
             "message": "已重新入队",
-            "file_path": file_path,
+            "file_path": storage_reference,
+            "storage_uri": storage_reference,
             "filename": task.get("filename") or "",
             "created_at": int(time.time()),
             "user_id": task_user_id or current_user.username,
@@ -330,7 +331,7 @@ async def retry_task(
             "retried_from_task_id": task_id,
         },
     )
-    await enqueue_ingest_pdf(new_task_id, file_path, user_id=task_user_id or current_user.username)
+    await enqueue_ingest_pdf(new_task_id, storage_reference, user_id=task_user_id or current_user.username)
     return {
         "message": "Retried",
         "task_id": new_task_id,

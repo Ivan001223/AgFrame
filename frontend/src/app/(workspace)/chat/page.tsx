@@ -18,6 +18,7 @@ import {
   type ConversationDTO,
   useConversationsQuery,
 } from '@/domains/conversations/hooks';
+import { getSessionCacheScope } from '@/lib/auth/session';
 import { formatMessage, useMessages } from '@/lib/i18n';
 import { CHAT_MESSAGES } from './messages';
 
@@ -84,6 +85,7 @@ function getConversationDayBucket(value?: number | null) {
 }
 
 export default function ChatPage() {
+  const cacheScope = getSessionCacheScope();
   const text = useMessages(CHAT_MESSAGES);
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -251,7 +253,7 @@ export default function ChatPage() {
                 ]
           );
           setContextPruning(pruningSummary ?? null);
-          void queryClient.invalidateQueries({ queryKey: CONVERSATION_KEYS.all });
+          void queryClient.invalidateQueries({ queryKey: CONVERSATION_KEYS.all(cacheScope) });
           interruptQuery.refetch();
         },
         onError: (error) => {
@@ -301,7 +303,7 @@ export default function ChatPage() {
           }
           setSelectedConversationId(sessionId);
           syncSessionQuery(sessionId);
-          void queryClient.invalidateQueries({ queryKey: CONVERSATION_KEYS.all });
+          void queryClient.invalidateQueries({ queryKey: CONVERSATION_KEYS.all(cacheScope) });
           interruptQuery.refetch();
         },
         onError: (error) => {

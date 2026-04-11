@@ -6,6 +6,7 @@ from typing import Any
 from arq.connections import RedisSettings
 
 from app.infrastructure.queue.arq_jobs import ingest_pdf, resume_harness_task, run_harness_task
+from app.infrastructure.queue.client import INGEST_QUEUE_NAME, RESUME_QUEUE_NAME, RUNTIME_QUEUE_NAME
 
 
 def _redis_settings() -> RedisSettings:
@@ -13,12 +14,10 @@ def _redis_settings() -> RedisSettings:
     return RedisSettings.from_dsn(url)
 
 
-class WorkerSettings:
-    functions = [ingest_pdf, run_harness_task, resume_harness_task]
+class _BaseWorkerSettings:
     redis_settings = _redis_settings()
     keep_result = 0
     job_timeout = 60 * 60
-    max_jobs = 4
 
     @staticmethod
     async def on_startup(ctx: dict[str, Any]) -> None:
@@ -27,3 +26,25 @@ class WorkerSettings:
     @staticmethod
     async def on_shutdown(ctx: dict[str, Any]) -> None:
         return None
+
+
+class IngestWorkerSettings(_BaseWorkerSettings):
+    functions = [ingest_pdf]
+    queue_name = INGEST_QUEUE_NAME
+    max_jobs = 2
+
+
+class RuntimeWorkerSettings(_BaseWorkerSettings):
+    functions = [run_harness_task]
+    queue_name = RUNTIME_QUEUE_NAME
+    max_jobs = 4
+
+
+class ResumeWorkerSettings(_BaseWorkerSettings):
+    functions = [resume_harness_task]
+    queue_name = RESUME_QUEUE_NAME
+    max_jobs = 2
+
+
+class WorkerSettings(RuntimeWorkerSettings):
+    pass

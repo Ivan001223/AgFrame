@@ -23,6 +23,7 @@ from app.infrastructure.database.models import (
     UserProfile,
 )
 from app.infrastructure.database.orm import get_session
+from app.infrastructure.storage.object_store import storage_display_label
 
 
 class MySQLConversationStore:
@@ -677,7 +678,7 @@ class MySQLDocStore:
             return docs
         return [
             doc for doc in docs
-            if q in str(doc.get("source_path") or "").lower()
+            if q in storage_display_label(str(doc.get("source_path") or "")).lower()
         ]
 
     def get_document(self, doc_id: int) -> dict[str, Any] | None:

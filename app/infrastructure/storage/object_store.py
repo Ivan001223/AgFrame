@@ -15,6 +15,8 @@ from app.infrastructure.config.settings import settings
 DOCUMENT_NAMESPACE = "documents"
 UPLOAD_NAMESPACE = "uploads"
 STREAM_CHUNK_SIZE = 1024 * 1024
+CURRENT_SEGMENT = os.curdir
+PARENT_SEGMENT = os.pardir
 
 
 class ObjectStoreError(RuntimeError):
@@ -40,9 +42,9 @@ def _normalize_key(*parts: str) -> str:
             continue
         for token in str(part).replace("\\", "/").split("/"):
             token = token.strip()
-            if not token or token == ".":
+            if not token or token == CURRENT_SEGMENT:
                 continue
-            if token == "..":
+            if token == PARENT_SEGMENT:
                 raise ValueError("storage key must stay within the configured namespace")
             normalized_parts.append(token)
     normalized = "/".join(normalized_parts)

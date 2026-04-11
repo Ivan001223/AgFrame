@@ -5,9 +5,11 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 
@@ -21,7 +23,44 @@ class ToolResult:
 
 
 def _run(cmd: list[str], *, timeout: int | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, text=True, capture_output=True, timeout=timeout)
+    return subprocess.run(
+        cmd,
+        text=True,
+        capture_output=True,
+        timeout=timeout,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+
+def _audit_timeout_seconds(default: int = 90) -> int:
+    try:
+        value = int(os.getenv("SECURITY_SCAN_TIMEOUT", str(default)))
+    except ValueError:
+        return default
+    return max(30, value)
+
+
+def _project_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def _resolve_tool(tool_name: str) -> list[str] | None:
+    direct = shutil.which(tool_name)
+    if direct:
+        return [direct]
+
+    scripts_dir = Path(sys.executable).resolve().parent
+    candidates = [scripts_dir / f"{tool_name}.exe", scripts_dir / tool_name]
+    for candidate in candidates:
+        if candidate.exists():
+            return [str(candidate)]
+
+    if tool_name == "pip-audit":
+        return [sys.executable, "-m", "pip_audit"]
+    if tool_name == "bandit":
+        return [sys.executable, "-m", "bandit"]
+    return None
 
 
 def _count_pip_audit_vulns(raw: Any) -> int:
@@ -42,9 +81,10 @@ def _count_pip_audit_vulns(raw: Any) -> int:
 
 
 def _bandit() -> ToolResult:
-    if shutil.which("bandit") is None:
+    bandit_cmd = _resolve_tool("bandit")
+    if bandit_cmd is None:
         return ToolResult("bandit", "missing", None, {"reason": "bandit not installed"}, None)
-    proc = _run(["bandit", "-r", "app", "-f", "json", "-q"])
+    proc = _run([*bandit_cmd, "-r", "app", "-f", "json", "-q"])
     raw: Any | None = None
     try:
         raw = json.loads(proc.stdout) if proc.stdout.strip() else None
@@ -66,9 +106,19 @@ def _bandit() -> ToolResult:
 
 
 def _pip_audit() -> ToolResult:
-    if shutil.which("pip-audit") is None:
+    pip_audit_cmd = _resolve_tool("pip-audit")
+    if pip_audit_cmd is None:
         return ToolResult("pip-audit", "missing", None, {"reason": "pip-audit not installed"}, None)
-    attempts: list[tuple[str, list[str], int]] = [("local", ["pip-audit", "--local", "--progress-spinner", "off", "-f", "json"], 60)]
+    cache_dir = _project_root() / ".pip-audit-cache"
+    cache_dir.mkdir(exist_ok=True)
+    timeout_seconds = _audit_timeout_seconds()
+    attempts: list[tuple[str, list[str], int]] = [
+        (
+            "local",
+            [*pip_audit_cmd, "--local", "--progress-spinner", "off", "--cache-dir", str(cache_dir), "-f", "json"],
+            timeout_seconds,
+        )
+    ]
     export_path: str | None = None
 
     if shutil.which("uv") is not None and os.path.exists("pyproject.toml"):
@@ -83,8 +133,8 @@ def _pip_audit() -> ToolResult:
                 0,
                 (
                     "uv-export",
-                    ["pip-audit", "-r", export_path, "--progress-spinner", "off", "-f", "json"],
-                    60,
+                    [*pip_audit_cmd, "-r", export_path, "--progress-spinner", "off", "--cache-dir", str(cache_dir), "-f", "json"],
+                    timeout_seconds,
                 ),
             )
 
@@ -147,7 +197,9 @@ def main() -> int:
     pip_audit_total = int(pip_audit_res.summary.get("total", 0))
     missing_tools = [res.tool for res in (bandit_res, pip_audit_res) if res.status == "missing"]
     tools_ready = len(missing_tools) == 0
-    gate_pass = tools_ready and bandit_high == 0 and pip_audit_total == 0
+    bandit_ready = bandit_res.status == "ok"
+    pip_audit_ready = pip_audit_res.status == "ok"
+    gate_pass = tools_ready and bandit_ready and pip_audit_ready and bandit_high == 0 and pip_audit_total == 0
 
     payload: dict[str, Any] = {
         "timestamp": datetime.now(UTC).isoformat(),
@@ -166,6 +218,8 @@ def main() -> int:
         "gate": {
             "pass": gate_pass,
             "tools_ready": tools_ready,
+            "bandit_ready": bandit_ready,
+            "pip_audit_ready": pip_audit_ready,
             "missing_tools": missing_tools,
             "bandit_high": bandit_high,
             "pip_audit_total": pip_audit_total,

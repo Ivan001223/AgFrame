@@ -1,5 +1,5 @@
 import os
-import subprocess
+import subprocess  # nosec B404
 import tempfile
 from dataclasses import replace
 from importlib import import_module
@@ -90,9 +90,12 @@ def _extract_pdf_text_with_pypdf(file_path: str) -> str:
 
 
 def _run_tesseract(image_path: str) -> str:
+    tesseract_path = which("tesseract")
+    if not tesseract_path:
+        return ""
     try:
         completed = subprocess.run(
-            ["tesseract", image_path, "stdout"],
+            [tesseract_path, image_path, "stdout"],  # nosec B603
             check=False,
             capture_output=True,
             text=True,

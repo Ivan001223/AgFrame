@@ -9,7 +9,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from html.parser import HTMLParser
 from urllib.parse import urlencode
-from xml.etree import ElementTree
+
+from defusedxml import ElementTree
 
 import redis
 import requests

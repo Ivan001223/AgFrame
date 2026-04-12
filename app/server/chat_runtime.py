@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import uuid
-from functools import lru_cache
 from typing import Any
 
-from app.infrastructure.checkpoint.redis_store import checkpoint_store
 from app.infrastructure.observability import get_langfuse_callback
-from app.runtime.graph.graph import run_app
+from app.runtime.graph.chat_graph_app import get_chat_graph_app as get_chat_graph_app
 
 
 def apply_request_runtime_config(
@@ -47,8 +45,3 @@ def apply_request_runtime_config(
             normalized["callbacks"] = [handler]
 
     return normalized
-
-
-@lru_cache(maxsize=1)
-def get_chat_graph_app():
-    return run_app(checkpointer=checkpoint_store)

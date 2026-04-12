@@ -1,8 +1,9 @@
 import pytest
 
 from app.infrastructure.config.settings import settings
+from app.platform.contracts.runtime_protocol import RuntimeResumePoint
 from app.runtime.graph.graph import _after_generate_key, _check_approval, run_app
-from app.runtime.graph.resume_service import GraphResumeService
+from app.runtime.graph.resume_service import GraphResumeService, build_runtime_resume_point
 
 
 class _Snapshot:
@@ -149,3 +150,23 @@ async def test_graph_resume_service_rejects_unapproved_checkpoint():
 
     assert result["ok"] is False
     assert result["error_code"] == "approval_not_granted"
+
+
+def test_build_runtime_resume_point_extracts_checkpoint_fields():
+    point = build_runtime_resume_point(
+        {
+            "checkpoint": {
+                "action_required": {"approved": True},
+                "orchestration_resume": {
+                    "next_step_index": 3,
+                    "rollback_state": {"agent_outputs": {"agent_a": "safe"}},
+                    "continuation": {"agent_id": "agent_b"},
+                },
+            }
+        }
+    )
+
+    assert isinstance(point, RuntimeResumePoint)
+    assert point.next_step_index == 3
+    assert point.rollback_state["agent_outputs"]["agent_a"] == "safe"
+    assert point.continuation["agent_id"] == "agent_b"

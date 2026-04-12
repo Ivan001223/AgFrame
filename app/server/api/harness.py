@@ -27,6 +27,7 @@ from app.harness.runtime.studio_service import (
     HarnessStudioProjectNotFoundError,
     build_studio_service,
 )
+from app.platform.governance.commands import ApprovalResolutionCommand
 from app.infrastructure.database.models import User
 from app.infrastructure.queue.client import enqueue_harness_run
 from app.infrastructure.utils.secrets import encrypt_secret
@@ -366,10 +367,13 @@ async def resolve_harness_approval(
     _require_authorized_run(service=run_service, run_id=run_id, current_user=current_user)
     service = get_approval_service()
     return await service.resolve(
-        run_id=run_id,
-        approved=payload.approved,
-        resolved_by=current_user.username,
-        comment=payload.comment,
+        ApprovalResolutionCommand(
+            run_id=run_id,
+            approval_id=f"approval_for_{run_id}",
+            approved=payload.approved,
+            resolved_by=current_user.username,
+            comment=payload.comment,
+        )
     )
 
 

@@ -514,10 +514,15 @@ async def test_run_harness_task_completes_agent_orchestration(monkeypatch):
     assert ok is True
     assert events[0] == ("running", "hr-orch")
     assert ("step", "prepare_orchestration") in events
+    assert any(event[1] == "runtime.execution_planned" for event in events if event[0] == "event")
+    assert any(event[1] == "runtime.command_accepted" for event in events if event[0] == "event")
     assert any(event[1] == "orchestration.review_agent_attached" for event in events if event[0] == "event")
     assert any(event[1] == "orchestration.review_completed" for event in events if event[0] == "event")
+    assert any(event[1] == "runtime.step_completed" for event in events if event[0] == "event")
     completed_event = next(event for event in events if event[0] == "event" and event[1] == "orchestration.completed")
+    runtime_completed_event = next(event for event in events if event[0] == "event" and event[1] == "runtime.completed")
     assert set(completed_event[2]["agent_outputs"]) == {"agent_a"}
+    assert set(runtime_completed_event[2]["agent_outputs"]) == {"agent_a"}
     assert "agent_a" in completed_event[2]["output_artifacts"]
     assert completed_event[2]["output_artifacts"]["agent_a"]["node_kind"] == "agent"
     assert events[-1] == ("completed", "pass", 2)
@@ -846,8 +851,11 @@ async def test_run_harness_task_records_cluster_output_artifacts(monkeypatch):
 
     assert ok is True
     completed_event = next(event for event in events if event[0] == "event" and event[1] == "orchestration.completed")
+    runtime_completed_event = next(event for event in events if event[0] == "event" and event[1] == "runtime.completed")
     assert any(event[1] == "orchestration.cluster_research_completed" for event in events if event[0] == "event")
+    assert any(event[1] == "runtime.step_completed" for event in events if event[0] == "event")
     artifact = completed_event[2]["output_artifacts"]["cluster_a"]
+    assert runtime_completed_event[2]["output_artifacts"]["cluster_a"]["node_kind"] == "cluster"
     assert artifact["winning_vote"] == "BALANCED"
     assert artifact["next_step"] == "Pilot with internal users."
     assert artifact["research"]["result_count"] == 4

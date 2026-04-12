@@ -12,6 +12,8 @@ from app.harness.persistence.stores import HarnessModelProviderStore
 from app.harness.runtime.checkpoint_adapter import CheckpointAdapter
 from app.harness.runtime.run_service import build_run_service
 from app.harness.runtime.verification_service import VerificationService
+from app.platform.contracts.runtime_protocol import runtime_resume_point_from_payload, runtime_resume_point_to_payload
+from app.platform.contracts.runtime_protocol import RuntimeCommandV1
 from app.infrastructure.database.schema import ensure_schema_if_possible
 from app.infrastructure.queue.redis_client import (
     append_task_incident,
@@ -30,6 +32,9 @@ from app.runtime.graph.orchestration_graph import (
     invoke_orchestration_step,
     review_orchestration_output,
 )
+from app.platform.runtime.events import build_runtime_completed_event, build_runtime_step_completed_event
+from app.platform.runtime.bootstrap import build_runtime_command_for_run, build_runtime_execution_plan
+from app.platform.runtime.service import RuntimeApplicationService
 from app.runtime.graph.resume_service import GraphResumeService
 from app.runtime.llm.provider_registry import ModelProviderRegistry
 from app.skills.rag.rag_engine import get_rag_engine
@@ -51,7 +56,7 @@ def _maybe_call(service: Any, method_name: str, *args: Any, **kwargs: Any) -> An
 
 
 def _persist_session_messages(*args: Any, **kwargs: Any) -> Any:
-    from app.server.session_history import persist_session_messages
+    from app.memory.session_history import persist_session_messages
 
     return persist_session_messages(*args, **kwargs)
 
@@ -1286,10 +1291,9 @@ def _finalize_auto_review_rejection(
 
 
 def _serialize_orchestration_resume_state(state: dict[str, Any], next_step_index: int) -> dict[str, Any]:
-    return {
-        "next_step_index": next_step_index,
-        "state": _snapshot_orchestration_state(state),
-    }
+    payload = runtime_resume_point_to_payload({"next_step_index": next_step_index})
+    payload["state"] = _snapshot_orchestration_state(state)
+    return payload
 
 
 def _window_text_for_stream_review(
@@ -1378,8 +1382,9 @@ async def _review_incremental_stream_output(
 
 def _restore_orchestration_state(task: str, resume_payload: dict[str, Any] | None) -> tuple[dict[str, Any], int]:
     payload = dict(resume_payload or {})
+    resume_point = runtime_resume_point_from_payload(cast(dict[str, object], payload))
     state_payload = dict(payload.get("state") or {})
-    next_step_index = int(payload.get("next_step_index") or 0)
+    next_step_index = int(resume_point.next_step_index)
     restored = {
         "messages": [],
         "task": str(state_payload.get("task") or task),
@@ -1395,9 +1400,8 @@ def _restore_orchestration_state(task: str, resume_payload: dict[str, Any] | Non
     knowledge_context = str(state_payload.get("knowledge_context") or "").strip()
     if knowledge_context:
         restored["knowledge_context"] = knowledge_context
-    continuation = payload.get("continuation")
-    if isinstance(continuation, dict) and continuation:
-        restored["continuation"] = dict(continuation)
+    if isinstance(resume_point.continuation, dict) and resume_point.continuation:
+        restored["continuation"] = dict(resume_point.continuation)
     return restored, next_step_index
 
 
@@ -2058,6 +2062,23 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
         if task_type == HarnessTaskType.AGENT_ORCHESTRATION.value:
             input_json = cast(dict[str, Any], run.get("input_json") or {})
             metadata_json = cast(dict[str, Any], run.get("metadata_json") or {})
+            execution_plan = build_runtime_execution_plan(run_id=run_id, task_type=task_type)
+            _maybe_call(
+                service,
+                "record_event",
+                run_id,
+                event_type="runtime.execution_planned",
+                details=execution_plan,
+            )
+            runtime_command = build_runtime_command_for_run(run_id=run_id, task_type=task_type)
+            runtime_result = RuntimeApplicationService().accept(runtime_command)
+            _maybe_call(
+                service,
+                "record_event",
+                run_id,
+                event_type="runtime.command_accepted",
+                details=dict(runtime_result.payload),
+            )
             graph = input_json.get("graph") if isinstance(input_json, dict) else {}
             graph = graph if isinstance(graph, dict) else {}
             agents = cast(list[dict[str, Any]], graph.get("agents") if isinstance(graph.get("agents"), list) else [])
@@ -2358,7 +2379,15 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                     "check_count": 0,
                 }
 
-                async def _review_stream_chunk(chunk_text: str, accumulated_text: str, chunk_index: int):
+                async def _review_stream_chunk(
+                    chunk_text: str,
+                    accumulated_text: str,
+                    chunk_index: int,
+                    *,
+                    agent_conf: dict[str, Any] = agent_conf,
+                    step_index: int = step_index,
+                    stream_review_state: dict[str, int] = stream_review_state,
+                ):
                     if not review_enabled:
                         return None
                     blocked = await _review_incremental_stream_output(
@@ -2768,6 +2797,20 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                         "loop_number": int(step["loop_number"]),
                     },
                 )
+                runtime_step_event = build_runtime_step_completed_event(
+                    run_id=run_id,
+                    step_index=step_index,
+                    agent_id=agent_output_key,
+                    agent_name=agent_name,
+                    loop_number=int(step["loop_number"]),
+                )
+                _maybe_call(
+                    service,
+                    "record_event",
+                    run_id,
+                    event_type=runtime_step_event.event_type,
+                    details=dict(runtime_step_event.payload),
+                )
 
                 if review_enabled and latest_output:
                     segmented_review = await _run_segmented_output_review(
@@ -2989,6 +3032,21 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                     "review_agent_enabled": review_agent_enabled,
                     "recovery_mode": recovery_mode,
                 },
+            )
+            runtime_completed_event = build_runtime_completed_event(
+                run_id=run_id,
+                agent_outputs=agent_outputs,
+                output_artifacts=output_artifacts,
+                errors=list(errors),
+                review_agent_enabled=review_agent_enabled,
+                recovery_mode=recovery_mode,
+            )
+            _maybe_call(
+                service,
+                "record_event",
+                run_id,
+                event_type=runtime_completed_event.event_type,
+                details=dict(runtime_completed_event.payload),
             )
             _record_review_notification(
                 service,

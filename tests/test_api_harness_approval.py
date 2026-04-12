@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.platform.governance.commands import ApprovalResolutionCommand
 from app.server.api import harness as harness_api
 
 
@@ -26,8 +27,9 @@ def test_get_harness_approval(monkeypatch):
         def get_pending_approval(self, run_id: str):
             return {"run_id": run_id, "status": "pending", "action_type": "resume"}
 
-        async def resolve(self, run_id: str, approved: bool, resolved_by: str, comment: str | None):
-            return {"run_id": run_id, "status": "approved", "resolved_by": resolved_by}
+        async def resolve(self, command: ApprovalResolutionCommand):
+            assert isinstance(command, ApprovalResolutionCommand)
+            return {"run_id": command.run_id, "status": "approved", "resolved_by": command.resolved_by}
 
     monkeypatch.setattr(harness_api, "get_run_service", lambda: _RunService())
     monkeypatch.setattr(harness_api, "get_approval_service", lambda: _ApprovalService())
@@ -75,9 +77,9 @@ def test_approve_harness_run(monkeypatch):
         def get_pending_approval(self, run_id: str):
             return {"run_id": run_id, "status": "pending", "action_type": "resume"}
 
-        async def resolve(self, run_id: str, approved: bool, resolved_by: str, comment: str | None):
-            called["resolved"] = (run_id, approved, resolved_by, comment)
-            return {"run_id": run_id, "status": "approved", "resolved_by": resolved_by}
+        async def resolve(self, command: ApprovalResolutionCommand):
+            called["resolved"] = command
+            return {"run_id": command.run_id, "status": "approved", "resolved_by": command.resolved_by}
 
     monkeypatch.setattr(harness_api, "get_run_service", lambda: _RunService())
     monkeypatch.setattr(harness_api, "get_approval_service", lambda: _ApprovalService())
@@ -90,7 +92,10 @@ def test_approve_harness_run(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["status"] == "approved"
-    assert called["resolved"] == ("hr-1", True, "u1", "ok")
+    assert called["resolved"].run_id == "hr-1"
+    assert called["resolved"].approved is True
+    assert called["resolved"].resolved_by == "u1"
+    assert called["resolved"].comment == "ok"
 
 
 def test_approve_harness_run_forbidden(monkeypatch):
@@ -103,7 +108,7 @@ def test_approve_harness_run_forbidden(monkeypatch):
             return {"run_id": run_id, "user_id": "u2", "status": "waiting_approval"}
 
     class _ApprovalService:
-        async def resolve(self, run_id: str, approved: bool, resolved_by: str, comment: str | None):
+        async def resolve(self, command: ApprovalResolutionCommand):
             raise AssertionError("approval resolution should not happen for forbidden runs")
 
     monkeypatch.setattr(harness_api, "get_run_service", lambda: _RunService())
@@ -132,9 +137,9 @@ def test_reject_harness_run(monkeypatch):
         def get_pending_approval(self, run_id: str):
             return {"run_id": run_id, "status": "pending", "action_type": "resume"}
 
-        async def resolve(self, run_id: str, approved: bool, resolved_by: str, comment: str | None):
-            called["resolved"] = (run_id, approved, resolved_by, comment)
-            return {"run_id": run_id, "status": "rejected", "resolved_by": resolved_by}
+        async def resolve(self, command: ApprovalResolutionCommand):
+            called["resolved"] = command
+            return {"run_id": command.run_id, "status": "rejected", "resolved_by": command.resolved_by}
 
     monkeypatch.setattr(harness_api, "get_run_service", lambda: _RunService())
     monkeypatch.setattr(harness_api, "get_approval_service", lambda: _ApprovalService())
@@ -147,4 +152,7 @@ def test_reject_harness_run(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["status"] == "rejected"
-    assert called["resolved"] == ("hr-1", False, "u1", "stop")
+    assert called["resolved"].run_id == "hr-1"
+    assert called["resolved"].approved is False
+    assert called["resolved"].resolved_by == "u1"
+    assert called["resolved"].comment == "stop"

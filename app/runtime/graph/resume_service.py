@@ -3,13 +3,13 @@ from __future__ import annotations
 from inspect import isawaitable
 from typing import Any, cast
 
+from app.platform.contracts.runtime_protocol import RuntimeResumePoint, runtime_resume_point_from_payload
+from app.runtime.graph.chat_graph_app import get_chat_graph_app
 from app.runtime.graph.nodes.human_interrupt import check_approval_node
 from app.runtime.graph.state import AgentState
 
 
 def _get_default_chat_graph_app() -> Any:
-    from app.server.chat_runtime import get_chat_graph_app
-
     return get_chat_graph_app()
 
 
@@ -69,6 +69,14 @@ def extract_last_assistant_reply(messages: list[dict[str, str]]) -> str | None:
             if content:
                 return content
     return None
+
+
+def build_runtime_resume_point(checkpoint: dict[str, Any]) -> RuntimeResumePoint:
+    checkpoint_payload = dict(checkpoint.get("checkpoint") or {})
+    resume_payload = checkpoint_payload.get("orchestration_resume")
+    if not isinstance(resume_payload, dict):
+        return RuntimeResumePoint(next_step_index=0)
+    return runtime_resume_point_from_payload(cast(dict[str, object], resume_payload))
 
 
 class GraphResumeService:

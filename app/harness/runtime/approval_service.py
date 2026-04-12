@@ -1,8 +1,41 @@
 from __future__ import annotations
 
+from app.platform.governance.commands import ApprovalResolutionCommand, VerificationRecordCommand
 from app.harness.runtime.checkpoint_adapter import CheckpointAdapter
 from app.harness.runtime.run_service import build_run_service
 from app.infrastructure.queue.client import enqueue_harness_resume
+
+
+def build_approval_resolution_command(
+    *,
+    run_id: str,
+    approval_id: str,
+    approved: bool,
+    resolved_by: str,
+    comment: str | None,
+) -> ApprovalResolutionCommand:
+    return ApprovalResolutionCommand(
+        run_id=run_id,
+        approval_id=approval_id,
+        approved=approved,
+        resolved_by=resolved_by,
+        comment=comment,
+    )
+
+
+def build_approval_resolution_verification_command(
+    *,
+    run_id: str,
+    approved: bool,
+) -> VerificationRecordCommand:
+    return VerificationRecordCommand(
+        run_id=run_id,
+        verification_profile="approval_resolution",
+        result_status="pass" if approved else "partial",
+        checks_run=["approval_resolution"],
+        artifacts={"approved": approved},
+        summary="approval accepted" if approved else "approval rejected",
+    )
 
 
 class ApprovalService:
@@ -18,11 +51,12 @@ class ApprovalService:
 
     async def resolve(
         self,
-        run_id: str,
-        approved: bool,
-        resolved_by: str,
-        comment: str | None,
+        command: ApprovalResolutionCommand,
     ) -> dict[str, object]:
+        run_id = command.run_id
+        approved = command.approved
+        resolved_by = command.resolved_by
+        comment = command.comment
         approval = self.run_service.get_pending_approval_for_run(run_id)
         if approval is None:
             return {
@@ -33,12 +67,14 @@ class ApprovalService:
             }
 
         approval_status = "approved" if approved else "rejected"
-        updated = self.run_service.update_approval(
-            str(approval["approval_id"]),
-            status=approval_status,
+        resolved_command = build_approval_resolution_command(
+            run_id=run_id,
+            approval_id=str(approval.get("approval_id") or command.approval_id),
+            approved=approved,
             resolved_by=resolved_by,
             comment=comment,
         )
+        updated = self.run_service.resolve_approval_command(resolved_command)
 
         run = self.run_service.get_run(run_id)
         action_type = str(approval.get("action_type") or "resume")
@@ -77,7 +113,9 @@ class ApprovalService:
                 if metadata_json:
                     self.run_service.update_run_metadata_json(run_id, metadata_json)
                 self.run_service.mark_approved(run_id)
-                self.run_service.persist_approval_resolution(run_id, approved=True)
+                self.run_service.create_verification_command(
+                    build_approval_resolution_verification_command(run_id=run_id, approved=True)
+                )
                 await enqueue_harness_resume(run_id)
             else:
                 rollback_state = dict(resume_state.get("rollback_state") or {})
@@ -95,14 +133,20 @@ class ApprovalService:
                 if metadata_json:
                     self.run_service.update_run_metadata_json(run_id, metadata_json)
                 self.run_service.mark_rejected(run_id)
-                self.run_service.persist_approval_resolution(run_id, approved=False)
+                self.run_service.create_verification_command(
+                    build_approval_resolution_verification_command(run_id=run_id, approved=False)
+                )
         elif approved:
             self.run_service.mark_approved(run_id)
-            self.run_service.persist_approval_resolution(run_id, approved=True)
+            self.run_service.create_verification_command(
+                build_approval_resolution_verification_command(run_id=run_id, approved=True)
+            )
             await enqueue_harness_resume(run_id)
         else:
             self.run_service.mark_rejected(run_id)
-            self.run_service.persist_approval_resolution(run_id, approved=False)
+            self.run_service.create_verification_command(
+                build_approval_resolution_verification_command(run_id=run_id, approved=False)
+            )
 
         return {
             "run_id": run_id,

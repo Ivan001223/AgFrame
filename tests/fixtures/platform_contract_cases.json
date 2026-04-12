@@ -1,0 +1,30 @@
+{
+  "create_run": {
+    "legacy_run": {
+      "run_id": "hr-1",
+      "task_type": "document_ingest",
+      "status": "created",
+      "input_json": {
+        "file_path": "/tmp/a.pdf"
+      },
+      "metadata_json": {
+        "source": "manual"
+      }
+    },
+    "expected_status": "created"
+  },
+  "query_run": {
+    "legacy_run": {
+      "run_id": "hr-2",
+      "task_type": "agent_orchestration",
+      "status": "queued",
+      "input_json": {
+        "task": "Coordinate work"
+      },
+      "metadata_json": {
+        "source": "studio"
+      }
+    },
+    "expected_status": "queued"
+  }
+}

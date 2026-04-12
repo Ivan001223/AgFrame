@@ -4,11 +4,11 @@ import uuid
 from typing import Any, Literal, cast
 
 from app.harness.contracts.run import (
-    HarnessRunChecklistItem,
-    HarnessRunChecklistSnapshot,
     HarnessContinuationState,
     HarnessResearchState,
     HarnessReviewState,
+    HarnessRunChecklistItem,
+    HarnessRunChecklistSnapshot,
     HarnessRuntimeState,
     HarnessWorkflowProgress,
     HarnessWorkflowStep,
@@ -24,6 +24,9 @@ from app.harness.persistence.stores import (
 from app.harness.runtime.event_service import HarnessEventService
 from app.harness.runtime.policy_registry import get_policy, list_policies
 from app.harness.runtime.verification_service import VerificationService
+from app.platform.governance.audit import build_lifecycle_event_details
+from app.platform.governance.commands import ApprovalResolutionCommand, VerificationRecordCommand
+from app.platform.governance.service import GovernanceService
 from app.runtime.graph.orchestration_graph import build_orchestration_execution_plan
 
 
@@ -49,6 +52,7 @@ class HarnessRunService:
         self.runtime_state_store = runtime_state_store
         self.runtime_state_history_store = runtime_state_history_store
         self.verification_service = VerificationService()
+        self.governance_service = GovernanceService()
 
     @staticmethod
     def _normalize_metadata(value: dict[str, object] | None) -> dict[str, object] | None:
@@ -637,13 +641,22 @@ class HarnessRunService:
         existing = self.run_store.get_run(run_id)
         if existing is None:
             return None
+        transition = self.governance_service.authorize_transition(
+            current_status=str(existing.get("status") or ""),
+            target_status=status,
+            reason=str((details or {}).get("reason") or "") or None,
+        )
         updated = self.run_store.update_run(run_id, status=status, **changes)
         if updated is None:
             return None
-        event_details: dict[str, object] = {
-            "from_status": str(existing.get("status") or "") or None,
-            "to_status": status,
-        }
+        event_details = build_lifecycle_event_details(
+            run_id=run_id,
+            actor=actor,
+            contract_version="run.v1",
+            from_status=transition.from_status or None,
+            to_status=transition.to_status,
+            triggered_by="run_service",
+        )
         if details:
             event_details.update(details)
         self._record_event_for_run(
@@ -930,6 +943,15 @@ class HarnessRunService:
                 self.sync_runtime_state(updated_run_id, run=run, latest_approval=updated, transition_type="approval_resolved")
         return updated
 
+    def resolve_approval_command(self, command: ApprovalResolutionCommand) -> dict[str, object] | None:
+        approval_status = "approved" if command.approved else "rejected"
+        return self.update_approval(
+            command.approval_id,
+            status=approval_status,
+            resolved_by=command.resolved_by,
+            comment=command.comment,
+        )
+
     def build_approval_verification(self, *, approved: bool) -> dict[str, object]:
         return {
             "status": "pass" if approved else "partial",
@@ -960,6 +982,18 @@ class HarnessRunService:
         )
         self.sync_runtime_state(run_id, latest_verification=verification, transition_type="verification_recorded")
         return verification
+
+    def create_verification_command(self, command: VerificationRecordCommand) -> dict[str, object] | None:
+        return self.create_verification(
+            command.run_id,
+            {
+                "status": command.result_status,
+                "checks_run": list(command.checks_run),
+                "artifacts": dict(command.artifacts or {}),
+                "summary": command.summary,
+                "verification_profile": command.verification_profile,
+            },
+        )
 
     def build_document_ingest_verification(
         self,

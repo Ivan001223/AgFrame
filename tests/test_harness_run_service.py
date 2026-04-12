@@ -919,3 +919,37 @@ def test_create_run_rejects_unknown_task_type():
             session_id=None,
             metadata_json=None,
         )
+
+
+def test_update_run_status_rejects_invalid_governance_transition():
+    state = {
+        "run_id": "hr-1",
+        "user_id": "u1",
+        "session_id": None,
+        "task_type": "document_ingest",
+        "status": "created",
+        "policy_id": "document_ingest:v1",
+        "input_json": {"file_path": "/tmp/a.pdf"},
+        "metadata_json": None,
+        "current_step": None,
+        "retry_count": 0,
+        "resume_count": 0,
+        "approval_required": False,
+        "verification_status": None,
+        "created_at": 1,
+        "updated_at": 1,
+        "finished_at": None,
+    }
+
+    class _RunStore:
+        def get_run(self, run_id: str):
+            return dict(state) if run_id == "hr-1" else None
+
+        def update_run(self, run_id: str, **changes):
+            state.update(changes)
+            return dict(state)
+
+    service = HarnessRunService(run_store=_RunStore())
+
+    with pytest.raises(ValueError, match="invalid lifecycle transition"):
+        service.update_run_status("hr-1", "completed")

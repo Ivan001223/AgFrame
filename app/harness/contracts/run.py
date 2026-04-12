@@ -1,18 +1,21 @@
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.platform.contracts.run import RunEnvelopeV1
+from app.platform.contracts.translators import legacy_run_to_run_envelope, run_envelope_to_legacy_payload
 
-class HarnessTaskType(str, Enum):
+
+class HarnessTaskType(StrEnum):
     DOCUMENT_INGEST = "document_ingest"
     SESSION_RESUME_APPROVAL = "session_resume_approval"
     AGENT_ORCHESTRATION = "agent_orchestration"
 
 
-class HarnessRunStatus(str, Enum):
+class HarnessRunStatus(StrEnum):
     CREATED = "created"
     QUEUED = "queued"
     RUNNING = "running"
@@ -113,3 +116,11 @@ class HarnessRuntimeState(BaseModel):
     review: HarnessReviewState = Field(default_factory=HarnessReviewState)
     continuation: HarnessContinuationState = Field(default_factory=HarnessContinuationState)
     research: HarnessResearchState = Field(default_factory=HarnessResearchState)
+
+
+def to_platform_run_envelope(payload: dict[str, object]) -> RunEnvelopeV1:
+    return legacy_run_to_run_envelope(payload)
+
+
+def from_platform_run_envelope(payload: RunEnvelopeV1 | dict[str, object]) -> dict[str, object]:
+    return run_envelope_to_legacy_payload(payload)

@@ -5,7 +5,7 @@ import tempfile
 from datetime import datetime
 from typing import Any, cast
 
-import docker
+from docker import from_env as docker_from_env  # type: ignore[attr-defined]
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class CodeSandbox:
     @property
     def client(self) -> Any:
         if self._client is None:
-            self._client = cast(Any, getattr(docker, "from_env")())
+            self._client = cast(Any, docker_from_env())
         return self._client
 
     def _create_container(self, code: str) -> str:

@@ -21,7 +21,7 @@ class SearchToolFactory:
     def get_search_tool(return_results_obj: bool = False) -> Any:
         """
         返回配置的搜索工具提供方。
-        
+
         参数:
             return_results_obj: 为 True 时返回 SearchResults 对象（包含元数据）。
                                 为 False 时返回 SearchRun 对象（仅文本）。

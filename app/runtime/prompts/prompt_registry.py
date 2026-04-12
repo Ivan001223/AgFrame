@@ -205,7 +205,7 @@ class PromptRegistry:
         }
 
     def import_prompts(self, data: dict[str, Any]) -> None:
-        for key, val in data.get("prompts", {}).items():
+        for _key, val in data.get("prompts", {}).items():
             self.register(PromptTemplate.from_dict(val))
         self._ab_tests = data.get("ab_tests", {})
 

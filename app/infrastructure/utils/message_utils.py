@@ -23,10 +23,10 @@ def sanitize_messages_for_routing(messages: Iterable[BaseMessage]) -> list[BaseM
     """
     清洗消息列表以用于路由判断。
     移除多模态内容（图片等），仅保留文本，减少 Token 消耗并提高稳定性。
-    
+
     Args:
         messages: 原始消息列表
-        
+
     Returns:
         List[BaseMessage]: 清洗后的纯文本消息列表
     """

@@ -17,10 +17,10 @@ class MemoryRouteDecision(BaseModel):
 def route_memory(state: dict[str, Any]) -> MemoryRouteDecision:
     """
     内存路由函数：判断用户请求是否需要检索文档或历史记忆。
-    
+
     Args:
         state: 包含对话消息的状态字典
-        
+
     Returns:
         MemoryRouteDecision: 包含检索需求的决策对象
     """

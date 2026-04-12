@@ -1,1 +1,1 @@
-from .observability import get_langfuse_callback
+from .observability import get_langfuse_callback as get_langfuse_callback

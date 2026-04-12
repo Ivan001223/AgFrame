@@ -13,7 +13,7 @@ from app.runtime.llm.llm_factory import get_llm
 T = TypeVar("T", bound=BaseModel)
 
 
-def run_json_router(
+def run_json_router[T: BaseModel](
     messages: Iterable[Any],
     *,
     system_template: str,
@@ -25,7 +25,7 @@ def run_json_router(
 ) -> T:
     """
     通用 JSON 路由器：使用 LLM 根据系统提示词和对话历史生成结构化 JSON 输出。
-    
+
     Args:
         messages: 对话历史消息
         system_template: 系统提示词模板，定义路由规则和角色
@@ -34,7 +34,7 @@ def run_json_router(
         temperature: LLM 温度参数，默认为 0（确定性）
         streaming: 是否流式输出
         json_mode: 是否启用 LLM 的 JSON 模式
-        
+
     Returns:
         T: 解析后的 Pydantic 模型实例
     """

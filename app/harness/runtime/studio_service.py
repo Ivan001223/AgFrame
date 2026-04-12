@@ -3185,7 +3185,6 @@ class HarnessStudioService:
             if str(item).strip()
         ]
         source_lane_set = set(source_lane_ids)
-        target_lane_set = set(target_lane_ids)
         complementary_lane_ids = [
             lane_id for lane_id in target_lane_ids if lane_id not in source_lane_set and lane_id != "generalist"
         ]
@@ -3215,7 +3214,6 @@ class HarnessStudioService:
             for item in self._as_object_list(target_summary.get("enabled_tool_ids"))
             if str(item).strip()
         ]
-        target_enabled_tool_id_set = set(target_enabled_tool_ids)
         source_mcp_server_ids = [
             str(item).strip()
             for item in self._as_object_list(source_summary.get("mcp_server_ids"))

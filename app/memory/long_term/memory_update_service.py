@@ -28,11 +28,11 @@ class MemoryUpdateService:
     def update_after_save(self, user_id: str, session_id: str, messages: list[dict[str, Any]]) -> None:
         """
         在消息保存后触发的更新逻辑。
-        
+
         策略：
         1. 检查距离上次摘要更新的消息数，如果超过阈值（6条），则生成新摘要。
         2. 检查距离上次画像更新的消息数，如果超过阈值（20条），则增量更新用户画像。
-        
+
         Args:
             user_id: 用户 ID
             session_id: 会话 ID

@@ -85,25 +85,19 @@ def build_role_profile_alignment_diagnostics(
         restrictive_tool_ids = _normalize_string_list(role_profile.get("restrictive_tool_ids"))
         restrictive_mcp_server_ids = _normalize_string_list(role_profile.get("restrictive_mcp_server_ids"))
         loaded_skill_ids = set(_normalize_string_list(item.get("loaded_skill_ids")))
-        current_tool_ids = set(
-            [
-                *_normalize_string_list(item.get("enabled_tool_ids")),
-                *_normalize_string_list(item.get("provider_limited_tool_ids")),
-            ]
-        )
+        current_tool_ids = {
+            *_normalize_string_list(item.get("enabled_tool_ids")),
+            *_normalize_string_list(item.get("provider_limited_tool_ids")),
+        }
         current_mcp_server_ids = set(_normalize_string_list(item.get("mcp_server_ids")))
-        denied_tool_ids = set(
-            [
-                *_normalize_string_list(item.get("configured_denied_tool_ids")),
-                *_normalize_string_list(item.get("denied_tool_ids")),
-            ]
-        )
-        denied_mcp_server_ids = set(
-            [
-                *_normalize_string_list(item.get("configured_denied_mcp_server_ids")),
-                *_normalize_string_list(item.get("denied_mcp_server_ids")),
-            ]
-        )
+        denied_tool_ids = {
+            *_normalize_string_list(item.get("configured_denied_tool_ids")),
+            *_normalize_string_list(item.get("denied_tool_ids")),
+        }
+        denied_mcp_server_ids = {
+            *_normalize_string_list(item.get("configured_denied_mcp_server_ids")),
+            *_normalize_string_list(item.get("denied_mcp_server_ids")),
+        }
         delegation_lane_ids = [
             lane_id
             for lane_id in _normalize_string_list(item.get("delegation_lane_ids"))

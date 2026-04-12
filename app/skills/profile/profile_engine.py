@@ -30,10 +30,10 @@ def _default_profile() -> dict[str, Any]:
 def normalize_profile(profile: dict[str, Any]) -> dict[str, Any]:
     """
     标准化用户画像数据，确保所有必要字段都存在且格式正确。
-    
+
     Args:
         profile: 原始用户画像数据
-        
+
     Returns:
         Dict: 标准化后的用户画像
     """
@@ -73,12 +73,12 @@ def normalize_profile(profile: dict[str, Any]) -> dict[str, Any]:
 def apply_forgetting(profile: dict[str, Any], now: int | None = None, max_age_days: int = 90) -> dict[str, Any]:
     """
     应用遗忘机制：降低旧事实的置信度，移除置信度过低的事实。
-    
+
     Args:
         profile: 用户画像
         now: 当前时间戳
         max_age_days: 开始衰减的天数阈值
-        
+
     Returns:
         Dict: 更新后的用户画像
     """
@@ -113,10 +113,10 @@ def apply_forgetting(profile: dict[str, Any], now: int | None = None, max_age_da
 def extract_base_profile(conversation_history: str) -> dict[str, Any]:
     """
     从完整的对话历史中提取初始用户画像。
-    
+
     Args:
         conversation_history: 对话历史文本
-        
+
     Returns:
         Dict: 提取出的用户画像
     """
@@ -154,11 +154,11 @@ def extract_base_profile(conversation_history: str) -> dict[str, Any]:
 def incremental_update_profile(old_profile: dict[str, Any], chat_log: str) -> dict[str, Any]:
     """
     根据新的对话片段增量更新用户画像。
-    
+
     Args:
         old_profile: 旧的用户画像
         chat_log: 新的对话片段
-        
+
     Returns:
         Dict: 更新后的用户画像
     """
@@ -191,10 +191,10 @@ def incremental_update_profile(old_profile: dict[str, Any], chat_log: str) -> di
 def analyze_interaction_protocol(conversation_samples: str) -> dict[str, Any]:
     """
     分析用户的交互偏好和风格。
-    
+
     Args:
         conversation_samples: 对话样本
-        
+
     Returns:
         Dict: 分析结果（偏好配置）
     """

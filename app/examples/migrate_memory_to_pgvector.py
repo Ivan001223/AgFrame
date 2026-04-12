@@ -1,3 +1,5 @@
+# ruff: noqa: E402
+
 import argparse
 import hashlib
 import os
@@ -16,7 +18,7 @@ from app.infrastructure.database.models import UserProfile
 from app.infrastructure.database.orm import get_session
 from app.infrastructure.database.schema import ensure_schema_if_possible
 from app.memory.long_term.user_memory_engine import UserMemoryEngine
-from app.memory.vector_stores.faiss_store import load_faiss
+from app.memory.vector_stores.faiss_store import load_faiss  # type: ignore[import-untyped]
 from app.runtime.llm.embeddings import ModelEmbeddings
 
 
@@ -88,7 +90,7 @@ def _migrate_faiss_chat_summaries(engine: UserMemoryEngine) -> dict[str, int]:
         if not rows:
             continue
         embeddings = engine.embeddings.embed_documents([r["text"] for r in rows])
-        for r, e in zip(rows, embeddings):
+        for r, e in zip(rows, embeddings, strict=False):
             r["embedding"] = e
         engine.store.upsert_items(rows)
 

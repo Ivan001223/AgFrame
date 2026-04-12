@@ -42,10 +42,10 @@ class QwenVLOCR:
     def process_file(self, file_path: str) -> str:
         """
         处理 PDF 或图片文件，并返回提取出的文本。
-        
+
         Args:
             file_path: 文件路径
-            
+
         Returns:
             str: 提取出的文本内容
         """

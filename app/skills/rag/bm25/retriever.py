@@ -49,7 +49,7 @@ class BM25Retriever:
 
         candidate_docs = set()
         for term in query_terms:
-            for doc_id, tf in self.builder.index.get_postings(term):
+            for doc_id, _tf in self.builder.index.get_postings(term):
                 candidate_docs.add(doc_id)
 
         scores = []

@@ -14,10 +14,10 @@ def route_request(state: dict[str, Any]) -> RouteDecision:
     """
     通用编排器/路由节点。
     分析对话历史以决定下一步动作。
-    
+
     Args:
         state: 包含对话消息的状态字典
-        
+
     Returns:
         RouteDecision: 包含目标节点和理由的决策对象
     """

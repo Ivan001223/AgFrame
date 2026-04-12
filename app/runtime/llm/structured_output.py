@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
-from enum import Enum
-from typing import Any, TypeVar
+from enum import StrEnum
+from typing import Any
 
 import anyio
-
-logger = logging.getLogger(__name__)
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from pydantic import BaseModel
 
@@ -15,15 +13,15 @@ from app.infrastructure.utils.json_parser import parse_json_from_llm
 from app.infrastructure.utils.message_utils import sanitize_messages_for_routing
 from app.runtime.llm.llm_factory import get_llm
 
-T = TypeVar("T", bound=BaseModel)
+logger = logging.getLogger(__name__)
 
 
-class StructuredOutputMode(str, Enum):
+class StructuredOutputMode(StrEnum):
     NATIVE_FIRST = "native_first"
     PROMPT_ONLY = "prompt_only"
 
 
-async def invoke_structured(
+async def invoke_structured[T: BaseModel](
     messages: Iterable[Any],
     *,
     system_template: str,

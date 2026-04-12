@@ -27,13 +27,13 @@ def build_llm_chain(
     """
     构建标准的 LLM 执行链。
     Prompt -> LLM (bind tools)
-    
+
     Args:
         system_prompt: 系统提示词
         temperature: 温度参数
         tools: 可用工具列表
         json_mode: 是否启用 JSON 模式
-        
+
     Returns:
         Runnable: 可执行的 LangChain 对象
     """
@@ -47,11 +47,11 @@ def build_llm_chain(
 def make_agent_node(chain, *, messages_key: str = "messages") -> Callable[[AgentState], dict]:
     """
     创建符合 LangGraph 签名的节点函数。
-    
+
     Args:
         chain: LLM 执行链
         messages_key: 状态中存储消息的键名
-        
+
     Returns:
         Callable: 节点函数，输入 State，输出更新后的 State
     """

@@ -4,9 +4,9 @@ import asyncio
 import logging
 import re
 from collections import defaultdict, deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from inspect import isawaitable
-from typing import Annotated, Any, Awaitable, NotRequired, TypedDict, cast
+from typing import Annotated, Any, NotRequired, TypedDict, cast
 
 import anyio
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
@@ -362,7 +362,7 @@ async def _invoke_llm_with_tool_loop(
     tool_runs: list[dict[str, Any]] = []
     last_ai_message: AIMessage | None = None
 
-    for round_index in range(max(max_rounds, 1)):
+    for _round_index in range(max(max_rounds, 1)):
         with anyio.fail_after(timeout_seconds):
             response = await bound_llm.ainvoke(conversation)
         ai_message = response if isinstance(response, AIMessage) else AIMessage(content=_message_text(response))
@@ -375,7 +375,9 @@ async def _invoke_llm_with_tool_loop(
         tool_results_by_index: dict[int, dict[str, Any]] = {}
         pending_read_only_calls: list[tuple[int, dict[str, Any]]] = []
 
-        async def flush_read_only_batch() -> None:
+        async def flush_read_only_batch(
+            tool_results_by_index_ref: dict[int, dict[str, Any]] = tool_results_by_index,
+        ) -> None:
             nonlocal pending_read_only_calls
             if not pending_read_only_calls:
                 return
@@ -391,7 +393,7 @@ async def _invoke_llm_with_tool_loop(
                 ]
             )
             for index, result in zip(indexes, results, strict=False):
-                tool_results_by_index[index] = result
+                tool_results_by_index_ref[index] = result
             pending_read_only_calls = []
 
         for index, raw_tool_call in enumerate(tool_calls):

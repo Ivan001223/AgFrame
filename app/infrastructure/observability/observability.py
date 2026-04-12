@@ -1,16 +1,18 @@
+import importlib
 import logging
 import os
 from typing import Any, cast
 
 _callback_handler_type: Any | None = None
 try:
-    from langfuse.callback import CallbackHandler as _ImportedCallbackHandler  # type: ignore[import-not-found]
+    _langfuse_callback_module = importlib.import_module("langfuse.callback")
 except ImportError:
     _callback_handler_type = None
 else:
-    _callback_handler_type = _ImportedCallbackHandler
+    _callback_handler_type = getattr(_langfuse_callback_module, "CallbackHandler", None)
 
 logger = logging.getLogger(__name__)
+
 
 def get_langfuse_callback() -> object | None:
     """

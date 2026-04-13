@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from app.platform.contracts.runtime_protocol import (
+    normalize_review_approval_resume_payload,
+    normalize_review_rejection_resume_payload,
+)
 from app.platform.governance.commands import ApprovalResolutionCommand, VerificationRecordCommand
 from app.harness.runtime.checkpoint_adapter import CheckpointAdapter
 from app.harness.runtime.run_service import build_run_service
@@ -101,13 +105,12 @@ class ApprovalService:
             payload_json = dict(payload_value) if isinstance(payload_value, dict) else {}
             review_stage = str(payload_json.get("review_stage") or "").strip()
             if approved:
-                if review_stage == "cluster_research":
-                    resume_state["continue_mode"] = "accept_research_evidence"
-                    metadata_json["review_recovery_mode"] = "continue_with_research"
-                elif review_stage == "agent_output_stream":
-                    resume_state["continue_mode"] = "accept_partial_stream_output"
-                    metadata_json["review_recovery_mode"] = "continue_with_partial_stream_output"
-                resume_state["review_decision"] = "approved"
+                resume_state, recovery_mode = normalize_review_approval_resume_payload(
+                    resume_state,
+                    review_stage=review_stage,
+                )
+                if recovery_mode:
+                    metadata_json["review_recovery_mode"] = recovery_mode
                 input_json["orchestration_resume"] = resume_state
                 self.run_service.update_run_input_json(run_id, input_json)
                 if metadata_json:
@@ -118,16 +121,21 @@ class ApprovalService:
                 )
                 await enqueue_harness_resume(run_id)
             else:
-                rollback_state = dict(resume_state.get("rollback_state") or {})
-                if rollback_state:
-                    resume_state["state"] = rollback_state
-                    if review_stage == "cluster_research":
-                        resume_state["next_step_index"] = int(resume_state.get("next_step_index") or 0)
-                        resume_state["continue_mode"] = "discard_research_evidence"
-                        metadata_json["review_recovery_mode"] = "continue_without_research"
-                    else:
-                        resume_state["next_step_index"] = int(resume_state.get("next_step_index") or 0)
+                resume_state, recovery_mode = normalize_review_rejection_resume_payload(
+                    resume_state,
+                    review_stage=review_stage,
+                    continue_mode=(
+                        "discard_research_evidence"
+                        if review_stage == "cluster_research"
+                        else str(resume_state.get("continue_mode") or "")
+                    ),
+                    review_step_index=int(payload_json.get("step_index") or 0) or None,
+                )
                 resume_state["review_decision"] = "rejected"
+                if review_stage == "cluster_research":
+                    resume_state["continue_mode"] = "discard_research_evidence"
+                if recovery_mode:
+                    metadata_json["review_recovery_mode"] = recovery_mode
                 input_json["orchestration_resume"] = resume_state
                 self.run_service.update_run_input_json(run_id, input_json)
                 if metadata_json:

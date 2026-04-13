@@ -953,3 +953,65 @@ def test_update_run_status_rejects_invalid_governance_transition():
 
     with pytest.raises(ValueError, match="invalid lifecycle transition"):
         service.update_run_status("hr-1", "completed")
+
+
+def test_create_retry_run_keeps_research_resume_position_when_review_discards_evidence():
+    created: list[dict[str, object]] = []
+    source_run = {
+        "run_id": "hr-1",
+        "user_id": "u1",
+        "session_id": None,
+        "task_type": "agent_orchestration",
+        "status": "rejected",
+        "policy_id": "agent_orchestration:v1",
+        "input_json": {
+            "task": "Draft a launch plan.",
+            "orchestration_resume": {
+                "next_step_index": 3,
+                "rollback_state": {"research": {"cluster_a": "baseline"}},
+                "continue_mode": "discard_research_evidence",
+                "review_decision": "rejected",
+            },
+        },
+        "metadata_json": {},
+        "current_step": None,
+        "retry_count": 0,
+        "resume_count": 0,
+        "approval_required": False,
+        "verification_status": None,
+        "created_at": 1,
+        "updated_at": 1,
+        "finished_at": None,
+    }
+
+    class _RunStore:
+        def get_run(self, run_id: str):
+            return dict(source_run) if run_id == "hr-1" else None
+
+        def create_run(self, **kwargs):
+            created.append(kwargs)
+            return {"run_id": "hr-2", **kwargs}
+
+    class _ApprovalStore:
+        def get_latest_by_run(self, run_id: str):
+            if run_id == "hr-1":
+                return {
+                    "approval_id": "ha-1",
+                    "run_id": run_id,
+                    "action_type": "orchestration_review",
+                    "status": "rejected",
+                    "comment": "Drop the weak evidence and continue.",
+                    "payload_json": {"review_stage": "cluster_research"},
+                }
+            return None
+
+    service = HarnessRunService(run_store=_RunStore(), approval_store=_ApprovalStore())
+
+    retried = service.create_retry_run("hr-1", requested_by="u1")
+
+    assert retried["retry_count"] == 1
+    assert created[0]["input_json"]["orchestration_resume"]["next_step_index"] == 3
+    assert created[0]["input_json"]["orchestration_resume"]["state"]["research"]["cluster_a"] == "baseline"
+    assert "continue_mode" not in created[0]["input_json"]["orchestration_resume"]
+    assert created[0]["metadata_json"]["review_recovery_mode"] == "continue_without_research"
+    assert "Drop the weak evidence and continue." in created[0]["input_json"]["task"]

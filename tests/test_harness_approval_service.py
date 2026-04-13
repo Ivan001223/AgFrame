@@ -1,11 +1,11 @@
 import pytest
 
-from app.harness.runtime.approval_service import ApprovalService
+from app.harness.runtime.approval_service import ApprovalService, build_approval_resolution_command
 
 
 @pytest.mark.anyio
 async def test_approval_service_approve_updates_checkpoint_and_enqueues(monkeypatch):
-    calls = {"saved": None, "enqueued": None, "approval": None, "marks": []}
+    calls = {"saved": None, "enqueued": None, "marks": [], "verification": None}
 
     class _CheckpointAdapter:
         async def load(self, session_id: str):
@@ -26,9 +26,9 @@ async def test_approval_service_approve_updates_checkpoint_and_enqueues(monkeypa
         def get_pending_approval_for_run(self, run_id: str):
             return {"approval_id": "ha-1", "run_id": run_id, "status": "pending"}
 
-        def update_approval(self, approval_id: str, *, status: str, resolved_by: str, comment: str | None):
-            calls["approval"] = (approval_id, status, resolved_by, comment)
-            return {"approval_id": approval_id, "status": status}
+        def resolve_approval_command(self, command):
+            calls["resolved"] = command
+            return {"approval_id": command.approval_id, "status": "approved"}
 
         def get_run(self, run_id: str):
             return {"run_id": run_id, "session_id": "s1"}
@@ -36,11 +36,11 @@ async def test_approval_service_approve_updates_checkpoint_and_enqueues(monkeypa
         def mark_approved(self, run_id: str):
             calls["marks"].append(("approved", run_id))
 
-        def persist_approval_resolution(self, run_id: str, *, approved: bool):
-            calls["marks"].append(("persist", run_id, approved))
-
         def mark_rejected(self, run_id: str):
             calls["marks"].append(("rejected", run_id))
+
+        def create_verification_command(self, command):
+            calls["verification"] = command
 
     async def _enqueue(run_id: str):
         calls["enqueued"] = run_id
@@ -50,20 +50,28 @@ async def test_approval_service_approve_updates_checkpoint_and_enqueues(monkeypa
     service.run_service = _RunService()
     monkeypatch.setattr("app.harness.runtime.approval_service.enqueue_harness_resume", _enqueue)
 
-    result = await service.resolve("hr-1", True, "u1", "ok")
+    result = await service.resolve(
+        build_approval_resolution_command(
+            run_id="hr-1",
+            approval_id="ha-unknown",
+            approved=True,
+            resolved_by="u1",
+            comment="ok",
+        )
+    )
 
     assert result["status"] == "approved"
-    assert calls["approval"] == ("ha-1", "approved", "u1", "ok")
+    assert calls["resolved"].approval_id == "ha-1"
     assert calls["saved"][0] == "s1"
     assert calls["saved"][1]["action_required"]["approved"] is True
     assert calls["enqueued"] == "hr-1"
     assert ("approved", "hr-1") in calls["marks"]
-    assert ("persist", "hr-1", True) in calls["marks"]
+    assert calls["verification"].artifacts == {"approved": True}
 
 
 @pytest.mark.anyio
 async def test_approval_service_reject_does_not_enqueue(monkeypatch):
-    calls = {"saved": None, "enqueued": None, "marks": []}
+    calls = {"saved": None, "enqueued": None, "marks": [], "verification": None}
 
     class _CheckpointAdapter:
         async def load(self, session_id: str):
@@ -81,8 +89,8 @@ async def test_approval_service_reject_does_not_enqueue(monkeypatch):
         def get_pending_approval_for_run(self, run_id: str):
             return {"approval_id": "ha-1", "run_id": run_id, "status": "pending"}
 
-        def update_approval(self, approval_id: str, *, status: str, resolved_by: str, comment: str | None):
-            return {"approval_id": approval_id, "status": status}
+        def resolve_approval_command(self, command):
+            return {"approval_id": command.approval_id, "status": "rejected"}
 
         def get_run(self, run_id: str):
             return {"run_id": run_id, "session_id": "s1"}
@@ -90,11 +98,11 @@ async def test_approval_service_reject_does_not_enqueue(monkeypatch):
         def mark_rejected(self, run_id: str):
             calls["marks"].append(("rejected", run_id))
 
-        def persist_approval_resolution(self, run_id: str, *, approved: bool):
-            calls["marks"].append(("persist", run_id, approved))
-
         def mark_approved(self, run_id: str):
             calls["marks"].append(("approved", run_id))
+
+        def create_verification_command(self, command):
+            calls["verification"] = command
 
     async def _enqueue(run_id: str):
         calls["enqueued"] = run_id
@@ -104,18 +112,26 @@ async def test_approval_service_reject_does_not_enqueue(monkeypatch):
     service.run_service = _RunService()
     monkeypatch.setattr("app.harness.runtime.approval_service.enqueue_harness_resume", _enqueue)
 
-    result = await service.resolve("hr-1", False, "u1", "stop")
+    result = await service.resolve(
+        build_approval_resolution_command(
+            run_id="hr-1",
+            approval_id="ha-1",
+            approved=False,
+            resolved_by="u1",
+            comment="stop",
+        )
+    )
 
     assert result["status"] == "rejected"
     assert calls["saved"][1]["action_required"]["approved"] is False
     assert calls["enqueued"] is None
     assert ("rejected", "hr-1") in calls["marks"]
-    assert ("persist", "hr-1", False) in calls["marks"]
+    assert calls["verification"].artifacts == {"approved": False}
 
 
 @pytest.mark.anyio
 async def test_approval_service_approve_orchestration_review_updates_resume_state(monkeypatch):
-    calls = {"updated_input": None, "enqueued": None, "marks": []}
+    calls = {"updated_input": None, "enqueued": None, "marks": [], "verification": None}
 
     class _CheckpointAdapter:
         async def load(self, session_id: str):
@@ -125,8 +141,8 @@ async def test_approval_service_approve_orchestration_review_updates_resume_stat
         def get_pending_approval_for_run(self, run_id: str):
             return {"approval_id": "ha-1", "run_id": run_id, "status": "pending", "action_type": "orchestration_review"}
 
-        def update_approval(self, approval_id: str, *, status: str, resolved_by: str, comment: str | None):
-            return {"approval_id": approval_id, "status": status, "action_type": "orchestration_review"}
+        def resolve_approval_command(self, command):
+            return {"approval_id": command.approval_id, "status": "approved", "action_type": "orchestration_review"}
 
         def get_run(self, run_id: str):
             return {
@@ -138,14 +154,17 @@ async def test_approval_service_approve_orchestration_review_updates_resume_stat
         def update_run_input_json(self, run_id: str, input_json: dict[str, object]):
             calls["updated_input"] = input_json
 
+        def update_run_metadata_json(self, run_id: str, metadata_json: dict[str, object]):
+            calls["updated_metadata"] = metadata_json
+
         def mark_approved(self, run_id: str):
             calls["marks"].append(("approved", run_id))
 
-        def persist_approval_resolution(self, run_id: str, *, approved: bool):
-            calls["marks"].append(("persist", run_id, approved))
-
         def mark_rejected(self, run_id: str):
             calls["marks"].append(("rejected", run_id))
+
+        def create_verification_command(self, command):
+            calls["verification"] = command
 
     async def _enqueue(run_id: str):
         calls["enqueued"] = run_id
@@ -155,7 +174,15 @@ async def test_approval_service_approve_orchestration_review_updates_resume_stat
     service.run_service = _RunService()
     monkeypatch.setattr("app.harness.runtime.approval_service.enqueue_harness_resume", _enqueue)
 
-    result = await service.resolve("hr-1", True, "u1", "continue")
+    result = await service.resolve(
+        build_approval_resolution_command(
+            run_id="hr-1",
+            approval_id="ha-1",
+            approved=True,
+            resolved_by="u1",
+            comment="continue",
+        )
+    )
 
     assert result["status"] == "approved"
     assert calls["updated_input"]["orchestration_resume"]["review_decision"] == "approved"
@@ -180,8 +207,8 @@ async def test_approval_service_approve_cluster_research_sets_continue_with_rese
                 "payload_json": {"review_stage": "cluster_research"},
             }
 
-        def update_approval(self, approval_id: str, *, status: str, resolved_by: str, comment: str | None):
-            return {"approval_id": approval_id, "status": status, "action_type": "orchestration_review"}
+        def resolve_approval_command(self, command):
+            return {"approval_id": command.approval_id, "status": "approved", "action_type": "orchestration_review"}
 
         def get_run(self, run_id: str):
             return {
@@ -200,11 +227,11 @@ async def test_approval_service_approve_cluster_research_sets_continue_with_rese
         def mark_approved(self, run_id: str):
             calls["marks"].append(("approved", run_id))
 
-        def persist_approval_resolution(self, run_id: str, *, approved: bool):
-            calls["marks"].append(("persist", run_id, approved))
-
         def mark_rejected(self, run_id: str):
             calls["marks"].append(("rejected", run_id))
+
+        def create_verification_command(self, command):
+            calls["verification"] = command
 
     async def _enqueue(run_id: str):
         calls["enqueued"] = run_id
@@ -214,7 +241,15 @@ async def test_approval_service_approve_cluster_research_sets_continue_with_rese
     service.run_service = _RunService()
     monkeypatch.setattr("app.harness.runtime.approval_service.enqueue_harness_resume", _enqueue)
 
-    result = await service.resolve("hr-1", True, "u1", "accept evidence")
+    result = await service.resolve(
+        build_approval_resolution_command(
+            run_id="hr-1",
+            approval_id="ha-1",
+            approved=True,
+            resolved_by="u1",
+            comment="accept evidence",
+        )
+    )
 
     assert result["status"] == "approved"
     assert calls["updated_input"]["orchestration_resume"]["continue_mode"] == "accept_research_evidence"
@@ -240,8 +275,8 @@ async def test_approval_service_approve_stream_review_sets_accept_partial_stream
                 "payload_json": {"review_stage": "agent_output_stream", "partial_output": "safe partial"},
             }
 
-        def update_approval(self, approval_id: str, *, status: str, resolved_by: str, comment: str | None):
-            return {"approval_id": approval_id, "status": status, "action_type": "orchestration_review"}
+        def resolve_approval_command(self, command):
+            return {"approval_id": command.approval_id, "status": "approved", "action_type": "orchestration_review"}
 
         def get_run(self, run_id: str):
             return {
@@ -260,11 +295,11 @@ async def test_approval_service_approve_stream_review_sets_accept_partial_stream
         def mark_approved(self, run_id: str):
             calls["marks"].append(("approved", run_id))
 
-        def persist_approval_resolution(self, run_id: str, *, approved: bool):
-            calls["marks"].append(("persist", run_id, approved))
-
         def mark_rejected(self, run_id: str):
             calls["marks"].append(("rejected", run_id))
+
+        def create_verification_command(self, command):
+            calls["verification"] = command
 
     async def _enqueue(run_id: str):
         calls["enqueued"] = run_id
@@ -274,7 +309,15 @@ async def test_approval_service_approve_stream_review_sets_accept_partial_stream
     service.run_service = _RunService()
     monkeypatch.setattr("app.harness.runtime.approval_service.enqueue_harness_resume", _enqueue)
 
-    result = await service.resolve("hr-1", True, "u1", "accept partial")
+    result = await service.resolve(
+        build_approval_resolution_command(
+            run_id="hr-1",
+            approval_id="ha-1",
+            approved=True,
+            resolved_by="u1",
+            comment="accept partial",
+        )
+    )
 
     assert result["status"] == "approved"
     assert calls["updated_input"]["orchestration_resume"]["continue_mode"] == "accept_partial_stream_output"
@@ -300,8 +343,8 @@ async def test_approval_service_reject_cluster_research_sets_discard_mode(monkey
                 "payload_json": {"review_stage": "cluster_research"},
             }
 
-        def update_approval(self, approval_id: str, *, status: str, resolved_by: str, comment: str | None):
-            return {"approval_id": approval_id, "status": status, "action_type": "orchestration_review"}
+        def resolve_approval_command(self, command):
+            return {"approval_id": command.approval_id, "status": "rejected", "action_type": "orchestration_review"}
 
         def get_run(self, run_id: str):
             return {
@@ -325,11 +368,11 @@ async def test_approval_service_reject_cluster_research_sets_discard_mode(monkey
         def mark_rejected(self, run_id: str):
             calls["marks"].append(("rejected", run_id))
 
-        def persist_approval_resolution(self, run_id: str, *, approved: bool):
-            calls["marks"].append(("persist", run_id, approved))
-
         def mark_approved(self, run_id: str):
             calls["marks"].append(("approved", run_id))
+
+        def create_verification_command(self, command):
+            calls["verification"] = command
 
     async def _enqueue(run_id: str):
         raise AssertionError("should not enqueue on reject")
@@ -338,9 +381,18 @@ async def test_approval_service_reject_cluster_research_sets_discard_mode(monkey
     service.run_service = _RunService()
     monkeypatch.setattr("app.harness.runtime.approval_service.enqueue_harness_resume", _enqueue)
 
-    result = await service.resolve("hr-1", False, "u1", "discard research")
+    result = await service.resolve(
+        build_approval_resolution_command(
+            run_id="hr-1",
+            approval_id="ha-1",
+            approved=False,
+            resolved_by="u1",
+            comment="discard research",
+        )
+    )
 
     assert result["status"] == "rejected"
     assert calls["updated_input"]["orchestration_resume"]["continue_mode"] == "discard_research_evidence"
     assert calls["updated_input"]["orchestration_resume"]["next_step_index"] == 3
+    assert calls["updated_input"]["orchestration_resume"]["state"]["agent_outputs"]["cluster_a"] == "safe"
     assert calls["updated_metadata"]["review_recovery_mode"] == "continue_without_research"

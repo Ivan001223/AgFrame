@@ -1296,6 +1296,21 @@ def _serialize_orchestration_resume_state(state: dict[str, Any], next_step_index
     return payload
 
 
+def _build_review_blocked_resume_payload(
+    *,
+    state: dict[str, Any],
+    next_step_index: int,
+    rollback_state: dict[str, Any] | None = None,
+    continuation: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = _serialize_orchestration_resume_state(state, next_step_index)
+    if rollback_state is not None:
+        payload["rollback_state"] = rollback_state
+    if continuation is not None:
+        payload["continuation"] = continuation
+    return payload
+
+
 def _window_text_for_stream_review(
     text: str,
     *,
@@ -2448,18 +2463,21 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                     agent_name = str(agent_conf.get("cluster_name") or agent_conf.get("name") or agent_output_key)
                     blocked_payload = dict(exc.payload or {})
                     partial_content = str(exc.partial_content or "")
-                    serialized_resume = _serialize_orchestration_resume_state(previous_state, step_index)
-                    serialized_resume["rollback_state"] = _serialize_orchestration_resume_state(previous_state, step_index)["state"]
-                    serialized_resume["continuation"] = {
-                        "resume_agent_id": str(agent_conf.get("agent_id") or agent_output_key),
-                        "agent_id": agent_output_key,
-                        "agent_name": agent_name,
-                        "partial_output": partial_content,
-                        "review_output": str(blocked_payload.get("review_output") or ""),
-                        "review_stage": "agent_output_stream",
-                        "step_index": step_index,
-                        "loop_number": int(step["loop_number"]),
-                    }
+                    serialized_resume = _build_review_blocked_resume_payload(
+                        state=previous_state,
+                        next_step_index=step_index,
+                        rollback_state=_serialize_orchestration_resume_state(previous_state, step_index)["state"],
+                        continuation={
+                            "resume_agent_id": str(agent_conf.get("agent_id") or agent_output_key),
+                            "agent_id": agent_output_key,
+                            "agent_name": agent_name,
+                            "partial_output": partial_content,
+                            "review_output": str(blocked_payload.get("review_output") or ""),
+                            "review_stage": "agent_output_stream",
+                            "step_index": step_index,
+                            "loop_number": int(step["loop_number"]),
+                        },
+                    )
                     input_json = dict(input_json)
                     input_json["orchestration_resume"] = serialized_resume
                     _maybe_call(service, "update_run_input_json", run_id, input_json)
@@ -2719,8 +2737,11 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                             rollback_outputs[agent_output_key] = latest_output
                             rollback_state["output_artifacts"] = rollback_artifacts
                             rollback_state["agent_outputs"] = rollback_outputs
-                            serialized_resume = _serialize_orchestration_resume_state(final_state, step_index + 1)
-                            serialized_resume["rollback_state"] = rollback_state
+                            serialized_resume = _build_review_blocked_resume_payload(
+                                state=final_state,
+                                next_step_index=step_index + 1,
+                                rollback_state=rollback_state,
+                            )
                             input_json = dict(input_json)
                             input_json["orchestration_resume"] = serialized_resume
                             _maybe_call(service, "update_run_input_json", run_id, input_json)
@@ -2846,8 +2867,11 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                         )
                     if not bool(segmented_review.get("approved")):
                         blocked_segment = dict(segmented_review.get("blocked_segment") or {})
-                        serialized_resume = _serialize_orchestration_resume_state(final_state, step_index + 1)
-                        serialized_resume["rollback_state"] = _serialize_orchestration_resume_state(previous_state, step_index)["state"]
+                        serialized_resume = _build_review_blocked_resume_payload(
+                            state=final_state,
+                            next_step_index=step_index + 1,
+                            rollback_state=_serialize_orchestration_resume_state(previous_state, step_index)["state"],
+                        )
                         input_json = dict(input_json)
                         input_json["orchestration_resume"] = serialized_resume
                         _maybe_call(service, "update_run_input_json", run_id, input_json)
@@ -2949,8 +2973,11 @@ async def run_harness_task(ctx: dict[str, Any], run_id: str) -> bool:
                         },
                     )
                     if not bool(review_result.get("approved")):
-                        serialized_resume = _serialize_orchestration_resume_state(final_state, step_index + 1)
-                        serialized_resume["rollback_state"] = _serialize_orchestration_resume_state(previous_state, step_index)["state"]
+                        serialized_resume = _build_review_blocked_resume_payload(
+                            state=final_state,
+                            next_step_index=step_index + 1,
+                            rollback_state=_serialize_orchestration_resume_state(previous_state, step_index)["state"],
+                        )
                         input_json = dict(input_json)
                         input_json["orchestration_resume"] = serialized_resume
                         _maybe_call(service, "update_run_input_json", run_id, input_json)

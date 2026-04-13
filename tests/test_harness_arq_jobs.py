@@ -36,6 +36,27 @@ def test_serialize_orchestration_resume_state_preserves_knowledge_context():
     assert restored["knowledge_context"] == "Knowledge excerpt"
 
 
+def test_build_review_blocked_resume_payload_includes_optional_recovery_fields():
+    payload = arq_jobs._build_review_blocked_resume_payload(
+        state={
+            "task": "Coordinate work",
+            "agent_outputs": {"agent_a": "done"},
+            "output_artifacts": {},
+            "current_agent": "agent_a",
+            "loop_index": 1,
+            "errors": [],
+        },
+        next_step_index=2,
+        rollback_state={"agent_outputs": {"agent_a": "safe"}},
+        continuation={"agent_id": "agent_a", "partial_output": "prefix"},
+    )
+
+    assert payload["next_step_index"] == 2
+    assert payload["rollback_state"] == {"agent_outputs": {"agent_a": "safe"}}
+    assert payload["continuation"]["agent_id"] == "agent_a"
+    assert payload["state"]["agent_outputs"]["agent_a"] == "done"
+
+
 def test_build_partial_output_artifact_snapshot_includes_mcp_inventory_and_policy():
     snapshot = arq_jobs._build_partial_output_artifact_snapshot(
         {

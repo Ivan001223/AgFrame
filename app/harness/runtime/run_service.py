@@ -27,6 +27,7 @@ from app.harness.runtime.verification_service import VerificationService
 from app.platform.governance.audit import build_lifecycle_event_details
 from app.platform.governance.commands import ApprovalResolutionCommand, VerificationRecordCommand
 from app.platform.governance.service import GovernanceService
+from app.platform.contracts.runtime_protocol import normalize_review_rejection_resume_payload
 from app.runtime.graph.orchestration_graph import build_orchestration_execution_plan
 
 
@@ -786,31 +787,17 @@ class HarnessRunService:
         input_json = self._as_object_dict(source_run.get("input_json"))
         if rejected_review:
             orchestration_resume = self._as_object_dict(input_json.get("orchestration_resume"))
-            rollback_state = self._as_object_dict(orchestration_resume.get("rollback_state"))
             payload_json = self._as_object_dict(latest_approval.get("payload_json") if isinstance(latest_approval, dict) else None)
             review_stage = str(payload_json.get("review_stage") or "").strip()
             continue_mode = str(orchestration_resume.get("continue_mode") or "").strip()
-            if rollback_state:
-                orchestration_resume["state"] = rollback_state
-            if review_stage == "cluster_research" or continue_mode == "discard_research_evidence":
-                orchestration_resume["next_step_index"] = self._coerce_int(orchestration_resume.get("next_step_index")) or 0
-                metadata["review_recovery_mode"] = "continue_without_research"
-            elif review_stage == "agent_output_stream":
-                orchestration_resume["next_step_index"] = (
-                    self._coerce_int(payload_json.get("step_index"))
-                    or self._coerce_int(orchestration_resume.get("next_step_index"))
-                    or 0
-                )
-                orchestration_resume.pop("continuation", None)
-                metadata["review_recovery_mode"] = "continue_from_stream_block"
-            else:
-                orchestration_resume["next_step_index"] = (
-                    self._coerce_int(orchestration_resume.get("next_step_index")) or 0
-                ) - 1
-                if cast(int, orchestration_resume["next_step_index"]) < 0:
-                    orchestration_resume["next_step_index"] = 0
-            orchestration_resume.pop("review_decision", None)
-            orchestration_resume.pop("continue_mode", None)
+            orchestration_resume, recovery_mode = normalize_review_rejection_resume_payload(
+                orchestration_resume,
+                review_stage=review_stage,
+                continue_mode=continue_mode,
+                review_step_index=self._coerce_int(payload_json.get("step_index")),
+            )
+            if recovery_mode:
+                metadata["review_recovery_mode"] = recovery_mode
             input_json["orchestration_resume"] = orchestration_resume
             rejection_comment = str(latest_approval.get("comment") or "").strip() if isinstance(latest_approval, dict) else ""
             if rejection_comment:

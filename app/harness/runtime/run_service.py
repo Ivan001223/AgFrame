@@ -24,10 +24,10 @@ from app.harness.persistence.stores import (
 from app.harness.runtime.event_service import HarnessEventService
 from app.harness.runtime.policy_registry import get_policy, list_policies
 from app.harness.runtime.verification_service import VerificationService
+from app.platform.contracts.runtime_protocol import normalize_review_rejection_resume_payload
 from app.platform.governance.audit import build_lifecycle_event_details
 from app.platform.governance.commands import ApprovalResolutionCommand, VerificationRecordCommand
 from app.platform.governance.service import GovernanceService
-from app.platform.contracts.runtime_protocol import normalize_review_rejection_resume_payload
 from app.runtime.graph.orchestration_graph import build_orchestration_execution_plan
 
 
@@ -637,6 +637,8 @@ class HarnessRunService:
         status: str,
         actor: str | None = None,
         details: dict[str, object] | None = None,
+        triggered_by: str | None = None,
+        correlation_id: str | None = None,
         **changes: object,
     ) -> dict[str, object] | None:
         existing = self.run_store.get_run(run_id)
@@ -646,6 +648,9 @@ class HarnessRunService:
             current_status=str(existing.get("status") or ""),
             target_status=status,
             reason=str((details or {}).get("reason") or "") or None,
+            actor=actor,
+            triggered_by=triggered_by,
+            correlation_id=correlation_id,
         )
         updated = self.run_store.update_run(run_id, status=status, **changes)
         if updated is None:
@@ -656,7 +661,8 @@ class HarnessRunService:
             contract_version="run.v1",
             from_status=transition.from_status or None,
             to_status=transition.to_status,
-            triggered_by="run_service",
+            triggered_by=triggered_by or "run_service",
+            correlation_id=correlation_id,
         )
         if details:
             event_details.update(details)

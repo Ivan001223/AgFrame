@@ -36,6 +36,14 @@
 - harness approval 与 verification 行为
 - worker 驱动的 harness 执行
 
+## 平台与治理测试
+
+```bash
+./.venv/bin/python -m pytest tests/test_platform_*.py tests/test_governance_*.py -q
+```
+
+覆盖平台契约层、运行时命令分发（`RuntimeApplicationService`）、worker 适配器执行计划、治理生命周期转换、审计上下文传播以及平台事件管道。
+
 ## 工作台冒烟测试
 
 ```bash

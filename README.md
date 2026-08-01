@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/Python-3.12-blue?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/FastAPI-0.115+-cyan?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI">
   <img src="https://img.shields.io/badge/LangGraph-0.3+-FF6B6B?style=flat-square&logoColor=white" alt="LangGraph">
-  <img src="https://img.shields.io/badge/Version-0.3.1-blue?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/Version-0.3.3-blue?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/Docker-Ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
 </div>
 
@@ -238,8 +238,8 @@ The ready check reports retrieval and runtime component readiness, including the
 
 ## Version Scope
 
-- Backend version: `0.3.2`
-- Frontend version: `0.3.2`
+- Backend version: `0.3.3`
+- Frontend version: `0.3.3`
 - Python constraint: `>=3.12,<3.13`
 - This README is aligned with the current repository state on 2026-04-08
 

@@ -6,8 +6,8 @@
 
 ## Scope
 
-- **Backend version**: `0.3.1`
-- **Frontend version**: `0.3.1`
+- **Backend version**: `0.3.3`
+- **Frontend version**: `0.3.3`
 - **Python constraint**: `>=3.12,<3.13`
 - **Primary local stack**: Postgres + Redis + FastAPI + 3 ARQ workers + Next.js
 

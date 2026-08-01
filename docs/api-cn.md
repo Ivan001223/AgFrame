@@ -8,7 +8,7 @@
 
 - **Base URL**：`http://127.0.0.1:8000`
 - **认证方式**：`POST /auth/token` 会返回 JWT，同时写入 HttpOnly 认证 Cookie；受保护接口优先支持 Cookie，也继续兼容 `Authorization: Bearer <token>`
-- **后端版本**：`0.3.1`
+- **后端版本**：`0.3.3`
 - **主运行时入口**：`POST /chat/workbench-invoke`
 
 ## 访问模型
@@ -86,6 +86,10 @@
 - `POST /harness/model-providers` — 创建模型提供方
 - `PUT /harness/model-providers/{provider_id}` — 更新模型提供方
 - `DELETE /harness/model-providers/{provider_id}` — 删除模型提供方
+
+> Harness run 在内部通过平台运行时命令层（`RuntimeApplicationService`）分发执行。参见
+> [平台治理控制平面](architecture/platform-governance-control-plane.md)
+> 了解运行时命令流转与生命周期治理详情。
 
 ## 会话历史
 

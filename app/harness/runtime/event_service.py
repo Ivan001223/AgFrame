@@ -4,6 +4,7 @@ import uuid
 
 from app.harness.persistence.stores import HarnessEventStore
 from app.infrastructure.database.schema import ensure_schema_if_possible
+from app.platform.contracts.event import EventEnvelopeV1
 
 
 class HarnessEventService:
@@ -43,6 +44,25 @@ class HarnessEventService:
             run_id=run_id,
             actor=actor,
             details_json=details,
+        )
+
+    def record_runtime_event(
+        self,
+        envelope: EventEnvelopeV1,
+        *,
+        user_id: str = "",
+    ) -> dict[str, object] | None:
+        """Persist a canonical ``EventEnvelopeV1`` as a harness event."""
+        if not self._database_available():
+            return None
+        return self.event_store.create_event(
+            event_id=f"he_{uuid.uuid4()}",
+            event_type=envelope.event_type,
+            event_source=envelope.source or "platform.runtime",
+            user_id=user_id,
+            run_id=envelope.aggregate_id or None,
+            actor=envelope.actor,
+            details_json=dict(envelope.payload),
         )
 
     def list_for_run(self, *, run_id: str, user_id: str | None = None, limit: int = 100) -> list[dict[str, object]]:

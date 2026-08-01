@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/Python-3.12-blue?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/FastAPI-0.115+-cyan?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI">
   <img src="https://img.shields.io/badge/LangGraph-0.3+-FF6B6B?style=flat-square&logoColor=white" alt="LangGraph">
-  <img src="https://img.shields.io/badge/Version-0.3.1-blue?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/Version-0.3.3-blue?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/Docker-Ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
 </div>
 
@@ -234,8 +234,8 @@ npm run dev
 
 ## 版本范围
 
-- 后端版本：`0.3.2`
-- 前端版本：`0.3.2`
+- 后端版本：`0.3.3`
+- 前端版本：`0.3.3`
 - Python 约束：`>=3.12,<3.13`
 - 本 README 已按 2026-04-08 的仓库状态校准
 

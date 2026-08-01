@@ -24,6 +24,82 @@ def build_runtime_step_completed_event(
     )
 
 
+def build_runtime_started_event(
+    *,
+    run_id: str,
+    task_type: str,
+    actor: str | None = None,
+) -> EventEnvelopeV1:
+    return EventEnvelopeV1(
+        event_id=f"runtime-started-{run_id}",
+        event_type="runtime.started",
+        aggregate_id=run_id,
+        actor=actor,
+        payload={
+            "task_type": task_type,
+        },
+    )
+
+
+def build_runtime_resumed_event(
+    *,
+    run_id: str,
+    task_type: str,
+    next_step_index: int = 0,
+    recovery_mode: str | None = None,
+    actor: str | None = None,
+) -> EventEnvelopeV1:
+    return EventEnvelopeV1(
+        event_id=f"runtime-resumed-{run_id}",
+        event_type="runtime.resumed",
+        aggregate_id=run_id,
+        actor=actor,
+        payload={
+            "task_type": task_type,
+            "next_step_index": next_step_index,
+            "recovery_mode": recovery_mode,
+        },
+    )
+
+
+def build_runtime_interrupted_event(
+    *,
+    run_id: str,
+    interrupt_type: str,
+    reason: str | None = None,
+    resumable: bool = True,
+) -> EventEnvelopeV1:
+    return EventEnvelopeV1(
+        event_id=f"runtime-interrupted-{run_id}",
+        event_type="runtime.interrupted",
+        aggregate_id=run_id,
+        payload={
+            "interrupt_type": interrupt_type,
+            "reason": reason,
+            "resumable": resumable,
+        },
+    )
+
+
+def build_runtime_failed_event(
+    *,
+    run_id: str,
+    error_type: str,
+    error_message: str | None = None,
+    task_type: str | None = None,
+) -> EventEnvelopeV1:
+    return EventEnvelopeV1(
+        event_id=f"runtime-failed-{run_id}",
+        event_type="runtime.failed",
+        aggregate_id=run_id,
+        payload={
+            "error_type": error_type,
+            "error_message": error_message,
+            "task_type": task_type,
+        },
+    )
+
+
 def build_runtime_completed_event(
     *,
     run_id: str,

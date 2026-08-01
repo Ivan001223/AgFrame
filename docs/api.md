@@ -8,7 +8,7 @@
 
 - **Base URL**: `http://127.0.0.1:8000`
 - **Auth model**: `POST /auth/token` returns a JWT and also sets an HttpOnly auth cookie; protected routes accept the cookie and still accept `Authorization: Bearer <token>`
-- **Backend version**: `0.3.1`
+- **Backend version**: `0.3.3`
 - **Primary runtime entry**: `POST /chat/workbench-invoke`
 
 ## Access Model
@@ -86,6 +86,11 @@ Session-level human approval and resume flow for interrupted chat execution:
 - `POST /harness/model-providers` — create a provider entry
 - `PUT /harness/model-providers/{provider_id}` — update an existing provider
 - `DELETE /harness/model-providers/{provider_id}` — delete a provider
+
+> Harness runs are internally dispatched through the platform runtime command
+> layer (`RuntimeApplicationService`). See
+> [Platform Governance Control Plane](architecture/platform-governance-control-plane.md)
+> for the runtime command flow and lifecycle governance details.
 
 ## History
 

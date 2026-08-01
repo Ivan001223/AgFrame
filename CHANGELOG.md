@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-08-01
+
+### Added
+
+- `RuntimeApplicationService` now dispatches real runtime commands (`start`, `resume`, `step`, `cancel`) instead of returning a placeholder `accepted` result, integrating with `HarnessRunService`, governance authorization, and the worker adapter execution plan.
+- ARQ worker execution entry point (`execute_harness_run`) now routes through `RuntimeApplicationService` and `build_runtime_command_for_run` so the platform runtime command is the single authoritative entry.
+- Platform event constructors for `runtime.started`, `runtime.resumed`, `runtime.interrupted`, `runtime.failed` in `app/platform/runtime/events.py`.
+- Governance lifecycle transitions for `failed -> created` (retry) and `resumed -> waiting_approval` with audit context (`actor`, `triggered_by`, `correlation_id`).
+- `openapi.json` regenerated from the FastAPI application covering all 72 public endpoints including 20 harness and interrupt routes.
+- New test coverage: `tests/test_governance_lifecycle.py` (boundary and illegal transitions), updated `tests/test_platform_runtime_service.py` (real execution paths), `tests/test_platform_runtime_events.py` (all event types), `tests/test_platform_runtime_worker_adapter.py` (plan-to-phase alignment).
+- `defusedxml` added as an explicit runtime dependency for safe XML parsing in enhanced search.
+
+### Changed
+
+- Unified version to `0.3.3` across `pyproject.toml`, `frontend/package.json`, `app/server/main.py`, README, and all documentation.
+- `GovernanceService.authorize_transition` and `GovernanceLifecycleManager.transition` now accept audit context parameters (`actor`, `triggered_by`, `correlation_id`) for governance traceability.
+- All `_transition_run_status` call sites in `HarnessRunService` now pass `actor` and `reason` for lifecycle audit.
+- `HarnessEventService` now supports writing events in `EventEnvelopeV1` canonical format via `record_runtime_event`.
+- Audit details in `app/platform/governance/audit.py` now include `correlation_id` field for cross-service traceability.
+
 ### Changed
 
 - Standardized the technical documentation set so README, API, deployment, testing, security, frontend architecture, and frontend subsystem docs reflect the current chat runtime, harness control plane, and Agent Studio behavior.

@@ -36,6 +36,16 @@ This is the maintained regression set for:
 - harness approval and verification behavior
 - worker-driven harness execution
 
+## Platform and Governance Tests
+
+```bash
+./.venv/bin/python -m pytest tests/test_platform_*.py tests/test_governance_*.py -q
+```
+
+This covers the platform contract layer, runtime command dispatch
+(`RuntimeApplicationService`), worker adapter execution plans, governance
+lifecycle transitions, audit context propagation, and platform event pipeline.
+
 ## Workbench Smoke Test
 
 ```bash

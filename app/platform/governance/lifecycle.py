@@ -7,6 +7,9 @@ class LifecycleTransitionDecision(BaseModel):
     from_status: str
     to_status: str
     reason: str | None = None
+    actor: str | None = None
+    triggered_by: str | None = None
+    correlation_id: str | None = None
 
 
 class GovernanceLifecycleManager:
@@ -17,10 +20,10 @@ class GovernanceLifecycleManager:
         "waiting_approval": {"approved", "rejected"},
         "approved": {"resumed", "running"},
         "rejected": {"created"},
-        "resumed": {"running", "failed"},
+        "resumed": {"running", "waiting_approval", "failed"},
         "verifying": {"completed", "failed"},
         "completed": set(),
-        "failed": set(),
+        "failed": {"created"},
     }
 
     def transition(
@@ -29,6 +32,9 @@ class GovernanceLifecycleManager:
         current_status: str,
         target_status: str,
         reason: str | None = None,
+        actor: str | None = None,
+        triggered_by: str | None = None,
+        correlation_id: str | None = None,
     ) -> LifecycleTransitionDecision:
         allowed_targets = self._allowed.get(current_status, set())
         if target_status not in allowed_targets and current_status != target_status:
@@ -37,4 +43,7 @@ class GovernanceLifecycleManager:
             from_status=current_status,
             to_status=target_status,
             reason=reason,
+            actor=actor,
+            triggered_by=triggered_by,
+            correlation_id=correlation_id,
         )

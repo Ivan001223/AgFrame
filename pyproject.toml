@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agframe"
-version = "0.3.1"
+version = "0.3.3"
 description = "Production-grade lightweight hybrid RAG and agent backend framework"
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -13,6 +13,7 @@ dependencies = [
     "boto3",
     "docx2txt",
     "duckduckgo-search",
+    "defusedxml",
     "easydict",
     "einops",
     "faiss-cpu",
